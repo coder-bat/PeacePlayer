@@ -1,6 +1,6 @@
 # PeacePlayer
 
-A personal iOS music player powered by YouTube Music. Stream and download any song directly to your iPhone with a clean, native SwiftUI interface.
+A personal iOS music player with a clean, native SwiftUI interface.
 
 **Personal use only — not for distribution.**
 
@@ -11,7 +11,7 @@ A personal iOS music player powered by YouTube Music. Stream and download any so
 PeacePlayer has two parts:
 
 - **iOS app** — SwiftUI client running on your iPhone
-- **Python backend** — runs on your Mac, handles YouTube Music search, streaming, and audio extraction
+- **Python backend** — runs on your Mac, handles music search, streaming, and audio extraction
 
 The iPhone connects to your Mac over your local network (WiFi or Tailscale).
 
@@ -119,7 +119,7 @@ make distclean    # Full reset (removes venv + oauth)
 - Accept background audio permissions when prompted
 
 **Auth fails**
-- Re-run `make auth` with fresh cookies from music.youtube.com
+- Re-run `make auth` 
 - Delete `backend/oauth.json` to reset to guest mode
 
 ---
