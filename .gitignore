@@ -91,3 +91,4 @@ server.log
 .idea/
 *.swp
 *.swo
+ios/YTAudioPlayer.xcodeproj/project.pbxproj
