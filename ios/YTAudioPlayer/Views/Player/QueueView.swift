@@ -13,86 +13,105 @@ struct QueueView: View {
 
     var body: some View {
         NavigationView {
-            List {
-                // Now Playing Section
-                Section(header: Text("Now Playing")) {
-                    if let currentItem = playerState.currentItem {
-                        QueueItemRow(
-                            item: currentItem,
-                            isPlaying: true
-                        )
-                    }
-                }
+            ZStack {
+                Theme.cyberBackground.ignoresSafeArea()
 
-                // Up Next Section
-                let upcoming: [QueueItem] = {
-                    if playerState.currentIndex < playerState.queue.count - 1 {
-                        return Array(playerState.queue[(playerState.currentIndex + 1)...])
-                    } else {
-                        return []
-                    }
-                }()
-
-                Section(header:
-                    HStack {
-                        Text("Up Next")
-                        Spacer()
-                        if playerState.isShuffled {
-                            Label("Shuffled", systemImage: "shuffle")
-                                .font(.caption)
-                                .foregroundColor(.accentColor)
+                List {
+                    // Now Playing Section
+                    Section(header:
+                        Text("NOW PLAYING")
+                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                            .foregroundColor(.cyberDim)
+                    ) {
+                        if let currentItem = playerState.currentItem {
+                            QueueItemRow(item: currentItem, isPlaying: true)
+                                .listRowBackground(Color.cyberSurface)
                         }
                     }
-                ) {
-                    if upcoming.isEmpty {
-                        Text("No more songs in queue")
-                            .foregroundColor(.secondary)
-                            .font(.footnote)
-                    } else {
-                        ForEach(Array(upcoming.enumerated()), id: \.element.id) { index, item in
-                            QueueItemRow(
-                                item: item,
-                                isPlaying: false,
-                                onTap: {
-                                    let actualIndex = playerState.currentIndex + 1 + index
-                                    HapticManager.medium()
-                                    playerState.playQueue(at: actualIndex)
+
+                    // Up Next Section
+                    let upcoming: [QueueItem] = {
+                        if playerState.currentIndex < playerState.queue.count - 1 {
+                            return Array(playerState.queue[(playerState.currentIndex + 1)...])
+                        } else {
+                            return []
+                        }
+                    }()
+
+                    Section(header:
+                        HStack {
+                            Text("UP NEXT")
+                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                .foregroundColor(.cyberDim)
+                            Spacer()
+                            if playerState.isShuffled {
+                                Label("Shuffled", systemImage: "shuffle")
+                                    .font(.caption)
+                                    .foregroundColor(.cyberCyan)
+                            }
+                        }
+                    ) {
+                        if upcoming.isEmpty {
+                            Text("Queue is empty")
+                                .foregroundColor(.cyberDim)
+                                .font(.system(size: 14, design: .monospaced))
+                                .listRowBackground(Color.cyberSurface)
+                        } else {
+                            ForEach(Array(upcoming.enumerated()), id: \.element.id) { index, item in
+                                QueueItemRow(
+                                    item: item,
+                                    isPlaying: false,
+                                    onTap: {
+                                        let actualIndex = playerState.currentIndex + 1 + index
+                                        HapticManager.medium()
+                                        playerState.playQueue(at: actualIndex)
+                                    }
+                                )
+                                .listRowBackground(Color.cyberSurface)
+                                .swipeActions(edge: .trailing) {
+                                    Button(role: .destructive) {
+                                        let actualIndex = playerState.currentIndex + 1 + index
+                                        playerState.removeFromQueue(at: actualIndex)
+                                    } label: {
+                                        Label("Remove", systemImage: "trash")
+                                    }
                                 }
-                            )
-                            .swipeActions(edge: .trailing) {
-                                Button(role: .destructive) {
+                            }
+                            .onDelete { indexSet in
+                                for index in indexSet {
                                     let actualIndex = playerState.currentIndex + 1 + index
                                     playerState.removeFromQueue(at: actualIndex)
-                                } label: {
-                                    Label("Remove", systemImage: "trash")
                                 }
                             }
-                        }
-                        .onDelete { indexSet in
-                            for index in indexSet {
-                                let actualIndex = playerState.currentIndex + 1 + index
-                                playerState.removeFromQueue(at: actualIndex)
-                            }
-                        }
-                        .onMove { indexSet, destination in
-                            let sourceIndices = Array(indexSet).map { playerState.currentIndex + 1 + $0 }
-                            let destIndex = playerState.currentIndex + 1 + destination
-                            if destIndex <= playerState.queue.count {
-                                playerState.moveQueueItem(from: IndexSet(sourceIndices), to: destIndex)
-                                HapticManager.light()
+                            .onMove { indexSet, destination in
+                                let sourceIndices = Array(indexSet).map { playerState.currentIndex + 1 + $0 }
+                                let destIndex = playerState.currentIndex + 1 + destination
+                                if destIndex <= playerState.queue.count {
+                                    playerState.moveQueueItem(from: IndexSet(sourceIndices), to: destIndex)
+                                    HapticManager.light()
+                                }
                             }
                         }
                     }
                 }
+                .listStyle(.insetGrouped)
+                .animation(.spring(response: 0.35, dampingFraction: 0.8), value: playerState.queue.count)
+                .onAppear {
+                    UITableView.appearance().backgroundColor = .clear
+                }
+                .onDisappear {
+                    UITableView.appearance().backgroundColor = .systemGroupedBackground
+                }
             }
-            .listStyle(.insetGrouped)
             .navigationTitle("Queue")
-            .navigationBarTitleDisplayMode(.large)
+            .navigationBarTitleDisplayMode(.inline)
+            .preferredColorScheme(.dark)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("Done") {
                         dismiss()
                     }
+                    .foregroundColor(.cyberCyan)
                 }
 
                 ToolbarItem(placement: .navigationBarLeading) {
@@ -133,23 +152,24 @@ struct QueueItemRow: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(item.track.title)
                     .font(.system(size: 16, weight: isPlaying ? .semibold : .regular))
+                    .foregroundColor(isPlaying ? .cyberCyan : .white)
                     .lineLimit(1)
 
                 Text(item.track.displayArtist)
                     .font(.system(size: 14))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(.cyberDim)
                     .lineLimit(1)
             }
 
             Spacer()
 
             if isPlaying {
-                PlayingIndicator()
+                CyberPlayingBars()
                     .frame(width: 20, height: 20)
             }
         }
         .padding(.vertical, 4)
-        .background(isPlaying ? Color.accentColor.opacity(0.1) : Color.clear)
+        .background(isPlaying ? Color.cyberCyan.opacity(0.08) : Color.clear)
         .cornerRadius(8)
         .contentShape(Rectangle())
         .onTapGesture {
@@ -161,37 +181,14 @@ struct QueueItemRow: View {
 
     private var placeholderView: some View {
         RoundedRectangle(cornerRadius: 6)
-            .fill(Color.gray.opacity(0.2))
+            .fill(Color.cyberDim.opacity(0.3))
             .overlay(
                 Image(systemName: "music.note")
-                    .foregroundColor(.gray)
+                    .foregroundColor(.cyberDim)
             )
     }
 }
 
-// MARK: - Playing Indicator
-struct PlayingIndicator: View {
-    @State private var animate = false
-
-    var body: some View {
-        HStack(spacing: 2) {
-            ForEach(0..<3) { index in
-                RoundedRectangle(cornerRadius: 1)
-                    .fill(Color.accentColor)
-                    .frame(width: 3, height: animate ? 16 : 4)
-                    .animation(
-                        .easeInOut(duration: 0.4)
-                        .repeatForever(autoreverses: true)
-                        .delay(Double(index) * 0.15),
-                        value: animate
-                    )
-            }
-        }
-        .onAppear {
-            animate = true
-        }
-    }
-}
 
 // MARK: - Preview
 struct QueueView_Previews: PreviewProvider {

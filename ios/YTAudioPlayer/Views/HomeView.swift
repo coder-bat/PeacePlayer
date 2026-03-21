@@ -11,8 +11,6 @@ import Combine
 struct HomeView: View {
     @StateObject private var playerState = PlayerState.shared
     @StateObject private var viewModel = HomeViewModel()
-    @State private var showLibrary = false
-    @State private var showSearch = false
     @State private var showAllRecent = false
 
     var body: some View {
@@ -54,12 +52,6 @@ struct HomeView: View {
         .onAppear {
             viewModel.loadData()
         }
-        .sheet(isPresented: $showLibrary) {
-            LibraryView()
-        }
-        .sheet(isPresented: $showSearch) {
-            SearchView()
-        }
         .sheet(isPresented: $showAllRecent) {
             AllRecentlyPlayedView()
         }
@@ -74,7 +66,7 @@ struct HomeView: View {
                     .foregroundColor(.cyberDim)
                     .textCase(.uppercase)
 
-                Text("NEURAL_LINK")
+                Text("PeacePlayer")
                     .font(.system(size: 12, weight: .bold, design: .monospaced))
                     .foregroundColor(.cyberCyan)
                     .glow(color: .cyberCyan, radius: 8)
@@ -84,7 +76,7 @@ struct HomeView: View {
 
             // Search button
             CyberButton(icon: "magnifyingglass") {
-                showSearch = true
+                NotificationCenter.default.post(name: .switchTab, object: 1)
             }
         }
     }
@@ -105,7 +97,7 @@ struct HomeView: View {
             } else {
                 // Empty state - get started
                 EmptyHero {
-                    showSearch = true
+                    NotificationCenter.default.post(name: .switchTab, object: 1)
                 }
             }
         }
@@ -114,7 +106,7 @@ struct HomeView: View {
     // MARK: - Vibes Section
     private var vibesSection: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("INSTANT_VIBE")
+            Text("Quick Vibes")
                 .font(.system(size: 12, weight: .bold, design: .monospaced))
                 .foregroundColor(.cyberDim)
                 .padding(.horizontal, 20)
@@ -138,14 +130,14 @@ struct HomeView: View {
             if !viewModel.recentlyPlayed.isEmpty {
                 VStack(alignment: .leading, spacing: 16) {
                     HStack {
-                        Text("RECENT_MEMORY")
+                        Text("Recently Played")
                             .font(.system(size: 12, weight: .bold, design: .monospaced))
                             .foregroundColor(.cyberDim)
 
                         Spacer()
 
                         if viewModel.recentlyPlayed.count > 5 {
-                            Button("view.all") {
+                            Button("View All") {
                                 showAllRecent = true
                             }
                             .font(.system(size: 11, weight: .medium, design: .monospaced))
@@ -184,7 +176,7 @@ struct HomeView: View {
 
             // Library shortcut
             CyberButton(icon: "square.stack") {
-                showLibrary = true
+                NotificationCenter.default.post(name: .switchTab, object: 3)
             }
         }
         .padding(.vertical, 16)
@@ -282,7 +274,7 @@ struct NowPlayingHero: View {
                     }
 
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("NOW_PLAYING")
+                        Text("Now Playing")
                             .font(.system(size: 10, weight: .bold, design: .monospaced))
                             .foregroundColor(.cyberCyan)
                             .glow(color: .cyberCyan, radius: 4)
@@ -298,12 +290,9 @@ struct NowPlayingHero: View {
                             .lineLimit(1)
 
                         // Visualizer bars
-                        HStack(spacing: 3) {
-                            ForEach(0..<5) { i in
-                                VisualizerBar(index: i, isPlaying: isPlaying)
-                            }
-                        }
-                        .padding(.top, 8)
+                        CyberPlayingBars()
+                            .frame(height: 20)
+                            .padding(.top, 8)
                     }
 
                     Spacer()
@@ -356,7 +345,7 @@ struct ResumeHero: View {
                     .clipShape(RoundedRectangle(cornerRadius: 16))
 
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("RESUME_SESSION")
+                        Text("Resume")
                             .font(.system(size: 10, weight: .bold, design: .monospaced))
                             .foregroundColor(.cyberDim)
 
@@ -405,7 +394,7 @@ struct EmptyHero: View {
                         .foregroundColor(.cyberCyan)
                         .glow(color: .cyberCyan, radius: 12)
 
-                    Text("INITIATE_AUDIO")
+                    Text("Start Listening")
                         .font(.system(size: 14, weight: .bold, design: .monospaced))
                         .foregroundColor(.white)
 
@@ -566,36 +555,6 @@ struct StatItem: View {
     }
 }
 
-// MARK: - Visualizer Bar
-struct VisualizerBar: View {
-    let index: Int
-    let isPlaying: Bool
-    @State private var height: CGFloat = 4
-
-    var body: some View {
-        RoundedRectangle(cornerRadius: 1)
-            .fill(Color.cyberCyan)
-            .frame(width: 3, height: height)
-            .onAppear {
-                if isPlaying {
-                    animate()
-                }
-            }
-            .onChange(of: isPlaying) { newValue in
-                if newValue {
-                    animate()
-                } else {
-                    height = 4
-                }
-            }
-    }
-
-    private func animate() {
-        withAnimation(.easeInOut(duration: 0.3 + Double(index) * 0.1).repeatForever(autoreverses: true)) {
-            height = CGFloat.random(in: 8...24)
-        }
-    }
-}
 
 // MARK: - Glow Modifier
 struct GlowModifier: ViewModifier {
@@ -767,7 +726,7 @@ struct AllRecentlyPlayedView: View {
                 .listStyle(.plain)
                 .background(Color.cyberBackground)
             }
-            .navigationTitle("RECENT_MEMORY")
+            .navigationTitle("Recently Played")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {

@@ -62,7 +62,7 @@ struct MainContainerView: View {
             }
         }
         .fullScreenCover(isPresented: $showFullPlayer) {
-            FullPlayer()
+            FullPlayer(isPresented: $showFullPlayer)
         }
     }
 }

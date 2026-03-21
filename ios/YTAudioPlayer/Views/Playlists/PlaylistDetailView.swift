@@ -167,7 +167,7 @@ struct PlaylistDetailView: View {
                         }
                         .background(
                             Theme.cyberBackground
-                                .opacity(Double(min(1, max(0, (scrollOffset - 100) / 100))))
+                                .opacity(Double(min(1, max(0, scrollOffset / 150))))
                         )
 
                         // Bottom padding for mini player
@@ -464,7 +464,7 @@ struct HeroPlaylistHeaderCyberpunk: View {
                     }
                 }
             }
-            .padding(.horizontal, 32)
+            .padding(.horizontal, 16)
 
             // Action Buttons
             HStack(spacing: 16) {
@@ -606,7 +606,7 @@ struct CyberpunkTrackRow: View {
             // Index or Playing Indicator
             ZStack {
                 if isPlaying {
-                    PlayingBars()
+                    CyberPlayingBars()
                         .frame(width: 20, height: 20)
                 } else {
                     Text(String(format: "%02d", index))
@@ -767,11 +767,11 @@ struct EmptyPlaylistCyberpunk: View {
             }
 
             VStack(spacing: 8) {
-                Text("NO_DATA")
+                Text("No Tracks Yet")
                     .font(.system(size: 18, weight: .bold, design: .monospaced))
                     .foregroundColor(.white)
 
-                Text("Add tracks from search or neural library")
+                Text("Add tracks from Search or your Library")
                     .font(.system(size: 14))
                     .foregroundColor(Theme.cyberDim)
                     .multilineTextAlignment(.center)

@@ -8,13 +8,18 @@
 import SwiftUI
 import MediaPlayer
 import AVKit
-
-// Import settings views
-import Foundation
+import CoreImage
+import CoreImage.CIFilterBuiltins
 
 struct FullPlayer: View {
     @ObservedObject private var playerState = PlayerState.shared
-    @Environment(\.dismiss) private var dismiss
+    @Binding var isPresented: Bool
+
+    private func dismiss() {
+        withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
+            isPresented = false
+        }
+    }
     
     @State private var showQueue = false
     @State private var showSleepTimer = false
@@ -22,12 +27,23 @@ struct FullPlayer: View {
     @State private var showAirPlayPicker = false
     @State private var showAudioSettings = false
     @State private var showShareSheet = false
-    
+    @State private var dominantColor: Color = .clear
+    @State private var dragOffset: CGFloat = 0
+    @State private var scrollAtTop: Bool = true
+    @State private var showScrubberThumb = false
+    @State private var scrubberHideTask: Task<Void, Never>? = nil
+
     var body: some View {
         ZStack {
             // Background
             Color.black.ignoresSafeArea()
-            
+
+            // Dominant color wash (animated cross-dissolve on track change)
+            dominantColor
+                .opacity(0.25)
+                .ignoresSafeArea()
+                .animation(.easeInOut(duration: 0.8), value: dominantColor)
+
             // Optional blur background from artwork
             ArtworkBackground(url: playerState.currentItem?.track.artworkURL)
             
@@ -35,10 +51,17 @@ struct FullPlayer: View {
             VStack(spacing: 0) {
                 // Top bar with drag handle
                 topBar
-                
+
                 ScrollView(showsIndicators: false) {
-                    // Enable drag to dismiss from anywhere in ScrollView
-                    // This works because ScrollView passes through vertical drags when at top
+                    // Scroll-position tracker (zero-height, at top of content)
+                    GeometryReader { geo in
+                        Color.clear.preference(
+                            key: FullPlayerScrollOffsetKey.self,
+                            value: geo.frame(in: .named("fullPlayerScroll")).minY
+                        )
+                    }
+                    .frame(height: 0)
+
                     VStack(spacing: 24) {
                         // Large Artwork
                         artworkSection
@@ -68,10 +91,48 @@ struct FullPlayer: View {
                     }
                     .padding(.horizontal, 24)
                 }
+                .coordinateSpace(name: "fullPlayerScroll")
+                .onPreferenceChange(FullPlayerScrollOffsetKey.self) { value in
+                    scrollAtTop = value >= -10
+                }
             }
         }
+        .simultaneousGesture(
+            DragGesture()
+                .onChanged { value in
+                    guard scrollAtTop else { return }
+                    let height = value.translation.height
+                    if height > 0 {
+                        dragOffset = height * 0.85
+                    } else {
+                        dragOffset = height * 0.05
+                    }
+                }
+                .onEnded { value in
+                    guard scrollAtTop else {
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
+                            dragOffset = 0
+                        }
+                        return
+                    }
+                    if value.translation.height > 100 || value.predictedEndTranslation.height > 250 {
+                        HapticManager.medium()
+                        dismiss()
+                    } else {
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
+                            dragOffset = 0
+                        }
+                    }
+                }
+        )
         .sheet(isPresented: $showQueue) {
-            QueueView()
+            if #available(iOS 16.0, *) {
+                QueueView()
+                    .presentationDetents([.medium, .large])
+                    .presentationDragIndicator(.visible)
+            } else {
+                QueueView()
+            }
         }
         .sheet(isPresented: $showLyrics) {
             LyricsView()
@@ -87,30 +148,54 @@ struct FullPlayer: View {
                 ShareSheet(track: track)
             }
         }
-        // Swipe down to dismiss gesture
-        .gesture(
-            DragGesture()
-                .onChanged { value in
-                    // Only track vertical swipes
-                    if value.translation.height > 0 && abs(value.translation.height) > abs(value.translation.width) {
-                        // User is swiping down
-                    }
-                }
-                .onEnded { value in
-                    // Check if it's a downward swipe with sufficient distance
-                    if value.translation.height > 100 && abs(value.translation.height) > abs(value.translation.width) {
-                        HapticManager.medium()
-                        dismiss()
-                    }
-                }
-        )
+        .offset(y: dragOffset)
+        .onAppear {
+            extractDominantColor()
+        }
+        .onChange(of: playerState.currentItem?.track.videoId) { _ in
+            extractDominantColor()
+        }
+    }
 
+    // MARK: - Dominant Color Extraction
+    private func extractDominantColor() {
+        guard let url = playerState.currentItem?.track.artworkURL else { return }
+        Task.detached(priority: .userInitiated) {
+            guard let (data, _) = try? await URLSession.shared.data(from: url),
+                  let ciImage = CIImage(data: data) else { return }
+
+            let extent = CIVector(cgRect: ciImage.extent)
+            guard let filter = CIFilter(name: "CIAreaAverage",
+                                        parameters: [kCIInputImageKey: ciImage,
+                                                     kCIInputExtentKey: extent]),
+                  let outputImage = filter.outputImage else { return }
+
+            let context = CIContext()
+            var bitmap = [UInt8](repeating: 0, count: 4)
+            context.render(outputImage,
+                           toBitmap: &bitmap,
+                           rowBytes: 4,
+                           bounds: CGRect(x: 0, y: 0, width: 1, height: 1),
+                           format: .RGBA8,
+                           colorSpace: CGColorSpaceCreateDeviceRGB())
+
+            let color = Color(
+                red: Double(bitmap[0]) / 255.0,
+                green: Double(bitmap[1]) / 255.0,
+                blue: Double(bitmap[2]) / 255.0
+            )
+            await MainActor.run {
+                withAnimation(.easeInOut(duration: 0.8)) {
+                    dominantColor = color
+                }
+            }
+        }
     }
     
     // MARK: - Top Bar
     private var topBar: some View {
         HStack {
-            // Drag handle
+            // Drag handle — visual only, actual drag handled by simultaneousGesture on ZStack
             Capsule()
                 .fill(Color.white.opacity(0.3))
                 .frame(width: 36, height: 5)
@@ -126,31 +211,38 @@ struct FullPlayer: View {
     
     // MARK: - Artwork Section
     private var artworkSection: some View {
-        ZStack {
-            ArtworkImage(
-                url: playerState.currentItem?.track.artworkURL,
-                size: 300
-            )
-            
-            // Loading overlay
-            if playerState.playbackState.isLoading {
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(Color.black.opacity(0.5))
-                
-                VStack(spacing: 16) {
-                    ProgressView()
-                        .scaleEffect(1.5)
-                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                    
-                    Text("Loading...")
-                        .font(.subheadline)
-                        .foregroundColor(.white)
+        GeometryReader { geometry in
+            let size = min(geometry.size.width - 48, 380)
+            ZStack {
+                ArtworkImage(
+                    url: playerState.currentItem?.track.artworkURL,
+                    size: size
+                )
+
+                // Loading overlay
+                if playerState.playbackState.isLoading {
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(Color.black.opacity(0.5))
+
+                    VStack(spacing: 16) {
+                        ProgressView()
+                            .scaleEffect(1.5)
+                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
+
+                        Text("Loading...")
+                            .font(.subheadline)
+                            .foregroundColor(.white)
+                    }
                 }
             }
+            .frame(width: size, height: size)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .shadow(color: Color.black.opacity(0.3), radius: 20, x: 0, y: 10)
+            .scaleEffect(playerState.playbackState.isPlaying ? 1.0 : 0.94)
+            .animation(.spring(response: 0.3, dampingFraction: 0.8), value: playerState.playbackState.isPlaying)
+            .frame(maxWidth: .infinity, alignment: .center)
         }
-        .frame(width: 300, height: 300)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .shadow(color: Color.black.opacity(0.3), radius: 20, x: 0, y: 10)
+        .aspectRatio(1, contentMode: .fit)
     }
     
     // MARK: - Track Info
@@ -190,12 +282,14 @@ struct FullPlayer: View {
                         .fill(Color.white)
                         .frame(width: max(0, geometry.size.width * CGFloat(playerState.progress)), height: 4)
                     
-                    // Draggable knob
+                    // Draggable knob (hidden until touched)
                     Circle()
                         .fill(Color.white)
-                        .frame(width: 12, height: 12)
+                        .frame(width: 14, height: 14)
                         .shadow(radius: 4)
-                        .offset(x: max(0, geometry.size.width * CGFloat(playerState.progress)) - 6)
+                        .offset(x: max(0, geometry.size.width * CGFloat(playerState.progress)) - 7)
+                        .opacity(showScrubberThumb ? 1 : 0)
+                        .animation(.easeInOut(duration: 0.15), value: showScrubberThumb)
                 }
                 .contentShape(Rectangle())
                 .gesture(
@@ -203,6 +297,23 @@ struct FullPlayer: View {
                         .onChanged { value in
                             let newProgress = min(max(0, Double(value.location.x / geometry.size.width)), 1)
                             playerState.seek(to: newProgress)
+                            withAnimation(.easeIn(duration: 0.15)) {
+                                showScrubberThumb = true
+                            }
+                            scrubberHideTask?.cancel()
+                        }
+                        .onEnded { _ in
+                            HapticManager.light()
+                            scrubberHideTask?.cancel()
+                            scrubberHideTask = Task {
+                                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                                guard !Task.isCancelled else { return }
+                                await MainActor.run {
+                                    withAnimation(.easeOut(duration: 0.2)) {
+                                        showScrubberThumb = false
+                                    }
+                                }
+                            }
                         }
                 )
             }
@@ -258,6 +369,9 @@ struct FullPlayer: View {
                             .foregroundColor(.black)
                             .offset(x: playerState.playbackState.isPlaying ? 0 : 2)
                     }
+                    .accessibilityLabel(playerState.playbackState.isPlaying
+                        ? "Pause \(playerState.currentItem?.track.title ?? "")"
+                        : "Play \(playerState.currentItem?.track.title ?? "")")
                     .buttonStyle(.plain)
                 }
             }
@@ -371,9 +485,17 @@ struct FullPlayer: View {
     }
 }
 
+// MARK: - Scroll Offset PreferenceKey
+private struct FullPlayerScrollOffsetKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
 // MARK: - Volume Slider
 struct VolumeSlider: View {
-    @State private var volume: Double = 0.7
+    @State private var volume: Double = Double(AVAudioSession.sharedInstance().outputVolume)
     @State private var isDragging = false
 
     var body: some View {
@@ -428,6 +550,9 @@ struct VolumeSlider: View {
         .padding(.vertical, 8)
         .background(Color.white.opacity(0.05))
         .cornerRadius(8)
+        .onAppear {
+            volume = Double(AVAudioSession.sharedInstance().outputVolume)
+        }
     }
 }
 
@@ -451,6 +576,19 @@ struct PlayerControlButton: View {
     var isActive: Bool = false
     let action: () -> Void
     
+    var label: String {
+        switch icon {
+        case "backward.fill": return "Previous track"
+        case "forward.fill": return "Next track"
+        case "shuffle": return isActive ? "Shuffle on" : "Shuffle off"
+        case "repeat": return "Repeat off"
+        case "repeat.1": return "Repeat one"
+        case "list.bullet": return "Up Next"
+        case "moon.fill": return isActive ? "Sleep timer on" : "Sleep timer"
+        default: return icon
+        }
+    }
+
     var body: some View {
         Button(action: action) {
             Image(systemName: icon)
@@ -458,6 +596,7 @@ struct PlayerControlButton: View {
                 .foregroundColor(isActive ? .accentColor : (isEnabled ? .white : .gray))
                 .frame(width: 44, height: 44)
         }
+        .accessibilityLabel(label)
         .disabled(!isEnabled)
         .buttonStyle(.plain)
     }
@@ -593,141 +732,174 @@ struct AirPlayRoutePickerView: UIViewRepresentable {
 struct AudioSettingsView: View {
     @StateObject private var crossfadeManager = CrossfadeManager.shared
     @Environment(\.dismiss) private var dismiss
-    
+
     var body: some View {
         NavigationView {
-            List {
-                // Crossfade Section
-                Section {
-                    Toggle(isOn: Binding(
-                        get: { crossfadeManager.isEnabled },
-                        set: { crossfadeManager.isEnabled = $0 }
-                    )) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Crossfade")
-                                .font(.body)
-                            Text("Smoothly fade between songs")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                    
-                    if crossfadeManager.isEnabled {
-                        VStack(alignment: .leading, spacing: 8) {
-                            HStack {
-                                Text("Duration")
-                                    .font(.subheadline)
-                                Spacer()
-                                Text("\(Int(crossfadeManager.duration)) seconds")
-                                    .font(.subheadline)
-                                    .foregroundColor(.secondary)
+            ZStack {
+                Theme.cyberBackground.ignoresSafeArea()
+
+                List {
+                    // Crossfade Section
+                    Section {
+                        Toggle(isOn: Binding(
+                            get: { crossfadeManager.isEnabled },
+                            set: { crossfadeManager.isEnabled = $0 }
+                        )) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Crossfade")
+                                    .font(.body)
+                                    .foregroundColor(.white)
+                                Text("Smoothly fade between songs")
+                                    .font(.caption)
+                                    .foregroundColor(.cyberDim)
                             }
-                            
-                            Slider(
-                                value: Binding(
-                                    get: { crossfadeManager.duration },
-                                    set: { crossfadeManager.duration = $0 }
-                                ),
-                                in: 1...5,
-                                step: 1
-                            )
-                            
-                            HStack {
-                                Text("1s")
-                                    .font(.caption2)
-                                    .foregroundColor(.secondary)
-                                Spacer()
-                                Text("5s")
-                                    .font(.caption2)
-                                    .foregroundColor(.secondary)
+                        }
+                        .tint(Color.cyberCyan)
+                        .listRowBackground(Color.cyberSurface)
+
+                        if crossfadeManager.isEnabled {
+                            VStack(alignment: .leading, spacing: 8) {
+                                HStack {
+                                    Text("Duration")
+                                        .font(.subheadline)
+                                        .foregroundColor(.white)
+                                    Spacer()
+                                    Text("\(Int(crossfadeManager.duration)) seconds")
+                                        .font(.subheadline)
+                                        .foregroundColor(.cyberDim)
+                                }
+
+                                Slider(
+                                    value: Binding(
+                                        get: { crossfadeManager.duration },
+                                        set: { crossfadeManager.duration = $0 }
+                                    ),
+                                    in: 1...5,
+                                    step: 1
+                                )
+                                .tint(Color.cyberCyan)
+
+                                HStack {
+                                    Text("1s")
+                                        .font(.caption2)
+                                        .foregroundColor(.cyberDim)
+                                    Spacer()
+                                    Text("5s")
+                                        .font(.caption2)
+                                        .foregroundColor(.cyberDim)
+                                }
+                            }
+                            .padding(.vertical, 4)
+                            .listRowBackground(Color.cyberSurface)
+                        }
+                    } header: {
+                        Text("TRANSITIONS")
+                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                            .foregroundColor(.cyberDim)
+                    } footer: {
+                        Text("Crossfade creates a smooth transition between songs by overlapping playback.")
+                            .foregroundColor(.cyberDim)
+                    }
+
+                    // Gapless Section
+                    Section {
+                        Toggle(isOn: Binding(
+                            get: { crossfadeManager.gaplessEnabled },
+                            set: { crossfadeManager.gaplessEnabled = $0 }
+                        )) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Gapless Playback")
+                                    .font(.body)
+                                    .foregroundColor(.white)
+                                Text("Remove silence between album tracks")
+                                    .font(.caption)
+                                    .foregroundColor(.cyberDim)
+                            }
+                        }
+                        .tint(Color.cyberCyan)
+                        .listRowBackground(Color.cyberSurface)
+                    } header: {
+                        Text("ALBUM PLAYBACK")
+                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                            .foregroundColor(.cyberDim)
+                    } footer: {
+                        Text("Gapless playback automatically removes silence between consecutive tracks from the same album.")
+                            .foregroundColor(.cyberDim)
+                    }
+
+                    // Info Section
+                    Section {
+                        VStack(alignment: .leading, spacing: 12) {
+                            HStack(spacing: 12) {
+                                Image(systemName: "waveform")
+                                    .font(.title2)
+                                    .foregroundColor(.cyberCyan)
+                                    .frame(width: 32)
+
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("High Quality Audio")
+                                        .font(.subheadline)
+                                        .fontWeight(.medium)
+                                        .foregroundColor(.white)
+                                    Text("AAC 128kbps streaming")
+                                        .font(.caption)
+                                        .foregroundColor(.cyberDim)
+                                }
+                            }
+
+                            HStack(spacing: 12) {
+                                Image(systemName: "network")
+                                    .font(.title2)
+                                    .foregroundColor(.cyberCyan)
+                                    .frame(width: 32)
+
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Adaptive Streaming")
+                                        .font(.subheadline)
+                                        .fontWeight(.medium)
+                                        .foregroundColor(.white)
+                                    Text("Optimized for your connection")
+                                        .font(.caption)
+                                        .foregroundColor(.cyberDim)
+                                }
                             }
                         }
                         .padding(.vertical, 4)
+                        .listRowBackground(Color.cyberSurface)
+                    } header: {
+                        Text("AUDIO QUALITY")
+                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                            .foregroundColor(.cyberDim)
                     }
-                } header: {
-                    Text("Transitions")
-                } footer: {
-                    Text("Crossfade creates a smooth transition between songs by overlapping playback.")
                 }
-                
-                // Gapless Section
-                Section {
-                    Toggle(isOn: Binding(
-                        get: { crossfadeManager.gaplessEnabled },
-                        set: { crossfadeManager.gaplessEnabled = $0 }
-                    )) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Gapless Playback")
-                                .font(.body)
-                            Text("Remove silence between album tracks")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                } header: {
-                    Text("Album Playback")
-                } footer: {
-                    Text("Gapless playback automatically removes silence between consecutive tracks from the same album.")
+                .listStyle(InsetGroupedListStyle())
+                .onAppear {
+                    UITableView.appearance().backgroundColor = .clear
                 }
-                
-                // Info Section
-                Section {
-                    VStack(alignment: .leading, spacing: 12) {
-                        HStack(spacing: 12) {
-                            Image(systemName: "waveform")
-                                .font(.title2)
-                                .foregroundColor(.accentColor)
-                                .frame(width: 32)
-                            
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("High Quality Audio")
-                                    .font(.subheadline)
-                                    .fontWeight(.medium)
-                                Text("AAC 128kbps streaming")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                            }
-                        }
-                        
-                        HStack(spacing: 12) {
-                            Image(systemName: "network")
-                                .font(.title2)
-                                .foregroundColor(.accentColor)
-                                .frame(width: 32)
-                            
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Adaptive Streaming")
-                                    .font(.subheadline)
-                                    .fontWeight(.medium)
-                                Text("Optimized for your connection")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                            }
-                        }
-                    }
-                    .padding(.vertical, 4)
-                } header: {
-                    Text("Audio Quality")
+                .onDisappear {
+                    UITableView.appearance().backgroundColor = .systemGroupedBackground
                 }
             }
-            .listStyle(InsetGroupedListStyle())
             .navigationTitle("Audio")
             .navigationBarTitleDisplayMode(.large)
+            .preferredColorScheme(.dark)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("Done") {
                         dismiss()
                     }
+                    .foregroundColor(.cyberCyan)
                 }
             }
         }
+        .preferredColorScheme(.dark)
     }
 }
 
 // MARK: - Preview
 struct FullPlayer_Previews: PreviewProvider {
     static var previews: some View {
-        FullPlayer()
+        FullPlayer(isPresented: .constant(true))
             .preferredColorScheme(.dark)
     }
 }

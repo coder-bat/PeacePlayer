@@ -188,7 +188,7 @@ struct SmartPlaylistCardCyberpunk: View {
                         .shadow(color: accentColor.opacity(0.5), radius: 8, x: 0, y: 0)
 
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(playlist.name.uppercased())
+                        Text(playlist.name)
                             .font(.system(size: 15, weight: .bold, design: .monospaced))
                             .foregroundColor(.white)
                             .lineLimit(1)
@@ -218,7 +218,7 @@ struct UserPlaylistsCyberpunk: View {
         VStack(alignment: .leading, spacing: 12) {
             // Header
             HStack {
-                Text("YOUR_COLLECTION")
+                Text("Your Playlists")
                     .font(.system(size: 13, weight: .bold, design: .monospaced))
                     .foregroundColor(Theme.cyberCyan)
 
@@ -289,7 +289,7 @@ struct EmptyPlaylistsCyberpunk: View {
             }
 
             VStack(spacing: 4) {
-                Text("NO_DATA")
+                Text("No Playlists")
                     .font(.system(size: 18, weight: .bold, design: .monospaced))
                     .foregroundColor(.white)
 
@@ -300,7 +300,7 @@ struct EmptyPlaylistsCyberpunk: View {
             }
 
             Button(action: onCreate) {
-                Label("INITIATE", systemImage: "plus")
+                Label("Create Playlist", systemImage: "plus")
                     .font(.system(size: 14, weight: .bold, design: .monospaced))
                     .foregroundColor(Theme.cyberBackground)
                     .padding(.horizontal, 24)
@@ -325,7 +325,7 @@ struct UserPlaylistGridCellCyberpunk: View {
         Button(action: onTap) {
             VStack(alignment: .leading, spacing: 10) {
                 // Artwork with cyberpunk border
-                PlaylistArtworkCyberpunk(trackIds: Array(playlist.trackIds.prefix(4)))
+                PlaylistArtworkCyberpunk(trackIds: Array(playlist.trackIds.prefix(4)), thumbnailURL: playlist.thumbnailURL)
                     .frame(height: 160)
                     .overlay(
                         RoundedRectangle(cornerRadius: 12)
@@ -335,7 +335,7 @@ struct UserPlaylistGridCellCyberpunk: View {
 
                 // Info
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(playlist.name.uppercased())
+                    Text(playlist.name)
                         .font(.system(size: 13, weight: .bold, design: .monospaced))
                         .foregroundColor(.white)
                         .lineLimit(1)
@@ -360,7 +360,7 @@ struct UserPlaylistListRowCyberpunk: View {
         Button(action: onTap) {
             HStack(spacing: 16) {
                 // Mini artwork with cyberpunk border
-                PlaylistArtworkMiniCyberpunk(trackIds: Array(playlist.trackIds.prefix(4)))
+                PlaylistArtworkMiniCyberpunk(trackIds: Array(playlist.trackIds.prefix(4)), thumbnailURL: playlist.thumbnailURL)
                     .frame(width: 64, height: 64)
                     .overlay(
                         RoundedRectangle(cornerRadius: 8)
@@ -368,7 +368,7 @@ struct UserPlaylistListRowCyberpunk: View {
                     )
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(playlist.name.uppercased())
+                    Text(playlist.name)
                         .font(.system(size: 14, weight: .bold, design: .monospaced))
                         .foregroundColor(.white)
                         .lineLimit(1)
@@ -401,64 +401,75 @@ struct UserPlaylistListRowCyberpunk: View {
 
 struct PlaylistArtworkCyberpunk: View {
     let trackIds: [String]
+    var thumbnailURL: String? = nil
 
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 12)
                 .fill(Theme.cyberSurface)
 
-            if trackIds.isEmpty {
-                // Empty state
-                Image(systemName: "music.note")
-                    .font(.system(size: 50, weight: .light))
-                    .foregroundColor(Theme.cyberDim)
-            } else if trackIds.count == 1 {
-                // Single track - show cyan gradient with icon
-                LinearGradient(
-                    colors: [Theme.cyberCyan.opacity(0.3), Theme.cyberCyan.opacity(0.1)],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                .cornerRadius(12)
-
-                Image(systemName: "music.note")
-                    .font(.system(size: 50, weight: .light))
-                    .foregroundColor(Theme.cyberCyan)
-                    .shadow(color: Theme.cyberCyan.opacity(0.5), radius: 8, x: 0, y: 0)
-            } else if trackIds.count < 4 {
-                // 2-3 tracks - show magenta gradient
-                LinearGradient(
-                    colors: [Theme.cyberMagenta.opacity(0.3), Theme.cyberMagenta.opacity(0.1)],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                .cornerRadius(12)
-
-                Image(systemName: "music.note.list")
-                    .font(.system(size: 50, weight: .light))
-                    .foregroundColor(Theme.cyberMagenta)
-                    .shadow(color: Theme.cyberMagenta.opacity(0.5), radius: 8, x: 0, y: 0)
-            } else {
-                // 4 tracks - show 2x2 grid with cyberpunk colors
-                VStack(spacing: 4) {
-                    HStack(spacing: 4) {
-                        Rectangle()
-                            .fill(Theme.cyberMagenta.opacity(0.7))
-                        Rectangle()
-                            .fill(Theme.cyberCyan.opacity(0.7))
-                    }
-                    HStack(spacing: 4) {
-                        Rectangle()
-                            .fill(Theme.cyberYellow.opacity(0.7))
-                        Rectangle()
-                            .fill(Theme.cyberCyan.opacity(0.4))
-                    }
+            if let urlString = thumbnailURL, let url = URL(string: urlString) {
+                CachedAsyncImage(url: url) {
+                    artworkFallback
                 }
-                .padding(4)
+                .scaledToFill()
+                .clipped()
                 .cornerRadius(12)
+            } else {
+                artworkFallback
             }
         }
         .cornerRadius(12)
+    }
+
+    @ViewBuilder
+    private var artworkFallback: some View {
+        if trackIds.isEmpty {
+            Image(systemName: "music.note")
+                .font(.system(size: 50, weight: .light))
+                .foregroundColor(Theme.cyberDim)
+        } else if trackIds.count == 1 {
+            LinearGradient(
+                colors: [Theme.cyberCyan.opacity(0.3), Theme.cyberCyan.opacity(0.1)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .cornerRadius(12)
+
+            Image(systemName: "music.note")
+                .font(.system(size: 50, weight: .light))
+                .foregroundColor(Theme.cyberCyan)
+                .shadow(color: Theme.cyberCyan.opacity(0.5), radius: 8, x: 0, y: 0)
+        } else if trackIds.count < 4 {
+            LinearGradient(
+                colors: [Theme.cyberMagenta.opacity(0.3), Theme.cyberMagenta.opacity(0.1)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .cornerRadius(12)
+
+            Image(systemName: "music.note.list")
+                .font(.system(size: 50, weight: .light))
+                .foregroundColor(Theme.cyberMagenta)
+                .shadow(color: Theme.cyberMagenta.opacity(0.5), radius: 8, x: 0, y: 0)
+        } else {
+            VStack(spacing: 4) {
+                HStack(spacing: 4) {
+                    Rectangle()
+                        .fill(Theme.cyberMagenta.opacity(0.7))
+                    Rectangle()
+                        .fill(Theme.cyberCyan.opacity(0.7))
+                }
+                HStack(spacing: 4) {
+                    Rectangle()
+                        .fill(Theme.cyberYellow.opacity(0.7))
+                    Rectangle()
+                        .fill(Theme.cyberCyan.opacity(0.4))
+                }
+            }
+            .padding(4)
+            .cornerRadius(12)
+        }
     }
 }
 
@@ -466,42 +477,56 @@ struct PlaylistArtworkCyberpunk: View {
 
 struct PlaylistArtworkMiniCyberpunk: View {
     let trackIds: [String]
+    var thumbnailURL: String? = nil
 
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 8)
                 .fill(Theme.cyberSurface)
 
-            if trackIds.isEmpty {
-                Image(systemName: "music.note")
-                    .font(.system(size: 24, weight: .light))
-                    .foregroundColor(Theme.cyberDim)
-            } else if trackIds.count < 4 {
-                LinearGradient(
-                    colors: [Theme.cyberCyan.opacity(0.3), Theme.cyberCyan.opacity(0.1)],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                .cornerRadius(8)
-
-                Image(systemName: "music.note")
-                    .font(.system(size: 28))
-                    .foregroundColor(Theme.cyberCyan)
-            } else {
-                // 2x2 grid with cyberpunk colors
-                VStack(spacing: 2) {
-                    HStack(spacing: 2) {
-                        Rectangle().fill(Theme.cyberMagenta.opacity(0.7))
-                        Rectangle().fill(Theme.cyberCyan.opacity(0.7))
-                    }
-                    HStack(spacing: 2) {
-                        Rectangle().fill(Theme.cyberYellow.opacity(0.7))
-                        Rectangle().fill(Theme.cyberCyan.opacity(0.4))
-                    }
+            if let urlString = thumbnailURL, let url = URL(string: urlString) {
+                CachedAsyncImage(url: url) {
+                    miniArtworkFallback
                 }
-                .padding(2)
+                .scaledToFill()
+                .clipped()
                 .cornerRadius(8)
+            } else {
+                miniArtworkFallback
             }
+        }
+    }
+
+    @ViewBuilder
+    private var miniArtworkFallback: some View {
+        if trackIds.isEmpty {
+            Image(systemName: "music.note")
+                .font(.system(size: 24, weight: .light))
+                .foregroundColor(Theme.cyberDim)
+        } else if trackIds.count < 4 {
+            LinearGradient(
+                colors: [Theme.cyberCyan.opacity(0.3), Theme.cyberCyan.opacity(0.1)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .cornerRadius(8)
+
+            Image(systemName: "music.note")
+                .font(.system(size: 28))
+                .foregroundColor(Theme.cyberCyan)
+        } else {
+            VStack(spacing: 2) {
+                HStack(spacing: 2) {
+                    Rectangle().fill(Theme.cyberMagenta.opacity(0.7))
+                    Rectangle().fill(Theme.cyberCyan.opacity(0.7))
+                }
+                HStack(spacing: 2) {
+                    Rectangle().fill(Theme.cyberYellow.opacity(0.7))
+                    Rectangle().fill(Theme.cyberCyan.opacity(0.4))
+                }
+            }
+            .padding(2)
+            .cornerRadius(8)
         }
     }
 }

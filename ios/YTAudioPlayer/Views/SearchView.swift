@@ -28,6 +28,8 @@ struct SearchView: View {
     var body: some View {
         NavigationView {
             ZStack {
+                Theme.cyberBackground.ignoresSafeArea()
+
                 if viewModel.isLoading {
                     skeletonLoadingView
                 } else if viewModel.results.isEmpty && viewModel.playlistResults.isEmpty {
@@ -37,6 +39,7 @@ struct SearchView: View {
                 }
             }
             .navigationTitle("Search Music")
+            .preferredColorScheme(.dark)
             .searchable(
                 text: $searchText,
                 placement: .navigationBarDrawer(displayMode: .always),
@@ -48,6 +51,10 @@ struct SearchView: View {
             }
             .onAppear {
                 viewModel.refreshDownloadedIds()
+                UITableView.appearance().backgroundColor = .clear
+            }
+            .onDisappear {
+                UITableView.appearance().backgroundColor = .systemGroupedBackground
             }
             .onChange(of: downloadManager.completedDownloads.count) { _ in
                 viewModel.refreshDownloadedIds()
@@ -92,23 +99,24 @@ struct SearchView: View {
                 .listRowInsets(EdgeInsets())
                 .listRowBackground(Color.clear)
             }
-            
+
             // Songs Section
             if shouldShowSongs {
                 if !viewModel.results.isEmpty {
-                    Section(header: 
+                    Section(header:
                         HStack {
-                            Text("Songs")
-                                .font(.title3.bold())
+                            Text("SONGS")
+                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                .foregroundColor(.cyberDim)
                             Spacer()
                             Text("\(viewModel.results.count)")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
+                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                .foregroundColor(.cyberDim)
                         }
                     ) {
                         ForEach(viewModel.results) { track in
                             let downloadTask = downloadManager.taskForTrack(track)
-                            
+
                             SearchResultRow(
                                 track: track,
                                 isDownloaded: viewModel.isDownloaded(track),
@@ -135,22 +143,24 @@ struct SearchView: View {
                                     selectedTrackForPlaylist = track
                                 }
                             )
+                            .listRowBackground(Color.cyberSurface)
                         }
                     }
                 }
             }
-            
+
             // Playlists Section
             if shouldShowPlaylists {
                 if !viewModel.playlistResults.isEmpty {
                     Section(header:
                         HStack {
-                            Text("Playlists")
-                                .font(.title3.bold())
+                            Text("PLAYLISTS")
+                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                .foregroundColor(.cyberDim)
                             Spacer()
                             Text("\(viewModel.playlistResults.count)")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
+                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                .foregroundColor(.cyberDim)
                         }
                     ) {
                         ForEach(viewModel.playlistResults) { playlist in
@@ -169,6 +179,7 @@ struct SearchView: View {
                                     queueYouTubePlaylist(playlist)
                                 }
                             )
+                            .listRowBackground(Color.cyberSurface)
                         }
                     }
                 }
@@ -176,7 +187,7 @@ struct SearchView: View {
         }
         .listStyle(.insetGrouped)
     }
-    
+
     private var shouldShowSongs: Bool {
         activeFilter == .all || activeFilter == .songs
     }
@@ -249,30 +260,31 @@ struct SearchView: View {
             ForEach(0..<8, id: \.self) { _ in
                 HStack(spacing: 12) {
                     RoundedRectangle(cornerRadius: 8)
-                        .fill(Color.gray.opacity(0.2))
+                        .fill(Color.cyberDim.opacity(0.2))
                         .frame(width: 60, height: 60)
                         .shimmer()
-                    
+
                     VStack(alignment: .leading, spacing: 8) {
                         RoundedRectangle(cornerRadius: 4)
-                            .fill(Color.gray.opacity(0.2))
+                            .fill(Color.cyberDim.opacity(0.2))
                             .frame(width: 180, height: 16)
                             .shimmer()
-                        
+
                         RoundedRectangle(cornerRadius: 4)
-                            .fill(Color.gray.opacity(0.2))
+                            .fill(Color.cyberDim.opacity(0.2))
                             .frame(width: 120, height: 14)
                             .shimmer()
                     }
-                    
+
                     Spacer()
                 }
                 .padding(.vertical, 4)
+                .listRowBackground(Color.cyberSurface)
             }
         }
-        .listStyle(.plain)
+        .listStyle(.insetGrouped)
     }
-    
+
     // MARK: - Empty State
     @ViewBuilder
     private var emptyStateView: some View {
@@ -281,20 +293,22 @@ struct SearchView: View {
             VStack(spacing: 20) {
                 Image(systemName: "magnifyingglass.circle")
                     .font(.system(size: 70))
-                    .foregroundColor(.gray)
-                
+                    .foregroundColor(.cyberDim)
+
                 Text("No results for \"\(searchText)\"")
                     .font(.title3)
                     .fontWeight(.semibold)
-                
+                    .foregroundColor(.white)
+
                 Text("Try a different search term")
-                    .foregroundColor(.secondary)
-                
+                    .foregroundColor(.cyberDim)
+
                 Button("Clear Search") {
                     searchText = ""
                     viewModel.clearSearch()
                     activeFilter = .all
                 }
+                .foregroundColor(.cyberCyan)
                 .padding(.top, 8)
             }
         } else {
@@ -303,72 +317,45 @@ struct SearchView: View {
                 VStack(spacing: 24) {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 60))
-                        .foregroundColor(.accentColor.opacity(0.5))
-                    
+                        .foregroundColor(.cyberCyan.opacity(0.5))
+
                     Text("Search Music")
                         .font(.title2)
                         .fontWeight(.bold)
-                    
+                        .foregroundColor(.white)
+
                     Text("Find songs and playlists from YouTube Music")
-                        .foregroundColor(.secondary)
-                    
+                        .foregroundColor(.cyberDim)
+
                     // Genre quick picks
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("Browse by Genre")
-                            .font(.headline)
+                        Text("BROWSE BY GENRE")
+                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                            .foregroundColor(.cyberDim)
                             .padding(.horizontal)
-                        
+
                         LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
-                            GenreButton(
-                                title: "Pop",
-                                icon: "sparkles",
-                                color: .pink
-                            ) {
+                            GenreButton(title: "Pop", icon: "sparkles", color: .pink) {
                                 searchText = "Pop"
                                 viewModel.search(query: "Pop music")
                             }
-                            
-                            GenreButton(
-                                title: "Trending",
-                                icon: "flame.fill",
-                                color: .orange
-                            ) {
+                            GenreButton(title: "Trending", icon: "flame.fill", color: .orange) {
                                 searchText = "Trending"
                                 viewModel.search(query: "Trending music 2024")
                             }
-                            
-                            GenreButton(
-                                title: "Rock",
-                                icon: "guitars.fill",
-                                color: .red
-                            ) {
+                            GenreButton(title: "Rock", icon: "guitars.fill", color: .red) {
                                 searchText = "Rock"
                                 viewModel.search(query: "Rock and roll")
                             }
-                            
-                            GenreButton(
-                                title: "Hip-Hop",
-                                icon: "mic.fill",
-                                color: .purple
-                            ) {
+                            GenreButton(title: "Hip-Hop", icon: "mic.fill", color: .purple) {
                                 searchText = "Hip Hop"
                                 viewModel.search(query: "Hip hop rap")
                             }
-                            
-                            GenreButton(
-                                title: "Electronic",
-                                icon: "waveform",
-                                color: .cyan
-                            ) {
+                            GenreButton(title: "Electronic", icon: "waveform", color: .cyan) {
                                 searchText = "Electronic"
                                 viewModel.search(query: "Electronic dance music")
                             }
-                            
-                            GenreButton(
-                                title: "Jazz",
-                                icon: "music.note",
-                                color: .indigo
-                            ) {
+                            GenreButton(title: "Jazz", icon: "music.note", color: .indigo) {
                                 searchText = "Jazz"
                                 viewModel.search(query: "Jazz classics")
                             }
@@ -376,14 +363,15 @@ struct SearchView: View {
                         .padding(.horizontal)
                     }
                     .padding(.top, 10)
-                    
+
                     // Recent searches
                     if !viewModel.recentSearches.isEmpty {
                         VStack(alignment: .leading, spacing: 12) {
-                            Text("Recent Searches")
-                                .font(.headline)
+                            Text("RECENT SEARCHES")
+                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                .foregroundColor(.cyberDim)
                                 .padding(.horizontal)
-                            
+
                             ForEach(viewModel.recentSearches, id: \.self) { query in
                                 Button(action: {
                                     searchText = query
@@ -391,9 +379,9 @@ struct SearchView: View {
                                 }) {
                                     HStack {
                                         Image(systemName: "clock.arrow.circlepath")
-                                            .foregroundColor(.secondary)
+                                            .foregroundColor(.cyberCyan)
                                         Text(query)
-                                            .foregroundColor(.primary)
+                                            .foregroundColor(.white)
                                         Spacer()
                                     }
                                     .padding(.vertical, 8)
@@ -416,27 +404,31 @@ struct FilterChip: View {
     let count: Int
     let isSelected: Bool
     let action: () -> Void
-    
+
     var body: some View {
         Button(action: action) {
             HStack(spacing: 6) {
                 Text(title)
                     .font(.subheadline.bold())
-                
+
                 if count > 0 {
                     Text("\(count)")
                         .font(.caption.bold())
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
-                        .background(isSelected ? Color.white.opacity(0.3) : Color.gray.opacity(0.2))
+                        .background(isSelected ? Color.cyberCyan.opacity(0.3) : Color.cyberDim.opacity(0.2))
                         .cornerRadius(10)
                 }
             }
-            .foregroundColor(isSelected ? .white : .primary)
+            .foregroundColor(isSelected ? .cyberBackground : .white)
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
-            .background(isSelected ? Color.accentColor : Color.gray.opacity(0.1))
+            .background(isSelected ? Color.cyberCyan : Color.cyberSurface)
             .cornerRadius(20)
+            .overlay(
+                RoundedRectangle(cornerRadius: 20)
+                    .stroke(isSelected ? Color.clear : Color.cyberDim.opacity(0.4), lineWidth: 0.5)
+            )
         }
         .buttonStyle(.plain)
     }
@@ -473,25 +465,25 @@ struct PlaylistSearchRow: View {
                 Text(playlist.title)
                     .font(.system(size: 16, weight: .semibold))
                     .lineLimit(1)
-                    .foregroundColor(.primary)
-                
+                    .foregroundColor(.white)
+
                 Text("by \(playlist.author)")
                     .font(.system(size: 14))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(.cyberDim)
                     .lineLimit(1)
-                
+
                 if !playlist.description.isEmpty {
                     Text(playlist.description)
                         .font(.system(size: 12))
-                        .foregroundColor(.gray)
+                        .foregroundColor(.cyberDim)
                         .lineLimit(1)
                 }
             }
-            
+
             Spacer()
-            
+
             Image(systemName: "chevron.right")
-                .foregroundColor(.secondary)
+                .foregroundColor(.cyberDim)
                 .font(.caption)
         }
         .padding(.vertical, 8)
@@ -522,12 +514,12 @@ struct PlaylistSearchRow: View {
             Button(action: onClone) {
                 Label("Clone", systemImage: "doc.on.doc")
             }
-            .tint(.green)
-            
+            .tint(.cyberCyan)
+
             Button(action: onAddToQueue) {
                 Label("Queue", systemImage: "plus")
             }
-            .tint(.blue)
+            .tint(.cyberMagenta)
         }
     }
 }
@@ -536,24 +528,23 @@ struct PlaylistSearchRow: View {
 
 struct ArtworkThumbnail: View {
     let url: URL?
-    @State private var isLoaded = false
-    
+
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 8)
-                .fill(Color.gray.opacity(0.2))
+                .fill(Color.cyberSurface)
                 .overlay(
                     Image(systemName: "music.note")
-                        .foregroundColor(.gray)
+                        .foregroundColor(.cyberDim)
                 )
-            
+
             if let url = url {
                 CachedAsyncImage(url: url) {
                     EmptyView()
                 }
             }
         }
-        .cornerRadius(8)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 }
 
@@ -564,21 +555,25 @@ struct GenreButton: View {
     let icon: String
     let color: Color
     let action: () -> Void
-    
+
     var body: some View {
         Button(action: action) {
             HStack {
                 Image(systemName: icon)
                     .font(.title3)
                 Text(title)
-                    .font(.subheadline.bold())
+                    .font(.system(size: 14, weight: .bold, design: .monospaced))
                 Spacer()
             }
-            .foregroundColor(.white)
+            .foregroundColor(color)
             .padding()
             .background(
                 RoundedRectangle(cornerRadius: 12)
-                    .fill(color.opacity(0.8))
+                    .fill(color.opacity(0.08))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(color.opacity(0.4), lineWidth: 1)
+                    )
             )
         }
         .buttonStyle(.plain)
@@ -619,14 +614,14 @@ struct SearchResultRow: View {
                 } else if isDownloaded {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.system(size: 14))
-                        .foregroundColor(.green)
-                        .background(Circle().fill(Color.white))
+                        .foregroundColor(.cyberCyan)
+                        .background(Circle().fill(Color.black))
                         .offset(x: 4, y: 4)
                 }
                 
                 // Now playing indicator
                 if isPlaying {
-                    PlayingBars()
+                    CyberPlayingBars()
                         .frame(width: 16, height: 16)
                         .padding(4)
                         .background(.ultraThinMaterial)
@@ -640,29 +635,29 @@ struct SearchResultRow: View {
                 Text(track.title)
                     .font(.system(size: 16, weight: isPlaying ? .bold : .semibold))
                     .lineLimit(1)
-                    .foregroundColor(isPlaying ? .accentColor : .primary)
-                
+                    .foregroundColor(isPlaying ? .cyberCyan : .white)
+
                 Text(track.displayArtist)
                     .font(.system(size: 14))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(.cyberDim)
                     .lineLimit(1)
-                
+
                 HStack(spacing: 4) {
                     if !track.album.isEmpty && track.album != "Unknown Album" {
                         Text(track.album)
                             .font(.system(size: 12))
-                            .foregroundColor(.gray)
+                            .foregroundColor(.cyberDim)
                             .lineLimit(1)
                     }
-                    
+
                     Text("• \(track.durationText)")
                         .font(.system(size: 12))
-                        .foregroundColor(.gray)
-                    
+                        .foregroundColor(.cyberDim)
+
                     if track.isExplicit {
                         Text("• E")
                             .font(.system(size: 12))
-                            .foregroundColor(.gray)
+                            .foregroundColor(.cyberDim)
                     }
                 }
             }
@@ -676,34 +671,34 @@ struct SearchResultRow: View {
                     if task.status.isActive {
                         ZStack {
                             Circle()
-                                .stroke(Color.gray.opacity(0.3), lineWidth: 2)
+                                .stroke(Color.cyberDim.opacity(0.3), lineWidth: 2)
                                 .frame(width: 24, height: 24)
                             Circle()
                                 .trim(from: 0, to: task.progress)
-                                .stroke(Color.accentColor, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                                .stroke(Color.cyberCyan, style: StrokeStyle(lineWidth: 2, lineCap: .round))
                                 .frame(width: 24, height: 24)
                                 .rotationEffect(.degrees(-90))
                         }
                     } else if task.status == .completed {
                         Image(systemName: "checkmark.circle.fill")
                             .font(.system(size: 22))
-                            .foregroundColor(.green)
+                            .foregroundColor(.cyberCyan)
                     }
                 } else if isDownloaded {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.system(size: 22))
-                        .foregroundColor(.green)
+                        .foregroundColor(.cyberCyan)
                 }
-                
+
                 Button(action: onPlay) {
                     Image(systemName: isPlaying ? "waveform" : "play.circle.fill")
                         .font(.system(size: 28))
-                        .foregroundColor(isPlaying ? .accentColor : .accentColor)
+                        .foregroundColor(.cyberCyan)
                 }
             }
         }
         .padding(.vertical, 8)
-        .background(isPlaying ? Color.accentColor.opacity(0.05) : Color.clear)
+        .background(isPlaying ? Color.cyberCyan.opacity(0.08) : Color.clear)
         .contextMenu {
             Button(action: onPlay) {
                 Label(isPlaying ? "Now Playing" : "Play", systemImage: "play.fill")
@@ -737,12 +732,12 @@ struct SearchResultRow: View {
             Button(action: onDownload) {
                 Label("Download", systemImage: "arrow.down")
             }
-            .tint(.green)
-            
+            .tint(.cyberCyan)
+
             Button(action: onAddToQueue) {
                 Label("Queue", systemImage: "plus")
             }
-            .tint(.blue)
+            .tint(.cyberMagenta)
         }
     }
 }
@@ -751,15 +746,15 @@ struct SearchResultRow: View {
 
 struct CircularProgressView: View {
     let progress: Double
-    
+
     var body: some View {
         ZStack {
             Circle()
-                .stroke(Color.gray.opacity(0.3), lineWidth: 2)
-            
+                .stroke(Color.cyberDim.opacity(0.3), lineWidth: 2)
+
             Circle()
                 .trim(from: 0, to: CGFloat(progress))
-                .stroke(Color.accentColor, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                .stroke(Color.cyberCyan, style: StrokeStyle(lineWidth: 2, lineCap: .round))
                 .rotationEffect(.degrees(-90))
                 .animation(.linear(duration: 0.1), value: progress)
         }

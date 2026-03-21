@@ -144,7 +144,7 @@ struct LibraryView: View {
                     isEditing = false
                 }
             } message: {
-                Text("This will permanently remove the selected tracks from your neural library.")
+                Text("This will permanently remove the selected tracks from your library.")
             }
             .preferredColorScheme(.dark)
         }
@@ -154,34 +154,14 @@ struct LibraryView: View {
     }
     
     private var emptyView: some View {
-        VStack(spacing: 16) {
-            ZStack {
-                Circle()
-                    .stroke(Theme.cyberCyan.opacity(0.3), lineWidth: 1)
-                    .frame(width: 120, height: 120)
-
-                Image(systemName: "music.note.list")
-                    .font(.system(size: 50))
-                    .foregroundColor(Theme.cyberCyan)
-                    .shadow(color: Theme.cyberCyan.opacity(0.5), radius: 10, x: 0, y: 0)
-            }
-
-            Text("NEURAL_LIBRARY_EMPTY")
-                .font(.system(size: 18, weight: .bold, design: .monospaced))
-                .foregroundColor(.white)
-
-            Text("Download audio for offline neural access")
-                .font(.system(size: 14))
-                .foregroundColor(Theme.cyberDim)
-                .multilineTextAlignment(.center)
-        }
+        EmptyStateView(type: .library)
     }
     
     private var contentView: some View {
         VStack(spacing: 0) {
             // Header
             HStack {
-                Text("NEURAL_LIBRARY")
+                Text("Library")
                     .font(.system(size: 24, weight: .bold, design: .monospaced))
                     .foregroundColor(.white)
                     .shadow(color: Theme.cyberCyan.opacity(0.5), radius: 10, x: 0, y: 0)
@@ -297,22 +277,30 @@ struct GridTrackCell: View {
             ZStack {
                 RoundedRectangle(cornerRadius: 12)
                     .fill(Theme.cyberSurface)
-                    .aspectRatio(1, contentMode: .fit)
-                    .overlay(
+
+                // Artwork image
+                if let url = track.thumbnailURL {
+                    CachedAsyncImage(url: url) {
                         Image(systemName: "music.note")
                             .font(.system(size: 40))
                             .foregroundColor(Theme.cyberDim)
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .stroke(isPlaying ? Theme.cyberCyan.opacity(0.5) : Theme.cyberCyan.opacity(0.1), lineWidth: 1)
-                    )
+                    }
+                    .scaledToFill()
+                } else {
+                    Image(systemName: "music.note")
+                        .font(.system(size: 40))
+                        .foregroundColor(Theme.cyberDim)
+                }
+
+                // Cyberpunk border
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(isPlaying ? Theme.cyberCyan.opacity(0.5) : Theme.cyberCyan.opacity(0.1), lineWidth: 1)
 
                 // Playing indicator overlay
                 if isPlaying {
                     Color.black.opacity(0.3)
 
-                    PlayingBars()
+                    CyberPlayingBars()
                         .frame(width: 30, height: 30)
                 }
 
@@ -326,7 +314,6 @@ struct GridTrackCell: View {
                             .clipShape(Circle())
                             .shadow(color: Theme.cyberCyan.opacity(0.5), radius: 10, x: 0, y: 0)
                     }
-                    .opacity(0)
                 }
 
                 if isEditing {
@@ -342,6 +329,8 @@ struct GridTrackCell: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
                 }
             }
+            .aspectRatio(1, contentMode: .fit)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(track.title)
@@ -389,23 +378,32 @@ struct ListTrackRow: View {
                     RoundedRectangle(cornerRadius: 6)
                         .fill(Theme.cyberSurface)
                         .frame(width: 50, height: 50)
-                        .overlay(
+
+                    if let url = track.thumbnailURL {
+                        CachedAsyncImage(url: url) {
                             Image(systemName: "music.note")
                                 .foregroundColor(Theme.cyberDim)
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 6)
-                                .stroke(isPlaying ? Theme.cyberCyan.opacity(0.5) : Color.clear, lineWidth: 1)
-                        )
+                        }
+                        .frame(width: 50, height: 50)
+                        .scaledToFill()
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                    } else {
+                        Image(systemName: "music.note")
+                            .foregroundColor(Theme.cyberDim)
+                    }
+
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(isPlaying ? Theme.cyberCyan.opacity(0.5) : Color.clear, lineWidth: 1)
 
                     if isPlaying {
-                        PlayingBars()
+                        CyberPlayingBars()
                             .frame(width: 20, height: 20)
                             .padding(4)
                             .background(Theme.cyberBackground.opacity(0.8))
                             .cornerRadius(4)
                     }
                 }
+                .frame(width: 50, height: 50)
             }
 
             VStack(alignment: .leading, spacing: 4) {

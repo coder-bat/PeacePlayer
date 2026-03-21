@@ -215,14 +215,14 @@ struct PlaylistContentView: View {
                     ActionButton(
                         title: "Shuffle",
                         icon: "shuffle",
-                        color: .orange,
+                        color: .cyberYellow,
                         action: onShuffle
                     )
-                    
+
                     ActionButton(
                         title: "Clone",
                         icon: "plus.square",
-                        color: .green,
+                        color: .cyberCyan,
                         action: onClone
                     )
                 }
@@ -397,7 +397,7 @@ struct TrackListRow: View {
             // Index or Artwork
             ZStack(alignment: .center) {
                 if isPlaying {
-                    PlayingBars()
+                    CyberPlayingBars()
                         .frame(width: 20, height: 20)
                 } else {
                     Text("\(index)")
@@ -426,7 +426,7 @@ struct TrackListRow: View {
                 } else if isDownloaded {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.system(size: 10))
-                        .foregroundColor(.green)
+                        .foregroundColor(.cyberCyan)
                         .background(Circle().fill(Color.white))
                         .offset(x: 2, y: 2)
                 }
@@ -456,7 +456,7 @@ struct TrackListRow: View {
                 Button(action: onPlay) {
                     Image(systemName: isPlaying ? "waveform" : "play.circle.fill")
                         .font(.system(size: 24))
-                        .foregroundColor(isPlaying ? .accentColor : .accentColor)
+                        .foregroundColor(isPlaying ? .cyberCyan : .cyberDim)
                 }
             }
         }
@@ -499,12 +499,12 @@ struct TrackListRow: View {
             Button(action: onDownload) {
                 Label("Download", systemImage: "arrow.down")
             }
-            .tint(.green)
-            
+            .tint(.cyberCyan)
+
             Button(action: onAddToQueue) {
                 Label("Queue", systemImage: "plus")
             }
-            .tint(.blue)
+            .tint(.cyberMagenta)
         }
     }
 }
@@ -532,8 +532,8 @@ struct PlaylistErrorView: View {
         VStack(spacing: 16) {
             Image(systemName: "exclamationmark.triangle")
                 .font(.system(size: 50))
-                .foregroundColor(.orange)
-            
+                .foregroundColor(.cyberYellow)
+
             Text(message)
                 .multilineTextAlignment(.center)
             

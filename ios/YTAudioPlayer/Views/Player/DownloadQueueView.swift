@@ -34,7 +34,7 @@ struct DownloadQueueView: View {
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     if !downloadManager.completedDownloads.isEmpty {
-                        Button("Clear") {
+                        Button("Clear All") {
                             downloadManager.clearCompleted()
                         }
                         .foregroundColor(Theme.cyberCyan)
@@ -340,14 +340,15 @@ struct CompletedDownloadCard: View {
                 }
             }
 
-            // Delete button
+            // Delete button (per-item)
             Button(action: {
-                downloadManager.clearCompleted()
+                downloadManager.removeCompleted(id: task.id)
             }) {
                 Image(systemName: "trash.circle.fill")
                     .font(.system(size: 24))
                     .foregroundColor(Theme.cyberMagenta.opacity(0.6))
             }
+            .accessibilityLabel("Remove download")
         }
         .padding(12)
         .background(Theme.cyberSurface)

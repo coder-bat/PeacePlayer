@@ -24,12 +24,14 @@ struct LikeButton: View {
                 .foregroundColor(isLiked ? .pink : .gray)
                 .scaleEffect(isAnimating ? 1.3 : 1.0)
         }
+        .accessibilityLabel(isLiked ? "Unlike" : "Like")
         .disabled(trackId == nil)
     }
     
     private func toggleLike() {
         guard let trackId = trackId else { return }
-        
+
+        HapticManager.medium()
         withAnimation(.spring(response: 0.3, dampingFraction: 0.5)) {
             isAnimating = true
             playlistManager.toggleLike(trackId: trackId)

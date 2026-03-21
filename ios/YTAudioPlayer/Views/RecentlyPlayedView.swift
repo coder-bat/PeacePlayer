@@ -86,7 +86,7 @@ struct RecentlyPlayedRow: View {
                 Spacer()
                 
                 if isPlaying {
-                    PlayingBars()
+                    CyberPlayingBars()
                         .frame(width: 20, height: 20)
                 }
             }

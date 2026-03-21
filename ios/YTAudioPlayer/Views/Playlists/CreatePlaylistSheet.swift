@@ -15,33 +15,47 @@ struct CreatePlaylistSheet: View {
     
     var body: some View {
         NavigationView {
-            Form {
-                Section {
-                    TextField("Playlist Name", text: $name)
-                    TextField("Description (Optional)", text: $description)
-                }
-                
-                Section {
-                    Button {
-                        createPlaylist()
-                    } label: {
-                        HStack {
-                            Spacer()
-                            Text("Create Playlist")
-                                .font(.headline)
-                            Spacer()
-                        }
+            ZStack {
+                Theme.cyberBackground.ignoresSafeArea()
+
+                List {
+                    Section {
+                        TextField("Playlist Name", text: $name)
+                            .foregroundColor(.white)
+                        TextField("Description (optional)", text: $description)
+                            .foregroundColor(.white)
                     }
-                    .disabled(name.isEmpty)
+                    .listRowBackground(Color.cyberSurface)
+
+                    Section {
+                        Button {
+                            createPlaylist()
+                        } label: {
+                            HStack {
+                                Spacer()
+                                Text("Create Playlist")
+                                    .font(.headline)
+                                    .foregroundColor(name.isEmpty ? .cyberDim : .cyberCyan)
+                                Spacer()
+                            }
+                        }
+                        .disabled(name.isEmpty)
+                        .listRowBackground(Color.cyberSurface)
+                    }
                 }
+                .listStyle(.insetGrouped)
+                .onAppear { UITableView.appearance().backgroundColor = .clear }
+                .onDisappear { UITableView.appearance().backgroundColor = .systemGroupedBackground }
             }
             .navigationTitle("New Playlist")
             .navigationBarTitleDisplayMode(.inline)
+            .preferredColorScheme(.dark)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
                     Button("Cancel") {
                         dismiss()
                     }
+                    .foregroundColor(.cyberDim)
                 }
             }
         }

@@ -154,8 +154,7 @@ struct TrendingSection: View {
 struct TrendingRow: View {
     let track: Track
     let rank: Int
-    @State private var isHovered = false
-    
+
     var body: some View {
         Button(action: {
             playTrack()
@@ -166,41 +165,34 @@ struct TrendingRow: View {
                     .font(.system(size: 18, weight: .bold))
                     .foregroundColor(.secondary)
                     .frame(width: 24, alignment: .center)
-                
+
                 // Artwork
                 ArtworkThumbnail(url: track.artworkURL)
                     .frame(width: 50, height: 50)
-                
+
                 // Info
                 VStack(alignment: .leading, spacing: 4) {
                     Text(track.title)
                         .font(.system(size: 16, weight: .medium))
                         .lineLimit(1)
-                    
+
                     Text(track.displayArtist)
                         .font(.system(size: 14))
                         .foregroundColor(.secondary)
                         .lineLimit(1)
                 }
-                
+
                 Spacer()
-                
-                // Play button
+
+                // Play button — always visible
                 Image(systemName: "play.circle.fill")
                     .font(.system(size: 28))
                     .foregroundColor(.accentColor)
-                    .opacity(isHovered ? 1 : 0)
             }
             .padding(.vertical, 8)
-            .background(isHovered ? Color(.systemGray6) : Color.clear)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .onHover { hover in
-            withAnimation(.easeInOut(duration: 0.2)) {
-                isHovered = hover
-            }
-        }
     }
     
     private func playTrack() {

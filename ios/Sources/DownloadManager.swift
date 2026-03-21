@@ -138,6 +138,10 @@ class DownloadManager: ObservableObject {
     func clearCompleted() {
         completedDownloads.removeAll()
     }
+
+    func removeCompleted(id: UUID) {
+        completedDownloads.removeAll { $0.id == id }
+    }
     
     func clearAll() {
         currentTask?.cancel()

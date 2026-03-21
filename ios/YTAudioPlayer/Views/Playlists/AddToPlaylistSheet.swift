@@ -24,113 +24,137 @@ struct AddToPlaylistSheet: View {
     
     var body: some View {
         NavigationView {
-            List {
-                // Track info header
-                Section {
-                    HStack(spacing: 12) {
-                        ArtworkThumbnail(url: track.artworkURL)
-                            .frame(width: 60, height: 60)
-                        
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(track.title)
-                                .font(.headline)
-                                .lineLimit(1)
-                            
-                            Text(track.displayArtist)
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
-                                .lineLimit(1)
-                        }
-                    }
-                    .padding(.vertical, 4)
-                }
-                
-                // Create new playlist
-                Section {
-                    if isCreatingNew {
-                        HStack {
-                            TextField("Playlist Name", text: $newPlaylistName)
-                                .textFieldStyle(RoundedBorderTextFieldStyle())
-                            
-                            Button("Create") {
-                                createPlaylist()
-                            }
-                            .disabled(newPlaylistName.isEmpty)
-                            
-                            Button("Cancel") {
-                                isCreatingNew = false
-                                newPlaylistName = ""
-                            }
-                            .foregroundColor(.secondary)
-                        }
-                    } else {
-                        Button {
-                            isCreatingNew = true
-                        } label: {
-                            Label("New Playlist", systemImage: "plus.circle.fill")
-                                .foregroundColor(.accentColor)
-                        }
-                    }
-                }
-                
-                // Recently modified playlists
-                if !recentlyModified.isEmpty && !isCreatingNew {
-                    Section("Recently Modified") {
-                        ForEach(recentlyModified) { playlist in
-                            PlaylistRow(
-                                playlist: playlist,
-                                track: track,
-                                isAdded: playlistManager.isTrackInPlaylist(track.videoId, playlistId: playlist.id)
-                            ) {
-                                toggleTrackInPlaylist(playlist.id)
-                            }
-                        }
-                    }
-                }
-                
-                // All playlists
-                if !userPlaylists.isEmpty && !isCreatingNew {
-                    Section("All Playlists") {
-                        ForEach(userPlaylists) { playlist in
-                            PlaylistRow(
-                                playlist: playlist,
-                                track: track,
-                                isAdded: playlistManager.isTrackInPlaylist(track.videoId, playlistId: playlist.id)
-                            ) {
-                                toggleTrackInPlaylist(playlist.id)
-                            }
-                        }
-                    }
-                }
-                
-                // Empty state
-                if userPlaylists.isEmpty && !isCreatingNew {
+            ZStack {
+                Theme.cyberBackground.ignoresSafeArea()
+
+                List {
+                    // Track info header
                     Section {
-                        VStack(spacing: 12) {
-                            Image(systemName: "music.note.list")
-                                .font(.system(size: 40))
-                                .foregroundColor(.secondary)
-                            
-                            Text("No Playlists Yet")
-                                .font(.headline)
-                            
-                            Text("Create a playlist to add this track")
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
+                        HStack(spacing: 12) {
+                            ArtworkThumbnail(url: track.artworkURL)
+                                .frame(width: 60, height: 60)
+
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(track.title)
+                                    .font(.headline)
+                                    .foregroundColor(.white)
+                                    .lineLimit(1)
+
+                                Text(track.displayArtist)
+                                    .font(.subheadline)
+                                    .foregroundColor(.cyberDim)
+                                    .lineLimit(1)
+                            }
                         }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 40)
+                        .padding(.vertical, 4)
+                        .listRowBackground(Color.cyberSurface)
+                    }
+
+                    // Create new playlist
+                    Section {
+                        if isCreatingNew {
+                            HStack {
+                                TextField("Playlist Name", text: $newPlaylistName)
+                                    .foregroundColor(.white)
+
+                                Button("Create") {
+                                    createPlaylist()
+                                }
+                                .foregroundColor(.cyberCyan)
+                                .disabled(newPlaylistName.isEmpty)
+
+                                Button("Cancel") {
+                                    isCreatingNew = false
+                                    newPlaylistName = ""
+                                }
+                                .foregroundColor(.cyberDim)
+                            }
+                        } else {
+                            Button {
+                                isCreatingNew = true
+                            } label: {
+                                Label("New Playlist", systemImage: "plus.circle.fill")
+                                    .foregroundColor(.cyberCyan)
+                            }
+                        }
+                    }
+                    .listRowBackground(Color.cyberSurface)
+
+                    // Recently modified playlists
+                    if !recentlyModified.isEmpty && !isCreatingNew {
+                        Section(header:
+                            Text("RECENTLY MODIFIED")
+                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                .foregroundColor(.cyberDim)
+                        ) {
+                            ForEach(recentlyModified) { playlist in
+                                PlaylistRow(
+                                    playlist: playlist,
+                                    track: track,
+                                    isAdded: playlistManager.isTrackInPlaylist(track.videoId, playlistId: playlist.id)
+                                ) {
+                                    toggleTrackInPlaylist(playlist.id)
+                                }
+                                .listRowBackground(Color.cyberSurface)
+                            }
+                        }
+                    }
+
+                    // All playlists
+                    if !userPlaylists.isEmpty && !isCreatingNew {
+                        Section(header:
+                            Text("ALL PLAYLISTS")
+                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                .foregroundColor(.cyberDim)
+                        ) {
+                            ForEach(userPlaylists) { playlist in
+                                PlaylistRow(
+                                    playlist: playlist,
+                                    track: track,
+                                    isAdded: playlistManager.isTrackInPlaylist(track.videoId, playlistId: playlist.id)
+                                ) {
+                                    toggleTrackInPlaylist(playlist.id)
+                                }
+                                .listRowBackground(Color.cyberSurface)
+                            }
+                        }
+                    }
+
+                    // Empty state
+                    if userPlaylists.isEmpty && !isCreatingNew {
+                        Section {
+                            VStack(spacing: 12) {
+                                Image(systemName: "music.note.list")
+                                    .font(.system(size: 40))
+                                    .foregroundColor(.cyberDim)
+
+                                Text("No Playlists Yet")
+                                    .font(.headline)
+                                    .foregroundColor(.white)
+
+                                Text("Create a playlist to add this track")
+                                    .font(.subheadline)
+                                    .foregroundColor(.cyberDim)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 40)
+                            .listRowBackground(Color.clear)
+                        }
                     }
                 }
+                .listStyle(.insetGrouped)
+                .onAppear { UITableView.appearance().backgroundColor = .clear }
+                .onDisappear { UITableView.appearance().backgroundColor = .systemGroupedBackground }
             }
-            .listStyle(.insetGrouped)
             .navigationTitle("Add to Playlist")
             .navigationBarTitleDisplayMode(.inline)
+            .preferredColorScheme(.dark)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("Done") {
                         dismiss()
                     }
+                    .foregroundColor(.cyberCyan)
                 }
             }
         }
@@ -174,22 +198,22 @@ struct PlaylistRow: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(playlist.name)
                         .font(.body.bold())
-                        .foregroundColor(.primary)
-                    
+                        .foregroundColor(.white)
+
                     Text("\(playlist.trackCount) songs")
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundColor(.cyberDim)
                 }
-                
+
                 Spacer()
-                
+
                 if isAdded {
                     Image(systemName: "checkmark.circle.fill")
-                        .foregroundColor(.accentColor)
+                        .foregroundColor(.cyberCyan)
                         .font(.title3)
                 } else {
                     Image(systemName: "circle")
-                        .foregroundColor(.secondary)
+                        .foregroundColor(.cyberDim)
                         .font(.title3)
                 }
             }

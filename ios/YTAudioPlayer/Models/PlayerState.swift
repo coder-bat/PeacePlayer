@@ -1196,6 +1196,16 @@ class PlayerState: ObservableObject {
         if let item = currentItem {
             dataManager.updatePlaybackProgress(for: item.track.videoId, progress: 1.0)
         }
+        // Check if "End of Track" sleep timer is active
+        let sleepTimer = SleepTimer.shared
+        if sleepTimer.isActive && sleepTimer.selectedMinutes == 0 {
+            print("🌙 End of Track sleep timer triggered: stopping playback")
+            DispatchQueue.main.async {
+                sleepTimer.cancel()
+            }
+            return
+        }
+
         print("🏁 Advancing to next track after completion")
 
         // Move to next track on main thread

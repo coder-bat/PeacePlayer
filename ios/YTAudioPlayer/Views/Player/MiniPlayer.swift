@@ -34,11 +34,11 @@ struct MiniPlayer: View {
                     Text(playerState.currentItem?.track.title ?? "")
                         .font(.system(size: 15, weight: .semibold))
                         .lineLimit(1)
-                        .foregroundColor(.primary)
-                    
+                        .foregroundColor(.white)
+
                     Text(playerState.currentItem?.track.displayArtist ?? "")
                         .font(.system(size: 13))
-                        .foregroundColor(.secondary)
+                        .foregroundColor(.cyberDim)
                         .lineLimit(1)
                 }
                 .frame(maxWidth: 180, alignment: .leading)
@@ -56,27 +56,31 @@ struct MiniPlayer: View {
                             .progressViewStyle(CircularProgressViewStyle())
                             .frame(width: 44, height: 44)
                     } else {
-                        Button(action: { 
+                        Button(action: {
                             HapticManager.light()
-                            playerState.togglePlayPause() 
+                            playerState.togglePlayPause()
                         }) {
                             Image(systemName: playerState.playbackState.isPlaying ? "pause.fill" : "play.fill")
                                 .font(.system(size: 22))
-                                .foregroundColor(.accentColor)
+                                .foregroundColor(.cyberCyan)
                                 .frame(width: 44, height: 44)
                         }
+                        .accessibilityLabel(playerState.playbackState.isPlaying
+                            ? "Pause \(playerState.currentItem?.track.title ?? "")"
+                            : "Play \(playerState.currentItem?.track.title ?? "")")
                     }
                 }
-                
-                Button(action: { 
+
+                Button(action: {
                     HapticManager.light()
-                    playerState.nextTrack() 
+                    playerState.nextTrack()
                 }) {
                     Image(systemName: "forward.fill")
                         .font(.system(size: 18))
-                        .foregroundColor(.primary)
+                        .foregroundColor(.white)
                         .frame(width: 44, height: 44)
                 }
+                .accessibilityLabel("Next track")
                 .disabled(!playerState.hasNextTrack)
                 .opacity(playerState.hasNextTrack ? 1 : 0.5)
             }
@@ -85,8 +89,33 @@ struct MiniPlayer: View {
         .padding(.vertical, 10)
         .frame(maxWidth: .infinity)
         .frame(height: 64)
-        .background(Color(.systemBackground))
-        .shadow(color: Color.black.opacity(0.1), radius: 2, x: 0, y: -1)
+        .background(
+            ZStack {
+                Rectangle().fill(.ultraThinMaterial)
+                Color.cyberSurface.opacity(0.7)
+            }
+        )
+        .overlay(alignment: .top) {
+            // Playback progress bar
+            GeometryReader { geo in
+                let progress = playerState.duration > 0
+                    ? CGFloat(playerState.currentTime / playerState.duration)
+                    : 0
+                Color.cyberCyan
+                    .frame(width: geo.size.width * progress, height: 2)
+            }
+            .frame(height: 2)
+        }
+        .overlay(alignment: .top) {
+            Color.cyberCyan.opacity(0.15).frame(height: 0.5)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 20))
+        .overlay(
+            RoundedRectangle(cornerRadius: 20)
+                .stroke(Color.cyberCyan.opacity(0.25), lineWidth: 1)
+        )
+        .shadow(color: Color.black.opacity(0.5), radius: 16, x: 0, y: 6)
+        .padding(.horizontal, 12)
         // Swipe gestures
         .offset(x: offset)
         .gesture(
@@ -207,7 +236,7 @@ struct ArtworkView: View {
             // Playing indicator (only when not loading)
             Group {
                 if isPlaying && !isLoading {
-                    PlayingBars()
+                    CyberPlayingBars()
                         .frame(width: 16, height: 16)
                         .padding(4)
                         .background(.ultraThinMaterial)
@@ -220,26 +249,26 @@ struct ArtworkView: View {
     }
 }
 
-// MARK: - Playing Bars Animation
-struct PlayingBars: View {
-    @State private var animating = false
-    
+// MARK: - Cyber Playing Bars (shared across the app)
+struct CyberPlayingBars: View {
+    @State private var animate = false
+
     var body: some View {
         HStack(spacing: 2) {
-            ForEach(0..<3) { i in
+            ForEach(0..<3) { index in
                 RoundedRectangle(cornerRadius: 1)
-                    .fill(Color.accentColor)
-                    .frame(width: 3, height: animating ? CGFloat.random(in: 4...12) : 4)
+                    .fill(Color.cyberCyan)
+                    .frame(width: 3, height: animate ? 16 : 4)
                     .animation(
                         .easeInOut(duration: 0.4)
                         .repeatForever(autoreverses: true)
-                        .delay(Double(i) * 0.1),
-                        value: animating
+                        .delay(Double(index) * 0.15),
+                        value: animate
                     )
             }
         }
         .onAppear {
-            animating = true
+            animate = true
         }
     }
 }

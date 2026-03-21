@@ -21,10 +21,19 @@ The iPhone connects to your Mac over your local network (WiFi or Tailscale).
 
 ### 1. Start the backend
 
+The backend runs automatically as a macOS background service (`com.peaceplayer.backend`) — it starts on login and restarts if it crashes. No manual start needed after initial setup.
+
+For first-time setup:
 ```bash
-make setup    # First time only — installs Python dependencies
-make backend  # Start the server on port 8181
+make setup    # Install Python dependencies
 ```
+
+Then load the service (once):
+```bash
+launchctl load ~/Library/LaunchAgents/com.peaceplayer.backend.plist
+```
+
+The service plist is at `~/Library/LaunchAgents/com.peaceplayer.backend.plist`.
 
 ### 2. (Optional) Authenticate for full library access
 
@@ -92,12 +101,44 @@ In Xcode:
 
 ---
 
+## Backend Service
+
+The backend runs as a macOS LaunchAgent (`com.peaceplayer.backend`) that auto-starts on login.
+
+### Control commands
+
+```bash
+# Check if running
+launchctl list | grep peaceplayer
+
+# Stop the service
+launchctl unload ~/Library/LaunchAgents/com.peaceplayer.backend.plist
+
+# Start the service
+launchctl load ~/Library/LaunchAgents/com.peaceplayer.backend.plist
+
+# View logs (live)
+tail -f ~/iYMusic/YTAudioSystem/backend/server.log
+
+# Verify backend is responding
+curl http://localhost:8181/
+```
+
+### First-time service setup
+
+If the plist isn't installed yet:
+```bash
+cp ~/iYMusic/YTAudioSystem/backend/com.peaceplayer.backend.plist ~/Library/LaunchAgents/
+launchctl load ~/Library/LaunchAgents/com.peaceplayer.backend.plist
+```
+
+---
+
 ## Makefile Commands
 
 ```bash
 make setup        # Install Python dependencies
-make backend      # Start backend server (port 8181)
-make dev          # Start with auto-reload (development)
+make dev          # Start with auto-reload (development mode)
 make auth         # Authenticate with Google (optional)
 make ios          # Open Xcode project
 make ip           # Show your Mac's local IP address

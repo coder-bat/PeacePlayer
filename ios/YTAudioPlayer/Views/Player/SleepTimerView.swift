@@ -71,34 +71,39 @@ class SleepTimer: ObservableObject {
 struct SleepTimerView: View {
     @StateObject private var timer = SleepTimer.shared
     @Environment(\.dismiss) private var dismiss
-    
+
     var body: some View {
         NavigationView {
-            VStack(spacing: 32) {
-                // Icon
-                Image(systemName: "moon.fill")
-                    .font(.system(size: 60))
-                    .foregroundColor(.accentColor)
-                    .padding(.top, 20)
-                
-                if timer.isActive {
-                    // Active timer display
-                    activeTimerView
-                } else {
-                    // Timer selection
-                    timerSelectionView
+            ZStack {
+                Theme.cyberBackground.ignoresSafeArea()
+
+                VStack(spacing: 32) {
+                    // Icon
+                    Image(systemName: "moon.fill")
+                        .font(.system(size: 60))
+                        .foregroundColor(.cyberCyan)
+                        .shadow(color: Color.cyberCyan.opacity(0.6), radius: 12)
+                        .padding(.top, 20)
+
+                    if timer.isActive {
+                        activeTimerView
+                    } else {
+                        timerSelectionView
+                    }
+
+                    Spacer()
                 }
-                
-                Spacer()
+                .padding()
             }
-            .padding()
             .navigationTitle("Sleep Timer")
             .navigationBarTitleDisplayMode(.large)
+            .preferredColorScheme(.dark)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("Done") {
                         dismiss()
                     }
+                    .foregroundColor(.cyberCyan)
                 }
             }
         }
@@ -109,38 +114,38 @@ struct SleepTimerView: View {
             // Countdown circle
             ZStack {
                 Circle()
-                    .stroke(Color.gray.opacity(0.2), lineWidth: 12)
+                    .stroke(Color.cyberDim.opacity(0.2), lineWidth: 12)
                     .frame(width: 200, height: 200)
-                
+
                 Circle()
                     .trim(from: 0, to: progress)
-                    .stroke(Color.accentColor, style: StrokeStyle(lineWidth: 12, lineCap: .round))
+                    .stroke(Color.cyberCyan, style: StrokeStyle(lineWidth: 12, lineCap: .round))
                     .frame(width: 200, height: 200)
                     .rotationEffect(.degrees(-90))
                     .animation(.linear, value: timer.remainingTime)
-                
+                    .shadow(color: Color.cyberCyan.opacity(0.5), radius: 8)
+
                 VStack {
-                    Text(timer.formattedRemainingTime)
-                        .font(.system(size: 48, weight: .bold, design: .rounded))
-                        .foregroundColor(.primary)
-                    
+                    Text(timer.selectedMinutes == 0 ? "End of Track" : timer.formattedRemainingTime)
+                        .font(.system(size: timer.selectedMinutes == 0 ? 20 : 48, weight: .bold, design: .rounded))
+                        .foregroundColor(.white)
+
                     Text("until sleep")
                         .font(.subheadline)
-                        .foregroundColor(.secondary)
+                        .foregroundColor(.cyberDim)
                 }
             }
-            
+
             // Cancel button
-            Button(action: {
-                timer.cancel()
-            }) {
+            Button(action: { timer.cancel() }) {
                 Text("Cancel Timer")
                     .font(.headline)
                     .foregroundColor(.red)
                     .frame(maxWidth: .infinity)
                     .padding()
-                    .background(Color.red.opacity(0.1))
+                    .background(Color.red.opacity(0.15))
                     .cornerRadius(12)
+                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.red.opacity(0.3), lineWidth: 0.5))
             }
             .padding(.horizontal, 32)
         }
@@ -150,8 +155,8 @@ struct SleepTimerView: View {
         VStack(spacing: 24) {
             Text("Stop playback after")
                 .font(.headline)
-                .foregroundColor(.secondary)
-            
+                .foregroundColor(.cyberDim)
+
             // Preset buttons
             LazyVGrid(columns: [
                 GridItem(.flexible()),
@@ -166,7 +171,7 @@ struct SleepTimerView: View {
                 }
             }
             .padding(.horizontal, 16)
-            
+
             // End of track option
             Button(action: {
                 timer.startEndOfTrack()
@@ -177,41 +182,47 @@ struct SleepTimerView: View {
                     Text("End of Track")
                         .font(.headline)
                 }
-                .foregroundColor(.accentColor)
+                .foregroundColor(.cyberCyan)
                 .frame(maxWidth: .infinity)
                 .padding()
-                .background(Color.accentColor.opacity(0.1))
+                .background(Color.cyberCyan.opacity(0.1))
                 .cornerRadius(12)
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.cyberCyan.opacity(0.3), lineWidth: 0.5))
             }
             .padding(.horizontal, 32)
         }
     }
     
     private var progress: CGFloat {
-        guard timer.selectedMinutes > 0 else { return 0 }
+        guard timer.selectedMinutes > 0 else { return 1 }
         let total = TimeInterval(timer.selectedMinutes * 60)
         let remaining = max(timer.remainingTime, 0)
-        return CGFloat(1 - (remaining / total))
+        // Starts at 1.0 (full ring) and shrinks to 0.0 as time depletes
+        return CGFloat(remaining / total)
     }
 }
 
 struct PresetButton: View {
     let minutes: Int
     let action: () -> Void
-    
+
     var body: some View {
         Button(action: action) {
             VStack(spacing: 4) {
                 Text("\(minutes)")
                     .font(.system(size: 32, weight: .bold))
+                    .foregroundColor(.white)
                 Text("min")
                     .font(.caption)
-                    .foregroundColor(.secondary)
+                    .foregroundColor(.cyberDim)
             }
-            .foregroundColor(.primary)
             .frame(maxWidth: .infinity, minHeight: 80)
-            .background(Color.gray.opacity(0.1))
+            .background(Color.cyberSurface)
             .cornerRadius(12)
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(Color.cyberDim.opacity(0.3), lineWidth: 0.5)
+            )
         }
     }
 }
