@@ -1,0 +1,618 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 70;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		0B97B073B2BCBE37732CD3C4 /* HapticManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9548F5CB54970A655782346A /* HapticManager.swift */; };
+		0BD64E5C60DB9B0C94498DF4 /* MainContainerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3981584A595276084E907877 /* MainContainerView.swift */; };
+		15C000EA5C3F4602E36A019B /* MiniPlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD9433711FA4B32991B869ED /* MiniPlayer.swift */; };
+		31D763D1C31605E03A21E40A /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A4D4641A6DFB5120002B115 /* ContentView.swift */; };
+		3AED7D7B7AFFE647BBE51BB6 /* PlaylistPreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8058065A2605621D9ACACE55 /* PlaylistPreviewView.swift */; };
+		3BB2A579043A9DD6436D840D /* LyricsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18E15FD0563E96D55099054E /* LyricsView.swift */; };
+		3C5431D4CD06B675A98D0183 /* CreatePlaylistSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CB0CB3A2ECFF5D7F29396A1 /* CreatePlaylistSheet.swift */; };
+		3DAD4F3A2463AF479C2B4AF3 /* QueueRestorer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0BFC375ECD06E998CB697145 /* QueueRestorer.swift */; };
+		468B8DA12F53EACC00CDE29B /* QueueView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 468B8D982F53EACC00CDE29B /* QueueView.swift */; };
+		468B8DA22F53EACC00CDE29B /* EmptyStateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 468B8D892F53EACC00CDE29B /* EmptyStateView.swift */; };
+		468B8DA32F53EACC00CDE29B /* PlaylistPreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 468B8D9E2F53EACC00CDE29B /* PlaylistPreviewView.swift */; };
+		468B8DA42F53EACC00CDE29B /* YourMixesSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 468B8D922F53EACC00CDE29B /* YourMixesSection.swift */; };
+		468B8DA52F53EACC00CDE29B /* SleepTimerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 468B8D992F53EACC00CDE29B /* SleepTimerView.swift */; };
+		468B8DA62F53EACC00CDE29B /* LyricsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 468B8D962F53EACC00CDE29B /* LyricsView.swift */; };
+		468B8DA72F53EACC00CDE29B /* DownloadQueueView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 468B8D942F53EACC00CDE29B /* DownloadQueueView.swift */; };
+		468B8DA82F53EACC00CDE29B /* MoodBrowseSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 468B8D8E2F53EACC00CDE29B /* MoodBrowseSection.swift */; };
+		468B8DA92F53EACC00CDE29B /* TrendingSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 468B8D912F53EACC00CDE29B /* TrendingSection.swift */; };
+		468B8DAA2F53EACC00CDE29B /* AddToPlaylistSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 468B8D9B2F53EACC00CDE29B /* AddToPlaylistSheet.swift */; };
+		468B8DAB2F53EACC00CDE29B /* ErrorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 468B8D8A2F53EACC00CDE29B /* ErrorView.swift */; };
+		468B8DAC2F53EACC00CDE29B /* LikeButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 468B8D8B2F53EACC00CDE29B /* LikeButton.swift */; };
+		468B8DAD2F53EACC00CDE29B /* RecentlyPlayedSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 468B8D902F53EACC00CDE29B /* RecentlyPlayedSection.swift */; };
+		468B8DAE2F53EACC00CDE29B /* CreatePlaylistSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 468B8D9C2F53EACC00CDE29B /* CreatePlaylistSheet.swift */; };
+		468B8DAF2F53EACC00CDE29B /* MiniPlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 468B8D972F53EACC00CDE29B /* MiniPlayer.swift */; };
+		468B8DB02F53EACC00CDE29B /* DiscoverView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 468B8D8D2F53EACC00CDE29B /* DiscoverView.swift */; };
+		468B8DB12F53EACC00CDE29B /* PlaylistDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 468B8D9D2F53EACC00CDE29B /* PlaylistDetailView.swift */; };
+		468B8DB22F53EACC00CDE29B /* NewReleasesSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 468B8D8F2F53EACC00CDE29B /* NewReleasesSection.swift */; };
+		468B8DB32F53EACC00CDE29B /* FullPlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 468B8D952F53EACC00CDE29B /* FullPlayer.swift */; };
+		468B8DB42F53EACC00CDE29B /* PlaylistsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 468B8D9F2F53EACC00CDE29B /* PlaylistsView.swift */; };
+		468B8DC02F53EACC00CDE29C /* VibeButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 468B8D8C2F53EACC00CDE29C /* VibeButton.swift */; };
+		468B8DC12F53EACC00CDE29D /* GenrePickerSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 468B8D8D2F53EACC00CDE29D /* GenrePickerSheet.swift */; };
+		468BB9612F6A9B0B00CDE29B /* YTAudioPlayer.xcdatamodeld in Sources */ = {isa = PBXBuildFile; fileRef = 468BB95F2F6A9B0B00CDE29B /* YTAudioPlayer.xcdatamodeld */; };
+		4B0591D40CA1EDCFEA157A50 /* ViewExtensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = F89C2506A14768CB685B2A7C /* ViewExtensions.swift */; };
+		63C543D28F620E719F782C46 /* LikeButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2A9468FFD7CCB3F04EED038 /* LikeButton.swift */; };
+		767F84264D5A0147FDAF1576 /* Track.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D823E6945F2F8CBC4462532 /* Track.swift */; };
+		7F18884C6472D54E69A88860 /* AddToPlaylistSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18CB5E604384AA12AE84E2D5 /* AddToPlaylistSheet.swift */; };
+		88A50F33382CF82BBEAD774A /* EmptyStateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B81D655E3DE40EE89C5400B4 /* EmptyStateView.swift */; };
+		971CD66E933CD6EBEBBC611E /* Playlist.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93B4300DF1688D223A2697AE /* Playlist.swift */; };
+		9D12BF87B1C1BD2F5F01A59A /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 1B89643747E78C4027FF9AD9 /* Assets.xcassets */; };
+		A0479382B5B66EE7F526B8CA /* FullPlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = D353D6C05094B36F8EA15622 /* FullPlayer.swift */; };
+		AC30D021A828DC129499800D /* SleepTimerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 791B0D8E28834A5D34E9FA93 /* SleepTimerView.swift */; };
+		B5A9F19389EDBC0B9918E9F3 /* PlaylistsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CAC504FA4E7BBC2BDCEBC5BD /* PlaylistsView.swift */; };
+		C3A812D628A613B24F1EEC30 /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD72DD7B62A4AC911BF749F6 /* HomeView.swift */; };
+		C41811001AF961E13FBD81D9 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51554D239E59D64D0D95EDD0 /* Theme.swift */; };
+		C8BBF5B384454033D256EAA0 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 6EEB0E0B1BCCEC02E21A234F /* LaunchScreen.storyboard */; };
+		CDB01CAE6DCC374351226883 /* ErrorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD44B40105E0AC2CC5C0781B /* ErrorView.swift */; };
+		D68E450CDE257229340947C7 /* LibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1AD3F94F37ADACD364BBCA1A /* LibraryView.swift */; };
+		E67443988D45187EB8E996D4 /* ShimmerModifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = F26DE8F2D8B762F09FFAD4C5 /* ShimmerModifier.swift */; };
+		E685DA1EA5DF80F815DB1AFF /* SearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F66019926050AB739EEF25E /* SearchView.swift */; };
+		E86A578CA391F693A6B3752B /* YTAudioPlayerApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0080BED852F91FC0AFA9DE17 /* YTAudioPlayerApp.swift */; };
+		ECD0697915EEBFC3863ACFD1 /* PlayerState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12DF773336B5A83BFF1FC347 /* PlayerState.swift */; };
+		F1BDDD059138B2D12ACD1238 /* DownloadQueueView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC0F1A4A8D19C80A2DFBE1FB /* DownloadQueueView.swift */; };
+		FCC18AB0C67C1A57062B9ADD /* PlaylistDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38ADEC1060AD8D53A3241FFA /* PlaylistDetailView.swift */; };
+		FDB9DC04823CF79D053C24CD /* RecentlyPlayedView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6AF72E449870436F01005365 /* RecentlyPlayedView.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		0080BED852F91FC0AFA9DE17 /* YTAudioPlayerApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = YTAudioPlayerApp.swift; sourceTree = "<group>"; };
+		0BFC375ECD06E998CB697145 /* QueueRestorer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueueRestorer.swift; sourceTree = "<group>"; };
+		12DF773336B5A83BFF1FC347 /* PlayerState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerState.swift; sourceTree = "<group>"; };
+		18CB5E604384AA12AE84E2D5 /* AddToPlaylistSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddToPlaylistSheet.swift; sourceTree = "<group>"; };
+		18E15FD0563E96D55099054E /* LyricsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LyricsView.swift; sourceTree = "<group>"; };
+		1A4D4641A6DFB5120002B115 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		1AD3F94F37ADACD364BBCA1A /* LibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryView.swift; sourceTree = "<group>"; };
+		1B89643747E78C4027FF9AD9 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		2D823E6945F2F8CBC4462532 /* Track.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Track.swift; sourceTree = "<group>"; };
+		38ADEC1060AD8D53A3241FFA /* PlaylistDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaylistDetailView.swift; sourceTree = "<group>"; };
+		3981584A595276084E907877 /* MainContainerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainContainerView.swift; sourceTree = "<group>"; };
+		468B8D892F53EACC00CDE29B /* EmptyStateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmptyStateView.swift; sourceTree = "<group>"; };
+		468B8D8A2F53EACC00CDE29B /* ErrorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErrorView.swift; sourceTree = "<group>"; };
+		468B8D8B2F53EACC00CDE29B /* LikeButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LikeButton.swift; sourceTree = "<group>"; };
+		468B8D8C2F53EACC00CDE29C /* VibeButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VibeButton.swift; sourceTree = "<group>"; };
+		468B8D8D2F53EACC00CDE29B /* DiscoverView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiscoverView.swift; sourceTree = "<group>"; };
+		468B8D8D2F53EACC00CDE29D /* GenrePickerSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GenrePickerSheet.swift; sourceTree = "<group>"; };
+		468B8D8E2F53EACC00CDE29B /* MoodBrowseSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoodBrowseSection.swift; sourceTree = "<group>"; };
+		468B8D8F2F53EACC00CDE29B /* NewReleasesSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewReleasesSection.swift; sourceTree = "<group>"; };
+		468B8D902F53EACC00CDE29B /* RecentlyPlayedSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecentlyPlayedSection.swift; sourceTree = "<group>"; };
+		468B8D912F53EACC00CDE29B /* TrendingSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrendingSection.swift; sourceTree = "<group>"; };
+		468B8D922F53EACC00CDE29B /* YourMixesSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = YourMixesSection.swift; sourceTree = "<group>"; };
+		468B8D942F53EACC00CDE29B /* DownloadQueueView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadQueueView.swift; sourceTree = "<group>"; };
+		468B8D952F53EACC00CDE29B /* FullPlayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FullPlayer.swift; sourceTree = "<group>"; };
+		468B8D962F53EACC00CDE29B /* LyricsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LyricsView.swift; sourceTree = "<group>"; };
+		468B8D972F53EACC00CDE29B /* MiniPlayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MiniPlayer.swift; sourceTree = "<group>"; };
+		468B8D982F53EACC00CDE29B /* QueueView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueueView.swift; sourceTree = "<group>"; };
+		468B8D992F53EACC00CDE29B /* SleepTimerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SleepTimerView.swift; sourceTree = "<group>"; };
+		468B8D9B2F53EACC00CDE29B /* AddToPlaylistSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddToPlaylistSheet.swift; sourceTree = "<group>"; };
+		468B8D9C2F53EACC00CDE29B /* CreatePlaylistSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CreatePlaylistSheet.swift; sourceTree = "<group>"; };
+		468B8D9D2F53EACC00CDE29B /* PlaylistDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaylistDetailView.swift; sourceTree = "<group>"; };
+		468B8D9E2F53EACC00CDE29B /* PlaylistPreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaylistPreviewView.swift; sourceTree = "<group>"; };
+		468B8D9F2F53EACC00CDE29B /* PlaylistsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaylistsView.swift; sourceTree = "<group>"; };
+		468BB9602F6A9B0B00CDE29B /* YTAudioPlayer.xcdatamodel */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcdatamodel; path = YTAudioPlayer.xcdatamodel; sourceTree = "<group>"; };
+		4CB0CB3A2ECFF5D7F29396A1 /* CreatePlaylistSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CreatePlaylistSheet.swift; sourceTree = "<group>"; };
+		4F66019926050AB739EEF25E /* SearchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchView.swift; sourceTree = "<group>"; };
+		51554D239E59D64D0D95EDD0 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
+		6AF72E449870436F01005365 /* RecentlyPlayedView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecentlyPlayedView.swift; sourceTree = "<group>"; };
+		6EEB0E0B1BCCEC02E21A234F /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
+		791B0D8E28834A5D34E9FA93 /* SleepTimerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SleepTimerView.swift; sourceTree = "<group>"; };
+		8058065A2605621D9ACACE55 /* PlaylistPreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaylistPreviewView.swift; sourceTree = "<group>"; };
+		93B4300DF1688D223A2697AE /* Playlist.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Playlist.swift; sourceTree = "<group>"; };
+		9548F5CB54970A655782346A /* HapticManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HapticManager.swift; sourceTree = "<group>"; };
+		B2A9468FFD7CCB3F04EED038 /* LikeButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LikeButton.swift; sourceTree = "<group>"; };
+		B81D655E3DE40EE89C5400B4 /* EmptyStateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmptyStateView.swift; sourceTree = "<group>"; };
+		BD72DD7B62A4AC911BF749F6 /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
+		CAC504FA4E7BBC2BDCEBC5BD /* PlaylistsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaylistsView.swift; sourceTree = "<group>"; };
+		CC5BFAE5E936B767B033FB34 /* YTAudioPlayer.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = YTAudioPlayer.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		CD44B40105E0AC2CC5C0781B /* ErrorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErrorView.swift; sourceTree = "<group>"; };
+		CD9433711FA4B32991B869ED /* MiniPlayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MiniPlayer.swift; sourceTree = "<group>"; };
+		D353D6C05094B36F8EA15622 /* FullPlayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FullPlayer.swift; sourceTree = "<group>"; };
+		DC0F1A4A8D19C80A2DFBE1FB /* DownloadQueueView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadQueueView.swift; sourceTree = "<group>"; };
+		F26DE8F2D8B762F09FFAD4C5 /* ShimmerModifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShimmerModifier.swift; sourceTree = "<group>"; };
+		F2E26BF4B015550CCC0C308B /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		F89C2506A14768CB685B2A7C /* ViewExtensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewExtensions.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		468BB97A2F6AA30300CDE29B /* Sources */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = Sources; sourceTree = "<group>"; };
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXGroup section */
+		052F62264ACE5847C9690E2C /* DesignSystem */ = {
+			isa = PBXGroup;
+			children = (
+				9548F5CB54970A655782346A /* HapticManager.swift */,
+				F26DE8F2D8B762F09FFAD4C5 /* ShimmerModifier.swift */,
+				51554D239E59D64D0D95EDD0 /* Theme.swift */,
+				F89C2506A14768CB685B2A7C /* ViewExtensions.swift */,
+			);
+			path = DesignSystem;
+			sourceTree = "<group>";
+		};
+		11AFA6949CB68AF96A7DFB56 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				468B8D8C2F53EACC00CDE29B /* Components */,
+				468B8D932F53EACC00CDE29B /* Discover */,
+				468B8D9A2F53EACC00CDE29B /* Player */,
+				468B8DA02F53EACC00CDE29B /* Playlists */,
+				1A4D4641A6DFB5120002B115 /* ContentView.swift */,
+				BD72DD7B62A4AC911BF749F6 /* HomeView.swift */,
+				1AD3F94F37ADACD364BBCA1A /* LibraryView.swift */,
+				3981584A595276084E907877 /* MainContainerView.swift */,
+				0BFC375ECD06E998CB697145 /* QueueRestorer.swift */,
+				6AF72E449870436F01005365 /* RecentlyPlayedView.swift */,
+				4F66019926050AB739EEF25E /* SearchView.swift */,
+				AC08B4BDDD8B335844F6B329 /* Components */,
+				29DEB23538F1CA6348425BC2 /* Player */,
+				32EF5F0844EBF7DCEA6DA3AC /* Playlists */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		29DEB23538F1CA6348425BC2 /* Player */ = {
+			isa = PBXGroup;
+			children = (
+				DC0F1A4A8D19C80A2DFBE1FB /* DownloadQueueView.swift */,
+				D353D6C05094B36F8EA15622 /* FullPlayer.swift */,
+				18E15FD0563E96D55099054E /* LyricsView.swift */,
+				CD9433711FA4B32991B869ED /* MiniPlayer.swift */,
+				791B0D8E28834A5D34E9FA93 /* SleepTimerView.swift */,
+			);
+			path = Player;
+			sourceTree = "<group>";
+		};
+		2A5805C9EE6676DE1CD6F2D3 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				CC5BFAE5E936B767B033FB34 /* YTAudioPlayer.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		32EF5F0844EBF7DCEA6DA3AC /* Playlists */ = {
+			isa = PBXGroup;
+			children = (
+				18CB5E604384AA12AE84E2D5 /* AddToPlaylistSheet.swift */,
+				4CB0CB3A2ECFF5D7F29396A1 /* CreatePlaylistSheet.swift */,
+				38ADEC1060AD8D53A3241FFA /* PlaylistDetailView.swift */,
+				8058065A2605621D9ACACE55 /* PlaylistPreviewView.swift */,
+				CAC504FA4E7BBC2BDCEBC5BD /* PlaylistsView.swift */,
+			);
+			path = Playlists;
+			sourceTree = "<group>";
+		};
+		3C3E5929C8DDBBA3CD020D75 = {
+			isa = PBXGroup;
+			children = (
+				468BB95F2F6A9B0B00CDE29B /* YTAudioPlayer.xcdatamodeld */,
+				468BB97A2F6AA30300CDE29B /* Sources */,
+				A22DEF899D9FF4981C036CF4 /* YTAudioPlayer */,
+				2A5805C9EE6676DE1CD6F2D3 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		468B8D8C2F53EACC00CDE29B /* Components */ = {
+			isa = PBXGroup;
+			children = (
+				468B8D892F53EACC00CDE29B /* EmptyStateView.swift */,
+				468B8D8A2F53EACC00CDE29B /* ErrorView.swift */,
+				468B8D8B2F53EACC00CDE29B /* LikeButton.swift */,
+				468B8D8C2F53EACC00CDE29C /* VibeButton.swift */,
+				468B8D8D2F53EACC00CDE29D /* GenrePickerSheet.swift */,
+			);
+			path = Components;
+			sourceTree = "<group>";
+		};
+		468B8D932F53EACC00CDE29B /* Discover */ = {
+			isa = PBXGroup;
+			children = (
+				468B8D8D2F53EACC00CDE29B /* DiscoverView.swift */,
+				468B8D8E2F53EACC00CDE29B /* MoodBrowseSection.swift */,
+				468B8D8F2F53EACC00CDE29B /* NewReleasesSection.swift */,
+				468B8D902F53EACC00CDE29B /* RecentlyPlayedSection.swift */,
+				468B8D912F53EACC00CDE29B /* TrendingSection.swift */,
+				468B8D922F53EACC00CDE29B /* YourMixesSection.swift */,
+			);
+			path = Discover;
+			sourceTree = "<group>";
+		};
+		468B8D9A2F53EACC00CDE29B /* Player */ = {
+			isa = PBXGroup;
+			children = (
+				468B8D942F53EACC00CDE29B /* DownloadQueueView.swift */,
+				468B8D952F53EACC00CDE29B /* FullPlayer.swift */,
+				468B8D962F53EACC00CDE29B /* LyricsView.swift */,
+				468B8D972F53EACC00CDE29B /* MiniPlayer.swift */,
+				468B8D982F53EACC00CDE29B /* QueueView.swift */,
+				468B8D992F53EACC00CDE29B /* SleepTimerView.swift */,
+			);
+			path = Player;
+			sourceTree = "<group>";
+		};
+		468B8DA02F53EACC00CDE29B /* Playlists */ = {
+			isa = PBXGroup;
+			children = (
+				468B8D9B2F53EACC00CDE29B /* AddToPlaylistSheet.swift */,
+				468B8D9C2F53EACC00CDE29B /* CreatePlaylistSheet.swift */,
+				468B8D9D2F53EACC00CDE29B /* PlaylistDetailView.swift */,
+				468B8D9E2F53EACC00CDE29B /* PlaylistPreviewView.swift */,
+				468B8D9F2F53EACC00CDE29B /* PlaylistsView.swift */,
+			);
+			path = Playlists;
+			sourceTree = "<group>";
+		};
+		A22DEF899D9FF4981C036CF4 /* YTAudioPlayer */ = {
+			isa = PBXGroup;
+			children = (
+				1B89643747E78C4027FF9AD9 /* Assets.xcassets */,
+				F2E26BF4B015550CCC0C308B /* Info.plist */,
+				6EEB0E0B1BCCEC02E21A234F /* LaunchScreen.storyboard */,
+				0080BED852F91FC0AFA9DE17 /* YTAudioPlayerApp.swift */,
+				052F62264ACE5847C9690E2C /* DesignSystem */,
+				CE0536C22C903F7D3E743673 /* Models */,
+				11AFA6949CB68AF96A7DFB56 /* Views */,
+			);
+			path = YTAudioPlayer;
+			sourceTree = "<group>";
+		};
+		AC08B4BDDD8B335844F6B329 /* Components */ = {
+			isa = PBXGroup;
+			children = (
+				B81D655E3DE40EE89C5400B4 /* EmptyStateView.swift */,
+				CD44B40105E0AC2CC5C0781B /* ErrorView.swift */,
+				B2A9468FFD7CCB3F04EED038 /* LikeButton.swift */,
+			);
+			path = Components;
+			sourceTree = "<group>";
+		};
+		CE0536C22C903F7D3E743673 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				12DF773336B5A83BFF1FC347 /* PlayerState.swift */,
+				93B4300DF1688D223A2697AE /* Playlist.swift */,
+				2D823E6945F2F8CBC4462532 /* Track.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		1C1AD7A86C5BEA7222BCA2D5 /* YTAudioPlayer */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B4B7324CF2C7EB45E56DC126 /* Build configuration list for PBXNativeTarget "YTAudioPlayer" */;
+			buildPhases = (
+				3FB1536B0624B1DA7DDC96AB /* Sources */,
+				C65A144FFB569F1336B8306F /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				468BB97A2F6AA30300CDE29B /* Sources */,
+			);
+			name = YTAudioPlayer;
+			packageProductDependencies = (
+			);
+			productName = YTAudioPlayer;
+			productReference = CC5BFAE5E936B767B033FB34 /* YTAudioPlayer.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		C6D22BD0FE745FD63CB08F3D /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					1C1AD7A86C5BEA7222BCA2D5 = {
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = 4F669F91915D99B6FBC86A22 /* Build configuration list for PBXProject "YTAudioPlayer" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 3C3E5929C8DDBBA3CD020D75;
+			minimizedProjectReferenceProxies = 1;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				1C1AD7A86C5BEA7222BCA2D5 /* YTAudioPlayer */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		C65A144FFB569F1336B8306F /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				9D12BF87B1C1BD2F5F01A59A /* Assets.xcassets in Resources */,
+				C8BBF5B384454033D256EAA0 /* LaunchScreen.storyboard in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		3FB1536B0624B1DA7DDC96AB /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				7F18884C6472D54E69A88860 /* AddToPlaylistSheet.swift in Sources */,
+				31D763D1C31605E03A21E40A /* ContentView.swift in Sources */,
+				3C5431D4CD06B675A98D0183 /* CreatePlaylistSheet.swift in Sources */,
+				F1BDDD059138B2D12ACD1238 /* DownloadQueueView.swift in Sources */,
+				88A50F33382CF82BBEAD774A /* EmptyStateView.swift in Sources */,
+				CDB01CAE6DCC374351226883 /* ErrorView.swift in Sources */,
+				468BB9612F6A9B0B00CDE29B /* YTAudioPlayer.xcdatamodeld in Sources */,
+				A0479382B5B66EE7F526B8CA /* FullPlayer.swift in Sources */,
+				0B97B073B2BCBE37732CD3C4 /* HapticManager.swift in Sources */,
+				C3A812D628A613B24F1EEC30 /* HomeView.swift in Sources */,
+				D68E450CDE257229340947C7 /* LibraryView.swift in Sources */,
+				63C543D28F620E719F782C46 /* LikeButton.swift in Sources */,
+				3BB2A579043A9DD6436D840D /* LyricsView.swift in Sources */,
+				0BD64E5C60DB9B0C94498DF4 /* MainContainerView.swift in Sources */,
+				15C000EA5C3F4602E36A019B /* MiniPlayer.swift in Sources */,
+				ECD0697915EEBFC3863ACFD1 /* PlayerState.swift in Sources */,
+				971CD66E933CD6EBEBBC611E /* Playlist.swift in Sources */,
+				FCC18AB0C67C1A57062B9ADD /* PlaylistDetailView.swift in Sources */,
+				3AED7D7B7AFFE647BBE51BB6 /* PlaylistPreviewView.swift in Sources */,
+				B5A9F19389EDBC0B9918E9F3 /* PlaylistsView.swift in Sources */,
+				3DAD4F3A2463AF479C2B4AF3 /* QueueRestorer.swift in Sources */,
+				FDB9DC04823CF79D053C24CD /* RecentlyPlayedView.swift in Sources */,
+				E685DA1EA5DF80F815DB1AFF /* SearchView.swift in Sources */,
+				E67443988D45187EB8E996D4 /* ShimmerModifier.swift in Sources */,
+				468B8DA12F53EACC00CDE29B /* QueueView.swift in Sources */,
+				468B8DA22F53EACC00CDE29B /* EmptyStateView.swift in Sources */,
+				468B8DA32F53EACC00CDE29B /* PlaylistPreviewView.swift in Sources */,
+				468B8DA42F53EACC00CDE29B /* YourMixesSection.swift in Sources */,
+				468B8DA52F53EACC00CDE29B /* SleepTimerView.swift in Sources */,
+				468B8DA62F53EACC00CDE29B /* LyricsView.swift in Sources */,
+				468B8DA72F53EACC00CDE29B /* DownloadQueueView.swift in Sources */,
+				468B8DA82F53EACC00CDE29B /* MoodBrowseSection.swift in Sources */,
+				468B8DA92F53EACC00CDE29B /* TrendingSection.swift in Sources */,
+				468B8DAA2F53EACC00CDE29B /* AddToPlaylistSheet.swift in Sources */,
+				468B8DAB2F53EACC00CDE29B /* ErrorView.swift in Sources */,
+				468B8DAC2F53EACC00CDE29B /* LikeButton.swift in Sources */,
+				468B8DC02F53EACC00CDE29C /* VibeButton.swift in Sources */,
+				468B8DC12F53EACC00CDE29D /* GenrePickerSheet.swift in Sources */,
+				468B8DAD2F53EACC00CDE29B /* RecentlyPlayedSection.swift in Sources */,
+				468B8DAE2F53EACC00CDE29B /* CreatePlaylistSheet.swift in Sources */,
+				468B8DAF2F53EACC00CDE29B /* MiniPlayer.swift in Sources */,
+				468B8DB02F53EACC00CDE29B /* DiscoverView.swift in Sources */,
+				468B8DB12F53EACC00CDE29B /* PlaylistDetailView.swift in Sources */,
+				468B8DB22F53EACC00CDE29B /* NewReleasesSection.swift in Sources */,
+				468B8DB32F53EACC00CDE29B /* FullPlayer.swift in Sources */,
+				468B8DB42F53EACC00CDE29B /* PlaylistsView.swift in Sources */,
+				AC30D021A828DC129499800D /* SleepTimerView.swift in Sources */,
+				C41811001AF961E13FBD81D9 /* Theme.swift in Sources */,
+				767F84264D5A0147FDAF1576 /* Track.swift in Sources */,
+				4B0591D40CA1EDCFEA157A50 /* ViewExtensions.swift in Sources */,
+				E86A578CA391F693A6B3752B /* YTAudioPlayerApp.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		7A43D7CC3D8FCA564D070F58 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		B2685B5E5579D02BC2FF668E /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_PREVIEWS = YES;
+				INFOPLIST_FILE = YTAudioPlayer/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.ytaudioplayer.app;
+				SDKROOT = iphoneos;
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_VERSION = 5.9;
+				TARGETED_DEVICE_FAMILY = 1;
+				UILaunchStoryboardName = LaunchScreen;
+			};
+			name = Release;
+		};
+		C3EB5CB645D0C654A1F90970 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_PREVIEWS = YES;
+				INFOPLIST_FILE = YTAudioPlayer/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.ytaudioplayer.app;
+				SDKROOT = iphoneos;
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_VERSION = 5.9;
+				TARGETED_DEVICE_FAMILY = 1;
+				UILaunchStoryboardName = LaunchScreen;
+			};
+			name = Debug;
+		};
+		CCA6353D66A828E2C0C605F5 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		4F669F91915D99B6FBC86A22 /* Build configuration list for PBXProject "YTAudioPlayer" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				7A43D7CC3D8FCA564D070F58 /* Debug */,
+				CCA6353D66A828E2C0C605F5 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		B4B7324CF2C7EB45E56DC126 /* Build configuration list for PBXNativeTarget "YTAudioPlayer" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C3EB5CB645D0C654A1F90970 /* Debug */,
+				B2685B5E5579D02BC2FF668E /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCVersionGroup section */
+		468BB95F2F6A9B0B00CDE29B /* YTAudioPlayer.xcdatamodeld */ = {
+			isa = XCVersionGroup;
+			children = (
+				468BB9602F6A9B0B00CDE29B /* YTAudioPlayer.xcdatamodel */,
+			);
+			currentVersion = 468BB9602F6A9B0B00CDE29B /* YTAudioPlayer.xcdatamodel */;
+			path = YTAudioPlayer.xcdatamodeld;
+			sourceTree = "<group>";
+			versionGroupType = wrapper.xcdatamodel;
+		};
+/* End XCVersionGroup section */
+	};
+	rootObject = C6D22BD0FE745FD63CB08F3D /* Project object */;
+}

@@ -1,0 +1,93 @@
+# ========================
+# macOS
+# ========================
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+
+# ========================
+# Xcode / iOS
+# ========================
+xcuserdata/
+**/*.xcodeproj/xcuserdata/
+**/*.xcworkspace/xcuserdata/
+**/*.xcworkspace/xcshareddata/IDEWorkspaceChecks.plist
+**/*.xcworkspace/xcshareddata/*.xccheckout
+**/*.xcworkspace/xcshareddata/*.xcscmblueprint
+DerivedData/
+build/
+*.ipa
+*.dSYM.zip
+*.dSYM
+*.hmap
+*.moved-aside
+*.pbxuser
+!default.pbxuser
+*.mode1v3
+!default.mode1v3
+*.mode2v3
+!default.mode2v3
+*.perspectivev3
+!default.perspectivev3
+.swiftpm/xcode/xcuserdata/
+
+# ========================
+# Secrets & Local Config
+# ========================
+ios/Config/Local.xcconfig
+*.env
+.env.*
+!.env.example
+!.env.*.example
+oauth.json
+*.credentials.json
+secrets.json
+
+# ========================
+# Python (backend)
+# ========================
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+venv/
+.venv/
+env/
+ENV/
+*.egg-info/
+dist/
+.pytest_cache/
+.mypy_cache/
+*.so
+
+# ========================
+# Logs
+# ========================
+*.log
+server.log
+
+# ========================
+# Audio / Media files
+# ========================
+*.m4a
+*.webm
+*.mp4
+*.mp3
+*.part
+
+# ========================
+# AI Tool Directories
+# ========================
+.claude/
+.obsidian-memory/
+
+# ========================
+# IDE
+# ========================
+.vscode/
+.idea/
+*.swp
+*.swo

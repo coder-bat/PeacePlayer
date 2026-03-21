@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="1" systemVersion="11A491" minimumToolsVersion="Automatic" sourceLanguage="Swift" usedWithCloudKit="false" userDefinedModelVersionIdentifier="">
+    <entity name="CDTrack" representedClassName="CDTrack" syncable="YES">
+        <attribute name="album" attributeType="String" defaultValueString="Unknown Album"/>
+        <attribute name="artists" attributeType="Transformable" valueTransformerName="NSSecureUnarchiveFromData" customClassName="[String]"/>
+        <attribute name="createdAt" attributeType="Date" defaultDateTimeInterval="0" usesScalarValueType="NO"/>
+        <attribute name="durationSeconds" attributeType="Integer 32" defaultValueString="0" usesScalarValueType="YES"/>
+        <attribute name="isExplicit" attributeType="Boolean" defaultValueString="NO" usesScalarValueType="YES"/>
+        <attribute name="isLiked" attributeType="Boolean" defaultValueString="NO" usesScalarValueType="YES"/>
+        <attribute name="thumbnailURLs" attributeType="Transformable" valueTransformerName="NSSecureUnarchiveFromData" customClassName="[String]"/>
+        <attribute name="title" attributeType="String"/>
+        <attribute name="videoId" attributeType="String"/>
+        <attribute name="videoType" attributeType="String" defaultValueString="UNKNOWN"/>
+        <relationship name="download" optional="YES" maxCount="1" deletionRule="Cascade" destinationEntity="CDDownloadedTrack" inverseName="track" inverseEntity="CDDownloadedTrack"/>
+        <relationship name="playHistory" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="CDPlayHistory" inverseName="track" inverseEntity="CDPlayHistory"/>
+        <uniquenessConstraints>
+            <uniquenessConstraint>
+                <constraint value="videoId"/>
+            </uniquenessConstraint>
+        </uniquenessConstraints>
+    </entity>
+    <entity name="CDPlaylist" representedClassName="CDPlaylist" syncable="YES">
+        <attribute name="artworkSeed" attributeType="Integer 32" defaultValueString="0" usesScalarValueType="YES"/>
+        <attribute name="createdAt" attributeType="Date" defaultDateTimeInterval="0" usesScalarValueType="NO"/>
+        <attribute name="id" attributeType="UUID" usesScalarValueType="YES"/>
+        <attribute name="isSmart" attributeType="Boolean" defaultValueString="NO" usesScalarValueType="YES"/>
+        <attribute name="modifiedAt" attributeType="Date" defaultDateTimeInterval="0" usesScalarValueType="NO"/>
+        <attribute name="name" attributeType="String"/>
+        <attribute name="playlistDescription" optional="YES" attributeType="String"/>
+        <attribute name="smartCriteriaType" optional="YES" attributeType="String"/>
+        <attribute name="thumbnailURL" optional="YES" attributeType="String"/>
+        <attribute name="trackOrder" attributeType="Transformable" valueTransformerName="NSSecureUnarchiveFromData" customClassName="[String]"/>
+        <uniquenessConstraints>
+            <uniquenessConstraint>
+                <constraint value="id"/>
+            </uniquenessConstraint>
+        </uniquenessConstraints>
+    </entity>
+    <entity name="CDDownloadedTrack" representedClassName="CDDownloadedTrack" syncable="YES">
+        <attribute name="downloadedAt" attributeType="Date" defaultDateTimeInterval="0" usesScalarValueType="NO"/>
+        <attribute name="fileSize" attributeType="Integer 64" defaultValueString="0" usesScalarValueType="YES"/>
+        <attribute name="localPath" attributeType="String"/>
+        <attribute name="mimeType" attributeType="String" defaultValueString="audio/mp4"/>
+        <attribute name="quality" attributeType="String" defaultValueString="high"/>
+        <relationship name="track" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="CDTrack" inverseName="download" inverseEntity="CDTrack"/>
+    </entity>
+    <entity name="CDPlayHistory" representedClassName="CDPlayHistory" syncable="YES">
+        <attribute name="completed" attributeType="Boolean" defaultValueString="NO" usesScalarValueType="YES"/>
+        <attribute name="playedAt" attributeType="Date" defaultDateTimeInterval="0" usesScalarValueType="NO"/>
+        <attribute name="progress" attributeType="Double" defaultValueString="0.0" usesScalarValueType="YES"/>
+        <relationship name="track" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="CDTrack" inverseName="playHistory" inverseEntity="CDTrack"/>
+    </entity>
+    <entity name="CDUserStats" representedClassName="CDUserStats" syncable="YES">
+        <attribute name="lastUpdated" attributeType="Date" defaultDateTimeInterval="0" usesScalarValueType="NO"/>
+        <attribute name="totalListeningSeconds" attributeType="Double" defaultValueString="0" usesScalarValueType="YES"/>
+        <attribute name="tracksPlayedCount" attributeType="Integer 32" defaultValueString="0" usesScalarValueType="YES"/>
+    </entity>
+    <elements>
+        <element name="CDTrack" positionX="-63" positionY="-18" width="128" height="224"/>
+        <element name="CDPlaylist" positionX="-54" positionY="-9" width="128" height="194"/>
+        <element name="CDDownloadedTrack" positionX="-36" positionY="9" width="128" height="119"/>
+        <element name="CDPlayHistory" positionX="-18" positionY="27" width="128" height="89"/>
+        <element name="CDUserStats" positionX="0" positionY="45" width="128" height="74"/>
+    </elements>
+</model>

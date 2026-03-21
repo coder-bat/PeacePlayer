@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+
+# OAuth credentials (keep private!)
+oauth.json
+*.json
+
+# Downloads
+~/Music/YTAudio/
+*.m4a
+*.webm
+*.mp4
+*.part
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
