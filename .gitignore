@@ -92,3 +92,5 @@ server.log
 *.swp
 *.swo
 ios/YTAudioPlayer.xcodeproj/project.pbxproj
+ios/YTAudioPlayer.xcodeproj/project.pbxproj
+ios/Sources/APIService.swift
