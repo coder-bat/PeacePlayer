@@ -7,6 +7,7 @@
 
 import Foundation
 import Combine
+import CoreData
 
 /// Manages persistent user data including recently played, stats, and playback progress
 class DataManager: ObservableObject {
@@ -22,6 +23,7 @@ class DataManager: ObservableObject {
     private let defaults = UserDefaults.standard
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
+    private let persistence = PersistenceController.shared
 
     // Debounce timer for UserDefaults writes to reduce disk I/O
     private var progressSaveTimer: Timer?
@@ -86,6 +88,7 @@ class DataManager: ObservableObject {
         
         recentlyPlayed = updated
         saveRecentlyPlayed()
+        persistPlayHistory(for: track, playbackProgress: playbackProgress)
         
         // Update stats
         tracksPlayedCount += 1
@@ -131,11 +134,61 @@ class DataManager: ObservableObject {
     func addListeningTime(_ seconds: TimeInterval) {
         totalListeningSeconds += seconds
         saveStats()
+        persistListeningTime(seconds)
     }
     
     private func saveStats() {
         defaults.set(totalListeningSeconds, forKey: Keys.totalListeningSeconds)
         defaults.set(tracksPlayedCount, forKey: Keys.tracksPlayedCount)
+    }
+
+    private func persistPlayHistory(for track: Track, playbackProgress: Double) {
+        let context = persistence.newBackgroundContext()
+
+        context.perform {
+            let trackEntity = CDTrack.fetchOrCreate(videoId: track.videoId, context: context)
+            trackEntity.title = track.title
+            trackEntity.artists = track.artists
+            trackEntity.album = track.album
+            trackEntity.durationSeconds = Int32(track.durationSeconds)
+            trackEntity.thumbnailURLs = track.thumbnails.map { $0.url.absoluteString }
+            trackEntity.isExplicit = track.isExplicit
+            trackEntity.videoType = track.videoType
+            if trackEntity.value(forKey: "createdAt") == nil {
+                trackEntity.createdAt = Date()
+            }
+
+            _ = CDPlayHistory.create(
+                for: trackEntity,
+                progress: playbackProgress,
+                completed: playbackProgress >= 0.9,
+                context: context
+            )
+
+            let stats = CDUserStats.getOrCreate(context: context)
+            stats.incrementTracksPlayed()
+
+            do {
+                try context.save()
+            } catch {
+                print("❌ Failed to persist play history: \(error)")
+            }
+        }
+    }
+
+    private func persistListeningTime(_ seconds: TimeInterval) {
+        let context = persistence.newBackgroundContext()
+
+        context.perform {
+            let stats = CDUserStats.getOrCreate(context: context)
+            stats.addListeningTime(seconds)
+
+            do {
+                try context.save()
+            } catch {
+                print("❌ Failed to persist listening stats: \(error)")
+            }
+        }
     }
     
     func formattedListeningTime() -> String {

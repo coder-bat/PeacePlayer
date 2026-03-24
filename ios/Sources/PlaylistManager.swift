@@ -8,6 +8,7 @@
 import Foundation
 import Combine
 import SwiftUI
+import CoreData
 
 /// Manages all playlist operations and persistence
 class PlaylistManager: ObservableObject {
@@ -22,6 +23,7 @@ class PlaylistManager: ObservableObject {
     // MARK: - Private Properties
     
     private let dataManager = DataManager.shared
+    private let persistence = PersistenceController.shared
     private let defaults = UserDefaults.standard
     var cancellables = Set<AnyCancellable>()
     
@@ -213,11 +215,12 @@ class PlaylistManager: ObservableObject {
                 .map { $0.videoId }
             
         case .recentlyPlayed:
-            // Get from DataManager's recently played (last 7 days)
-            let cutoff = Date().addingTimeInterval(-7 * 24 * 60 * 60)
-            trackIds = dataManager.recentlyPlayed
-                .filter { $0.playedAt > cutoff }
-                .map { $0.videoId }
+            let recentTracks = recentHistoryTracks(
+                since: Date().addingTimeInterval(-7 * 24 * 60 * 60),
+                limit: criteria.limit
+            )
+            TrackStore.shared.saveTracks(recentTracks)
+            trackIds = recentTracks.map(\.videoId)
             
         case .mostPlayed:
             // Sort by play count from DataManager
@@ -245,6 +248,36 @@ class PlaylistManager: ObservableObject {
         }
         
         playlists[index].trackIds = trackIds
+    }
+
+    private func recentHistoryTracks(since cutoff: Date, limit: Int?) -> [Track] {
+        let context = persistence.viewContext
+        let request: NSFetchRequest<CDPlayHistory> = CDPlayHistory.fetchRequest()
+        request.sortDescriptors = [NSSortDescriptor(keyPath: \CDPlayHistory.playedAt, ascending: false)]
+        request.predicate = NSPredicate(format: "playedAt > %@", cutoff as NSDate)
+        request.fetchLimit = 250
+
+        do {
+            let results = try context.fetch(request)
+            var seenVideoIds = Set<String>()
+            var tracks: [Track] = []
+
+            for entry in results {
+                guard let cdTrack = entry.track else { continue }
+                guard seenVideoIds.insert(cdTrack.videoId).inserted else { continue }
+
+                tracks.append(cdTrack.toTrack)
+
+                if let limit, tracks.count >= limit {
+                    break
+                }
+            }
+
+            return tracks
+        } catch {
+            print("❌ Failed to load recent history tracks for smart playlist: \(error)")
+            return []
+        }
     }
     
     /// Call this when library loads to populate the Downloaded smart playlist

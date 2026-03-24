@@ -288,35 +288,66 @@ class DownloadManager: ObservableObject {
     }
 
     private func saveDownloadToCoreData(track: Track, fileURL: URL) {
-        let context = PersistenceController.shared.viewContext
+        // Use a background context for Core Data operations
+        let context = PersistenceController.shared.backgroundContext
 
-        // Create or update track
-        let cdTrack = CDTrack(context: context)
-        cdTrack.videoId = track.videoId
-        cdTrack.title = track.title
-        cdTrack.artists = track.artists
-        cdTrack.album = track.album
-        cdTrack.durationSeconds = Int32(track.durationSeconds)
-        cdTrack.thumbnailURLs = track.thumbnails.map { $0.url.absoluteString }
-        cdTrack.isExplicit = track.isExplicit
-        cdTrack.videoType = track.videoType
-        cdTrack.createdAt = Date()
-        cdTrack.isLiked = false
+        context.performAndWait {
+            do {
+                // Fetch existing track or create new one (fetch-or-create pattern)
+                let cdTrack: CDTrack
+                let trackRequest: NSFetchRequest<CDTrack> = CDTrack.fetchRequest()
+                trackRequest.predicate = NSPredicate(format: "videoId == %@", track.videoId)
+                trackRequest.fetchLimit = 1
 
-        // Create downloaded track record
-        let downloadedTrack = CDDownloadedTrack(context: context)
-        downloadedTrack.localPath = fileURL.path
-        downloadedTrack.fileSize = Int64((try? FileManager.default.attributesOfItem(atPath: fileURL.path)[.size] as? Int64) ?? 0)
-        downloadedTrack.mimeType = "audio/mp4"
-        downloadedTrack.quality = "high"
-        downloadedTrack.downloadedAt = Date()
-        downloadedTrack.track = cdTrack
+                if let existingTrack = try context.fetch(trackRequest).first {
+                    // Use existing track
+                    cdTrack = existingTrack
+                    print("📀 Using existing CDTrack: \(track.title)")
+                } else {
+                    // Create new track
+                    cdTrack = CDTrack(context: context)
+                    cdTrack.videoId = track.videoId
+                    cdTrack.title = track.title
+                    cdTrack.artists = track.artists
+                    cdTrack.album = track.album
+                    cdTrack.durationSeconds = Int32(track.durationSeconds)
+                    cdTrack.thumbnailURLs = track.thumbnails.map { $0.url.absoluteString }
+                    cdTrack.isExplicit = track.isExplicit
+                    cdTrack.videoType = track.videoType
+                    cdTrack.createdAt = Date()
+                    cdTrack.isLiked = false
+                    print("📀 Created new CDTrack: \(track.title)")
+                }
 
-        do {
-            try context.save()
-            print("✅ Saved download to Core Data: \(track.title)")
-        } catch {
-            print("❌ Failed to save download to Core Data: \(error)")
+                // Check if download record already exists
+                let downloadRequest: NSFetchRequest<CDDownloadedTrack> = CDDownloadedTrack.fetchRequest()
+                downloadRequest.predicate = NSPredicate(format: "track.videoId == %@", track.videoId)
+                downloadRequest.fetchLimit = 1
+
+                if let existingDownload = try context.fetch(downloadRequest).first {
+                    // Update existing download record
+                    existingDownload.localPath = fileURL.path
+                    existingDownload.fileSize = Int64((try? FileManager.default.attributesOfItem(atPath: fileURL.path)[.size] as? Int64) ?? 0)
+                    existingDownload.downloadedAt = Date()
+                    print("📀 Updated existing CDDownloadedTrack: \(track.title)")
+                } else {
+                    // Create new downloaded track record
+                    let downloadedTrack = CDDownloadedTrack(context: context)
+                    downloadedTrack.localPath = fileURL.path
+                    downloadedTrack.fileSize = Int64((try? FileManager.default.attributesOfItem(atPath: fileURL.path)[.size] as? Int64) ?? 0)
+                    downloadedTrack.mimeType = "audio/mp4"
+                    downloadedTrack.quality = "high"
+                    downloadedTrack.downloadedAt = Date()
+                    downloadedTrack.track = cdTrack
+                    print("📀 Created new CDDownloadedTrack: \(track.title)")
+                }
+
+                try context.save()
+                print("✅ Saved download to Core Data: \(track.title)")
+            } catch {
+                print("❌ Failed to save download to Core Data: \(error)")
+                context.rollback()
+            }
         }
     }
     
@@ -375,8 +406,17 @@ class DownloadManager: ObservableObject {
     }
     
     func isAlreadyDownloaded(_ track: Track) -> Bool {
-        // Check against local library
-        // This would need to be integrated with LibraryViewModel
-        return false
+        // Check Core Data for existing download
+        let context = PersistenceController.shared.viewContext
+        let request: NSFetchRequest<CDDownloadedTrack> = CDDownloadedTrack.fetchRequest()
+        request.predicate = NSPredicate(format: "track.videoId == %@", track.videoId)
+
+        do {
+            let count = try context.count(for: request)
+            return count > 0
+        } catch {
+            print("❌ Error checking if track is downloaded: \(error)")
+            return false
+        }
     }
 }

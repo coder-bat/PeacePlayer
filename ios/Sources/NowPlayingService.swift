@@ -10,6 +10,7 @@ import Foundation
 import MediaPlayer
 import Combine
 import UIKit
+import WidgetKit
 
 /// Service responsible for updating system Now Playing interface
 class NowPlayingService {
@@ -171,6 +172,22 @@ class NowPlayingService {
         } else {
             MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
         }
+
+        // Update shared state and reload all widget timelines
+        let progress = duration > 0 ? currentTime / duration : 0
+        let nextIdx = PlayerState.shared.currentIndex + 1
+        let nextTrack = nextIdx < PlayerState.shared.queue.count ? PlayerState.shared.queue[nextIdx].track : nil
+        SharedNowPlayingState.update(snapshot: NowPlayingSnapshot(
+            title: track.title,
+            artist: track.displayArtist,
+            artworkURLString: track.artworkURL?.absoluteString ?? "",
+            isPlaying: isPlaying,
+            progress: progress,
+            nextTitle: nextTrack?.title ?? "",
+            nextArtist: nextTrack?.displayArtist ?? "",
+            currentVolume: Float(PlayerState.shared.volume)
+        ))
+        WidgetSyncService.reloadAll()
 
         updateCommandAvailability()
     }

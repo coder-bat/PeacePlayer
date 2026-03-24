@@ -12,7 +12,9 @@
         <attribute name="videoId" attributeType="String"/>
         <attribute name="videoType" attributeType="String" defaultValueString="UNKNOWN"/>
         <relationship name="download" optional="YES" maxCount="1" deletionRule="Cascade" destinationEntity="CDDownloadedTrack" inverseName="track" inverseEntity="CDDownloadedTrack"/>
+        <relationship name="memory" optional="YES" maxCount="1" deletionRule="Cascade" destinationEntity="CDSongMemory" inverseName="track" inverseEntity="CDSongMemory"/>
         <relationship name="playHistory" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="CDPlayHistory" inverseName="track" inverseEntity="CDPlayHistory"/>
+        <relationship name="queueEntry" optional="YES" maxCount="1" deletionRule="Cascade" destinationEntity="CDPlaybackQueue" inverseName="track" inverseEntity="CDPlaybackQueue"/>
         <uniquenessConstraints>
             <uniquenessConstraint>
                 <constraint value="videoId"/>
@@ -36,6 +38,18 @@
             </uniquenessConstraint>
         </uniquenessConstraints>
     </entity>
+    <entity name="CDSongMemory" representedClassName="CDSongMemory" syncable="YES">
+        <attribute name="createdAt" attributeType="Date" defaultDateTimeInterval="0" usesScalarValueType="NO"/>
+        <attribute name="id" attributeType="UUID" usesScalarValueType="YES"/>
+        <attribute name="noteText" attributeType="String"/>
+        <attribute name="updatedAt" attributeType="Date" defaultDateTimeInterval="0" usesScalarValueType="NO"/>
+        <relationship name="track" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="CDTrack" inverseName="memory" inverseEntity="CDTrack"/>
+        <uniquenessConstraints>
+            <uniquenessConstraint>
+                <constraint value="id"/>
+            </uniquenessConstraint>
+        </uniquenessConstraints>
+    </entity>
     <entity name="CDDownloadedTrack" representedClassName="CDDownloadedTrack" syncable="YES">
         <attribute name="downloadedAt" attributeType="Date" defaultDateTimeInterval="0" usesScalarValueType="NO"/>
         <attribute name="fileSize" attributeType="Integer 64" defaultValueString="0" usesScalarValueType="YES"/>
@@ -50,6 +64,13 @@
         <attribute name="progress" attributeType="Double" defaultValueString="0.0" usesScalarValueType="YES"/>
         <relationship name="track" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="CDTrack" inverseName="playHistory" inverseEntity="CDTrack"/>
     </entity>
+    <entity name="CDPlaybackQueue" representedClassName="CDPlaybackQueue" syncable="YES">
+        <attribute name="addedAt" attributeType="Date" defaultDateTimeInterval="0" usesScalarValueType="NO"/>
+        <attribute name="isCurrent" attributeType="Boolean" defaultValueString="NO" usesScalarValueType="YES"/>
+        <attribute name="position" attributeType="Integer 32" defaultValueString="0" usesScalarValueType="YES"/>
+        <attribute name="streamUrl" optional="YES" attributeType="String"/>
+        <relationship name="track" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="CDTrack" inverseName="queueEntry" inverseEntity="CDTrack"/>
+    </entity>
     <entity name="CDUserStats" representedClassName="CDUserStats" syncable="YES">
         <attribute name="lastUpdated" attributeType="Date" defaultDateTimeInterval="0" usesScalarValueType="NO"/>
         <attribute name="totalListeningSeconds" attributeType="Double" defaultValueString="0" usesScalarValueType="YES"/>
@@ -58,8 +79,10 @@
     <elements>
         <element name="CDTrack" positionX="-63" positionY="-18" width="128" height="224"/>
         <element name="CDPlaylist" positionX="-54" positionY="-9" width="128" height="194"/>
+        <element name="CDSongMemory" positionX="-45" positionY="0" width="128" height="104"/>
         <element name="CDDownloadedTrack" positionX="-36" positionY="9" width="128" height="119"/>
         <element name="CDPlayHistory" positionX="-18" positionY="27" width="128" height="89"/>
+        <element name="CDPlaybackQueue" positionX="-9" positionY="36" width="128" height="119"/>
         <element name="CDUserStats" positionX="0" positionY="45" width="128" height="74"/>
     </elements>
 </model>

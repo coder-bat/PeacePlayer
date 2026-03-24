@@ -13,6 +13,8 @@ import CoreImage.CIFilterBuiltins
 
 struct FullPlayer: View {
     @ObservedObject private var playerState = PlayerState.shared
+    @ObservedObject private var playlistManager = PlaylistManager.shared
+    @ObservedObject private var songMemoryManager = SongMemoryManager.shared
     @Binding var isPresented: Bool
 
     private func dismiss() {
@@ -27,133 +29,235 @@ struct FullPlayer: View {
     @State private var showAirPlayPicker = false
     @State private var showAudioSettings = false
     @State private var showShareSheet = false
+    @State private var showSongMemory = false
     @State private var dominantColor: Color = .clear
     @State private var dragOffset: CGFloat = 0
     @State private var scrollAtTop: Bool = true
     @State private var showScrubberThumb = false
     @State private var scrubberHideTask: Task<Void, Never>? = nil
+    @State private var isTrackInfoExpanded = false
+    @State private var likePulse = false
+
+    private var currentTrack: Track? {
+        playerState.currentItem?.track
+    }
+
+    private var currentTrackIsLiked: Bool {
+        guard let trackId = currentTrack?.videoId else { return false }
+        return playlistManager.isLiked(trackId: trackId)
+    }
+
+    private var combinedTrackLabel: String {
+        guard let currentTrack else { return "" }
+        return "\(currentTrack.title) — \(currentTrack.displayArtist)"
+    }
 
     var body: some View {
-        ZStack {
-            // Background
-            Color.black.ignoresSafeArea()
+        GeometryReader { geo in
+            let isLandscape = geo.size.width > geo.size.height
 
-            // Dominant color wash (animated cross-dissolve on track change)
-            dominantColor
-                .opacity(0.25)
-                .ignoresSafeArea()
-                .animation(.easeInOut(duration: 0.8), value: dominantColor)
+            ZStack {
+                // Background
+                Color.black.ignoresSafeArea()
 
-            // Optional blur background from artwork
-            ArtworkBackground(url: playerState.currentItem?.track.artworkURL)
-            
-            // Main content
+                // Dominant color wash (animated cross-dissolve on track change)
+                dominantColor
+                    .opacity(0.25)
+                    .ignoresSafeArea()
+                    .animation(.easeInOut(duration: 0.8), value: dominantColor)
+
+                // Optional blur background from artwork
+                ArtworkBackground(url: playerState.currentItem?.track.artworkURL)
+
+                // Main content — portrait or landscape
+                if isLandscape {
+                    landscapeContent(geo: geo)
+                } else {
+                    portraitContent
+                }
+            }
+            .simultaneousGesture(
+                DragGesture()
+                    .onChanged { value in
+                        guard !isLandscape, scrollAtTop else { return }
+                        let height = value.translation.height
+                        if height > 0 {
+                            dragOffset = height * 0.85
+                        } else {
+                            dragOffset = height * 0.05
+                        }
+                    }
+                    .onEnded { value in
+                        guard !isLandscape, scrollAtTop else {
+                            withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
+                                dragOffset = 0
+                            }
+                            return
+                        }
+                        if value.translation.height > 100 || value.predictedEndTranslation.height > 250 {
+                            HapticManager.medium()
+                            dismiss()
+                        } else {
+                            withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
+                                dragOffset = 0
+                            }
+                        }
+                    }
+            )
+            .sheet(isPresented: $showQueue, onDismiss: { playerState.showQueue = false }) {
+                if #available(iOS 16.0, *) {
+                    QueueView()
+                        .presentationDetents([.medium, .large])
+                        .presentationDragIndicator(.visible)
+                } else {
+                    QueueView()
+                }
+            }
+            .onChange(of: playerState.showQueue) { shouldShow in
+                if shouldShow {
+                    // Small delay so the full player finishes its entry animation first
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                        showQueue = true
+                    }
+                }
+            }
+            .sheet(isPresented: $showLyrics) {
+                LyricsView()
+            }
+            .sheet(isPresented: $showSleepTimer) {
+                SleepTimerView()
+            }
+            .sheet(isPresented: $showAudioSettings) {
+                AudioSettingsView()
+            }
+            .sheet(isPresented: $showShareSheet) {
+                if let track = playerState.currentItem?.track {
+                    ShareSheet(track: track)
+                }
+            }
+            .sheet(isPresented: $showSongMemory) {
+                if let track = playerState.currentItem?.track {
+                    SongMemorySheet(track: track)
+                }
+            }
+            .offset(y: dragOffset)
+            .onAppear {
+                extractDominantColor()
+            }
+            .onChange(of: playerState.currentItem?.track.videoId) { _ in
+                extractDominantColor()
+                isTrackInfoExpanded = false
+            }
+        }
+    }
+
+    // MARK: - Portrait Layout
+    private var portraitContent: some View {
+        VStack(spacing: 0) {
+            topBar
+            ScrollView(showsIndicators: false) {
+                GeometryReader { geo in
+                    Color.clear.preference(
+                        key: FullPlayerScrollOffsetKey.self,
+                        value: geo.frame(in: .named("fullPlayerScroll")).minY
+                    )
+                }
+                .frame(height: 0)
+
+                VStack(spacing: 10) {
+                    artworkSection
+                        .padding(.top, 6)
+                    trackInfoSection
+                    playbackControlsSection
+                    VolumeSlider()
+                        .padding(.horizontal, 8)
+                    moreActionsRow
+                    Spacer(minLength: 40)
+                }
+                .padding(.horizontal, 24)
+            }
+            .coordinateSpace(name: "fullPlayerScroll")
+            .onPreferenceChange(FullPlayerScrollOffsetKey.self) { value in
+                scrollAtTop = value >= -10
+            }
+        }
+    }
+
+    // MARK: - Landscape Layout
+    @ViewBuilder
+    private func landscapeContent(geo: GeometryProxy) -> some View {
+        let artworkSize = min(geo.size.height - 80, geo.size.width * 0.4 - 32)
+
+        HStack(spacing: 0) {
+            // Left column: dismiss button + centered artwork
             VStack(spacing: 0) {
-                // Top bar with drag handle
-                topBar
-
-                ScrollView(showsIndicators: false) {
-                    // Scroll-position tracker (zero-height, at top of content)
-                    GeometryReader { geo in
-                        Color.clear.preference(
-                            key: FullPlayerScrollOffsetKey.self,
-                            value: geo.frame(in: .named("fullPlayerScroll")).minY
-                        )
-                    }
-                    .frame(height: 0)
-
-                    VStack(spacing: 24) {
-                        // Large Artwork
-                        artworkSection
-                            .padding(.top, 10)
-                        
-                        // Track Info with Like button
-                        trackInfoSection
-                        
-                        // Progress Bar
-                        progressSection
-                        
-                        // Primary Controls (Previous/Play/Next)
-                        primaryControlsSection
-                            .padding(.vertical, 10)
-                        
-                        // Secondary Controls Row - organized in one line
-                        secondaryControlsRow
-
-                        // Volume Control
-                        VolumeSlider()
-                            .padding(.horizontal, 8)
-
-                        // More Actions - Lyrics, Share, AirPlay
-                        moreActionsRow
-                        
-                        Spacer(minLength: 40)
-                    }
-                    .padding(.horizontal, 24)
+                Button(action: dismiss) {
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.7))
+                        .padding(20)
                 }
-                .coordinateSpace(name: "fullPlayerScroll")
-                .onPreferenceChange(FullPlayerScrollOffsetKey.self) { value in
-                    scrollAtTop = value >= -10
-                }
-            }
-        }
-        .simultaneousGesture(
-            DragGesture()
-                .onChanged { value in
-                    guard scrollAtTop else { return }
-                    let height = value.translation.height
-                    if height > 0 {
-                        dragOffset = height * 0.85
-                    } else {
-                        dragOffset = height * 0.05
-                    }
-                }
-                .onEnded { value in
-                    guard scrollAtTop else {
-                        withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
-                            dragOffset = 0
-                        }
-                        return
-                    }
-                    if value.translation.height > 100 || value.predictedEndTranslation.height > 250 {
-                        HapticManager.medium()
-                        dismiss()
-                    } else {
-                        withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
-                            dragOffset = 0
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                Spacer()
+
+                ZStack {
+                    ArtworkImage(
+                        url: playerState.currentItem?.track.artworkURL,
+                        size: artworkSize
+                    )
+                    if playerState.playbackState.isLoading {
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(Color.black.opacity(0.5))
+                        VStack(spacing: 16) {
+                            ProgressView()
+                                .scaleEffect(1.5)
+                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                            Text("Loading...")
+                                .font(.subheadline)
+                                .foregroundColor(.white)
                         }
                     }
                 }
-        )
-        .sheet(isPresented: $showQueue) {
-            if #available(iOS 16.0, *) {
-                QueueView()
-                    .presentationDetents([.medium, .large])
-                    .presentationDragIndicator(.visible)
-            } else {
-                QueueView()
+                .frame(width: artworkSize, height: artworkSize)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(currentTrackIsLiked ? Color.red.opacity(0.55) : Color.clear, lineWidth: currentTrackIsLiked ? 1.5 : 0)
+                )
+                .shadow(
+                    color: currentTrackIsLiked ? Color.red.opacity(likePulse ? 0.45 : 0.22) : .black.opacity(0.3),
+                    radius: currentTrackIsLiked ? (likePulse ? 26 : 18) : 20,
+                    x: 0,
+                    y: 10
+                )
+                .scaleEffect(playerState.playbackState.isPlaying ? 1.0 : 0.94)
+                .animation(.spring(response: 0.3, dampingFraction: 0.8), value: playerState.playbackState.isPlaying)
+                .animation(.easeInOut(duration: 0.25), value: currentTrackIsLiked)
+                .animation(.easeInOut(duration: 0.25), value: likePulse)
+                .onTapGesture(count: 2) {
+                    toggleCurrentTrackLike()
+                }
+
+                Spacer()
             }
-        }
-        .sheet(isPresented: $showLyrics) {
-            LyricsView()
-        }
-        .sheet(isPresented: $showSleepTimer) {
-            SleepTimerView()
-        }
-        .sheet(isPresented: $showAudioSettings) {
-            AudioSettingsView()
-        }
-        .sheet(isPresented: $showShareSheet) {
-            if let track = playerState.currentItem?.track {
-                ShareSheet(track: track)
+            .frame(width: geo.size.width * 0.42)
+
+            // Right column: all controls in a scrollable stack
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 18) {
+                    trackInfoSection
+                    playbackControlsSection
+                    VolumeSlider()
+                        .padding(.horizontal, 8)
+                    moreActionsRow
+                    Spacer(minLength: 16)
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 12)
+                .padding(.bottom, 16)
             }
-        }
-        .offset(y: dragOffset)
-        .onAppear {
-            extractDominantColor()
-        }
-        .onChange(of: playerState.currentItem?.track.videoId) { _ in
-            extractDominantColor()
+            .frame(maxWidth: .infinity)
         }
     }
 
@@ -237,10 +341,24 @@ struct FullPlayer: View {
             }
             .frame(width: size, height: size)
             .clipShape(RoundedRectangle(cornerRadius: 12))
-            .shadow(color: Color.black.opacity(0.3), radius: 20, x: 0, y: 10)
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(currentTrackIsLiked ? Color.red.opacity(0.55) : Color.clear, lineWidth: currentTrackIsLiked ? 1.5 : 0)
+            )
+            .shadow(
+                color: currentTrackIsLiked ? Color.red.opacity(likePulse ? 0.45 : 0.22) : Color.black.opacity(0.3),
+                radius: currentTrackIsLiked ? (likePulse ? 26 : 18) : 20,
+                x: 0,
+                y: 10
+            )
             .scaleEffect(playerState.playbackState.isPlaying ? 1.0 : 0.94)
             .animation(.spring(response: 0.3, dampingFraction: 0.8), value: playerState.playbackState.isPlaying)
+            .animation(.easeInOut(duration: 0.25), value: currentTrackIsLiked)
+            .animation(.easeInOut(duration: 0.25), value: likePulse)
             .frame(maxWidth: .infinity, alignment: .center)
+            .onTapGesture(count: 2) {
+                toggleCurrentTrackLike()
+            }
         }
         .aspectRatio(1, contentMode: .fit)
     }
@@ -248,19 +366,29 @@ struct FullPlayer: View {
     // MARK: - Track Info
     private var trackInfoSection: some View {
         VStack(spacing: 8) {
-            Text(playerState.currentItem?.track.title ?? "")
-                .font(.system(size: 22, weight: .bold))
-                .foregroundColor(.white)
-                .lineLimit(1)
-                .multilineTextAlignment(.center)
-            
-            HStack(spacing: 8) {
-                Text(playerState.currentItem?.track.displayArtist ?? "")
-                    .font(.system(size: 16))
-                    .foregroundColor(.gray)
-                    .lineLimit(1)
-                
-                LikeButton(trackId: playerState.currentItem?.track.videoId)
+            Button {
+                withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
+                    isTrackInfoExpanded.toggle()
+                }
+            } label: {
+                Text(combinedTrackLabel)
+                    .font(.system(size: 21, weight: .bold))
+                    .foregroundColor(.white)
+                    .lineLimit(isTrackInfoExpanded ? 3 : 1)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.plain)
+            .disabled(currentTrack == nil)
+
+            if let memory = songMemoryManager.memory(for: currentTrack) {
+                Button {
+                    HapticManager.light()
+                    showSongMemory = true
+                } label: {
+                    SongMemoryBadge(text: memory.previewText)
+                }
+                .buttonStyle(.plain)
             }
         }
         .padding(.horizontal, 20)
@@ -268,7 +396,7 @@ struct FullPlayer: View {
     
     // MARK: - Progress Section
     private var progressSection: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: 4) {
             // Progress bar
             GeometryReader { geometry in
                 ZStack(alignment: .leading) {
@@ -333,10 +461,19 @@ struct FullPlayer: View {
             }
         }
     }
+
+    private var playbackControlsSection: some View {
+        VStack(spacing: 8) {
+            progressSection
+            primaryControlsSection
+                .padding(.bottom, 6)
+            secondaryControlsRow
+        }
+    }
     
     // MARK: - Primary Controls
     private var primaryControlsSection: some View {
-        HStack(spacing: 40) {
+        HStack(spacing: 34) {
             // Previous
             PlayerControlButton(
                 icon: "backward.fill",
@@ -388,7 +525,24 @@ struct FullPlayer: View {
             )
         }
     }
-    
+
+    private func toggleCurrentTrackLike() {
+        guard let trackId = currentTrack?.videoId else { return }
+
+        HapticManager.medium()
+        playlistManager.toggleLike(trackId: trackId)
+
+        withAnimation(.easeInOut(duration: 0.18)) {
+            likePulse = true
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.28) {
+            withAnimation(.easeInOut(duration: 0.22)) {
+                likePulse = false
+            }
+        }
+    }
+
     // MARK: - Secondary Controls Row (Shuffle, Repeat, Queue, Sleep)
     private var secondaryControlsRow: some View {
         HStack(spacing: 0) {
@@ -444,7 +598,7 @@ struct FullPlayer: View {
         .cornerRadius(12)
     }
     
-    // MARK: - More Actions Row (Lyrics, Audio, Share, AirPlay)
+    // MARK: - More Actions Row (Lyrics, Memory, Audio, Share, AirPlay)
     private var moreActionsRow: some View {
         HStack(spacing: 0) {
             // Lyrics
@@ -454,6 +608,15 @@ struct FullPlayer: View {
                 action: {
                     HapticManager.light()
                     showLyrics = true
+                }
+            )
+
+            MoreActionButton(
+                icon: songMemoryManager.hasMemory(for: playerState.currentItem?.track) ? "sparkles.rectangle.stack.fill" : "square.and.pencil",
+                title: "Memory",
+                action: {
+                    HapticManager.light()
+                    showSongMemory = true
                 }
             )
             

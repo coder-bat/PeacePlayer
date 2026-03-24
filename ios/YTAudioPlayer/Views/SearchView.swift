@@ -24,31 +24,92 @@ struct SearchView: View {
     @State private var selectedYouTubePlaylist: YouTubePlaylist?
     @State private var activeFilter: SearchFilter = .all
     @State private var cancellables = Set<AnyCancellable>()
-    
+    @FocusState private var isSearchFocused: Bool
+
     var body: some View {
         NavigationView {
-            ZStack {
-                Theme.cyberBackground.ignoresSafeArea()
+            VStack(spacing: 0) {
+                // Custom header + search bar
+                VStack(spacing: 12) {
+                    HStack {
+                        Text("Search")
+                            .font(.system(size: 24, weight: .bold, design: .monospaced))
+                            .foregroundColor(.white)
+                            .shadow(color: Color.cyberCyan.opacity(0.5), radius: 10, x: 0, y: 0)
+                        Spacer()
+                    }
+                    .padding(.horizontal)
 
-                if viewModel.isLoading {
-                    skeletonLoadingView
-                } else if viewModel.results.isEmpty && viewModel.playlistResults.isEmpty {
-                    emptyStateView
-                } else {
-                    resultsListView
+                    // Cyberpunk search input
+                    HStack(spacing: 12) {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 15, weight: .medium))
+                            .foregroundColor(isSearchFocused || !searchText.isEmpty ? .cyberCyan : .cyberDim)
+
+                        TextField("", text: $searchText,
+                                  prompt: Text("FIND MUSIC...")
+                                      .foregroundColor(Color.cyberDim)
+                                      .font(.system(size: 15, design: .monospaced)))
+                            .foregroundColor(.white)
+                            .font(.system(size: 15, design: .monospaced))
+                            .focused($isSearchFocused)
+                            .submitLabel(.search)
+                            .autocorrectionDisabled()
+                            .onSubmit {
+                                guard !searchText.isEmpty else { return }
+                                HapticManager.medium()
+                                viewModel.search(query: searchText)
+                                isSearchFocused = false
+                            }
+
+                        if !searchText.isEmpty {
+                            Button {
+                                searchText = ""
+                                viewModel.clearSearch()
+                                activeFilter = .all
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.system(size: 16))
+                                    .foregroundColor(.cyberDim)
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .background(Color.cyberSurface)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(
+                                isSearchFocused || !searchText.isEmpty
+                                    ? Color.cyberCyan.opacity(0.5)
+                                    : Color.cyberDim.opacity(0.3),
+                                lineWidth: 1
+                            )
+                    )
+                    .cornerRadius(12)
+                    .padding(.horizontal)
+                    .animation(.easeInOut(duration: 0.2), value: isSearchFocused)
+                }
+                .padding(.top, 8)
+                .padding(.bottom, 12)
+                .background(Theme.cyberBackground)
+
+                ZStack {
+                    Theme.cyberBackground.ignoresSafeArea()
+
+                    if viewModel.isLoading {
+                        skeletonLoadingView
+                    } else if viewModel.results.isEmpty && viewModel.playlistResults.isEmpty {
+                        emptyStateView
+                    } else {
+                        resultsListView
+                    }
                 }
             }
-            .navigationTitle("Search Music")
+            .background(Theme.cyberBackground.ignoresSafeArea())
+            .navigationTitle("")
+            .navigationBarHidden(true)
             .preferredColorScheme(.dark)
-            .searchable(
-                text: $searchText,
-                placement: .navigationBarDrawer(displayMode: .always),
-                prompt: "Search songs & playlists..."
-            )
-            .onSubmit(of: .search) {
-                HapticManager.medium()
-                viewModel.search(query: searchText)
-            }
             .onAppear {
                 viewModel.refreshDownloadedIds()
                 UITableView.appearance().backgroundColor = .clear
@@ -312,21 +373,9 @@ struct SearchView: View {
                 .padding(.top, 8)
             }
         } else {
-            // Initial state with genres
+            // Initial state
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 24) {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 60))
-                        .foregroundColor(.cyberCyan.opacity(0.5))
-
-                    Text("Search Music")
-                        .font(.title2)
-                        .fontWeight(.bold)
-                        .foregroundColor(.white)
-
-                    Text("Find songs and playlists from YouTube Music")
-                        .foregroundColor(.cyberDim)
-
                     // Genre quick picks
                     VStack(alignment: .leading, spacing: 12) {
                         Text("BROWSE BY GENRE")
@@ -362,11 +411,11 @@ struct SearchView: View {
                         }
                         .padding(.horizontal)
                     }
-                    .padding(.top, 10)
+                    .padding(.top, 4)
 
                     // Recent searches
                     if !viewModel.recentSearches.isEmpty {
-                        VStack(alignment: .leading, spacing: 12) {
+                        VStack(alignment: .leading, spacing: 8) {
                             Text("RECENT SEARCHES")
                                 .font(.system(size: 11, weight: .bold, design: .monospaced))
                                 .foregroundColor(.cyberDim)
@@ -377,21 +426,39 @@ struct SearchView: View {
                                     searchText = query
                                     viewModel.search(query: query)
                                 }) {
-                                    HStack {
+                                    HStack(spacing: 12) {
                                         Image(systemName: "clock.arrow.circlepath")
+                                            .font(.system(size: 14))
                                             .foregroundColor(.cyberCyan)
+                                            .frame(width: 20)
+
                                         Text(query)
+                                            .font(.system(size: 14, design: .monospaced))
                                             .foregroundColor(.white)
+
                                         Spacer()
+
+                                        Image(systemName: "arrow.up.left")
+                                            .font(.system(size: 12))
+                                            .foregroundColor(.cyberDim)
                                     }
-                                    .padding(.vertical, 8)
+                                    .padding(.horizontal, 14)
+                                    .padding(.vertical, 12)
+                                    .background(Color.cyberSurface)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 10)
+                                            .stroke(Color.cyberCyan.opacity(0.15), lineWidth: 1)
+                                    )
+                                    .cornerRadius(10)
                                 }
+                                .buttonStyle(.plain)
+                                .padding(.horizontal)
                             }
                         }
-                        .padding(.horizontal, 32)
                     }
                 }
-                .padding(.horizontal)
+                .padding(.top, 4)
+                .padding(.bottom, 80)
             }
         }
     }

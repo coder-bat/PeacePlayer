@@ -691,40 +691,90 @@ struct AllRecentlyPlayedView: View {
             ZStack {
                 Color.cyberBackground.ignoresSafeArea()
 
-                List {
-                    ForEach(viewModel.recentlyPlayed) { track in
-                        Button {
-                            viewModel.playTrack(track)
-                        } label: {
-                            HStack(spacing: 12) {
-                                CachedAsyncImage(url: track.artworkURL) {
+                VStack(spacing: 0) {
+                    // Play / Shuffle action buttons
+                    if !viewModel.recentlyPlayed.isEmpty {
+                        HStack(spacing: 16) {
+                            Button(action: {
+                                HapticManager.medium()
+                                viewModel.playTrack(viewModel.recentlyPlayed[0])
+                            }) {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "play.fill")
+                                        .font(.system(size: 16, weight: .semibold))
+                                    Text("PLAY")
+                                        .font(.system(size: 14, weight: .bold, design: .monospaced))
+                                }
+                                .foregroundColor(.cyberBackground)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 48)
+                                .background(Color.cyberCyan)
+                                .cornerRadius(8)
+                                .shadow(color: Color.cyberCyan.opacity(0.5), radius: 12, x: 0, y: 0)
+                            }
+
+                            Button(action: {
+                                HapticManager.medium()
+                                let shuffled = viewModel.recentlyPlayed.shuffled()
+                                viewModel.playTrack(shuffled[0])
+                            }) {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "shuffle")
+                                        .font(.system(size: 16, weight: .semibold))
+                                    Text("SHUFFLE")
+                                        .font(.system(size: 14, weight: .bold, design: .monospaced))
+                                }
+                                .foregroundColor(.cyberCyan)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 48)
+                                .background(Color.cyberSurface)
+                                .overlay(
                                     RoundedRectangle(cornerRadius: 8)
-                                        .fill(Color.cyberDim.opacity(0.3))
-                                }
-                                .frame(width: 50, height: 50)
-                                .clipShape(RoundedRectangle(cornerRadius: 8))
-
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(track.title)
-                                        .font(.system(size: 16, weight: .medium))
-                                        .foregroundColor(.white)
-                                        .lineLimit(1)
-
-                                    Text(track.displayArtist)
-                                        .font(.system(size: 14))
-                                        .foregroundColor(.cyberDim)
-                                        .lineLimit(1)
-                                }
-
-                                Spacer()
+                                        .stroke(Color.cyberCyan.opacity(0.5), lineWidth: 1)
+                                )
+                                .cornerRadius(8)
                             }
                         }
-                        .buttonStyle(.plain)
-                        .listRowBackground(Color.cyberSurface)
+                        .padding(.horizontal)
+                        .padding(.vertical, 12)
+                        .background(Color.cyberBackground)
                     }
+
+                    List {
+                        ForEach(viewModel.recentlyPlayed) { track in
+                            Button {
+                                viewModel.playTrack(track)
+                            } label: {
+                                HStack(spacing: 12) {
+                                    CachedAsyncImage(url: track.artworkURL) {
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .fill(Color.cyberDim.opacity(0.3))
+                                    }
+                                    .frame(width: 50, height: 50)
+                                    .clipShape(RoundedRectangle(cornerRadius: 8))
+
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(track.title)
+                                            .font(.system(size: 16, weight: .medium))
+                                            .foregroundColor(.white)
+                                            .lineLimit(1)
+
+                                        Text(track.displayArtist)
+                                            .font(.system(size: 14))
+                                            .foregroundColor(.cyberDim)
+                                            .lineLimit(1)
+                                    }
+
+                                    Spacer()
+                                }
+                            }
+                            .buttonStyle(.plain)
+                            .listRowBackground(Color.cyberSurface)
+                        }
+                    }
+                    .listStyle(.plain)
+                    .background(Color.cyberBackground)
                 }
-                .listStyle(.plain)
-                .background(Color.cyberBackground)
             }
             .navigationTitle("Recently Played")
             .navigationBarTitleDisplayMode(.inline)

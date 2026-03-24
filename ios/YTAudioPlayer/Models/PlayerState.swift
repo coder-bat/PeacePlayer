@@ -245,19 +245,29 @@ class PlayerState: ObservableObject {
     // MARK: - Queue Restoration
 
     private func restoreQueue() {
-        let savedQueue = dataManager.loadQueue()
-        guard !savedQueue.isEmpty else { return }
+        // Use PlaybackQueueManager to restore queue with fresh stream URLs
+        PlaybackQueueManager.shared.restoreQueue { [weak self] items in
+            guard let self = self, !items.isEmpty else { return }
 
-        // Convert saved snapshots to QueueItems
-        // Note: We can't restore stream URLs as they expire, so we'll need to refetch
-        // For now, we just restore the queue metadata and mark as needing refresh
+            DispatchQueue.main.async {
+                self.queue = items
+                self.currentIndex = PlaybackQueueManager.shared.getSavedCurrentIndex()
 
-        // Actually, we can't restore with expired URLs, so we'll just clear the saved queue
-        // In a more sophisticated implementation, we could store videoIds and refetch on restore
+                // Clamp index to valid range
+                if self.currentIndex >= items.count {
+                    self.currentIndex = 0
+                }
 
-        // For now, let's clear the saved queue since stream URLs expire
-        // A proper implementation would require storing videoIds and re-fetching stream URLs
-        dataManager.clearSavedQueue()
+                print("📱 Restored queue with \(items.count) items, current index: \(self.currentIndex)")
+
+                // Restore the current item without auto-playing
+                if self.currentIndex >= 0 && self.currentIndex < items.count {
+                    let currentItem = items[self.currentIndex]
+                    self.currentItem = currentItem
+                    self.expectedDuration = Double(currentItem.track.durationSeconds)
+                }
+            }
+        }
     }
     
     /// Restores playback state from saved data
@@ -346,10 +356,10 @@ class PlayerState: ObservableObject {
         
         // Add to recently played
         dataManager.addToRecentlyPlayed(item.track)
-        
-        // Save queue state
-        dataManager.saveQueue(queue)
-        
+        NotificationCenter.default.post(name: .trackPlayed, object: nil)
+
+        // Note: PlaybackQueueManager auto-saves queue changes, no need to manually save
+
         // Create player item
         print("🔊 Creating URL from streamUrl...")
         guard let url = URL(string: item.streamUrl) else {
@@ -902,6 +912,7 @@ class PlayerState: ObservableObject {
         
         // Add to recently played
         dataManager.addToRecentlyPlayed(item.track)
+        NotificationCenter.default.post(name: .trackPlayed, object: nil)
     }
     
     private var isPreparingNextTrack = false

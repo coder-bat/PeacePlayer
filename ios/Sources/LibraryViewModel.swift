@@ -81,6 +81,20 @@ class LibraryViewModel: ObservableObject {
         }
     }
 
+    /// Returns tracks filtered by search query
+    func filteredTracks(searchQuery: String) -> [DownloadedTrackItem] {
+        let query = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !query.isEmpty else {
+            return sortedTracks
+        }
+
+        return sortedTracks.filter { track in
+            track.title.lowercased().contains(query) ||
+            track.artist.lowercased().contains(query) ||
+            track.album.lowercased().contains(query)
+        }
+    }
+
     init() {
         loadLibrary()
 
@@ -100,7 +114,26 @@ class LibraryViewModel: ObservableObject {
 
         do {
             let results = try persistence.viewContext.fetch(request)
-            tracks = results.map { DownloadedTrackItem(from: $0) }
+
+            // Debug logging
+            print("📚 Library fetch: \(results.count) downloaded track records found")
+            for download in results {
+                let trackInfo = download.track
+                let fileExists = FileManager.default.fileExists(atPath: download.localPath)
+                print("  - \(trackInfo?.title ?? "Unknown") (videoId: \(trackInfo?.videoId ?? "nil")) - File exists: \(fileExists)")
+            }
+
+            // Filter out records with missing files or invalid data
+            tracks = results.compactMap { download in
+                // Skip if no track relationship
+                guard download.track != nil else {
+                    print("⚠️ Skipping download with no track relationship: \(download.localPath)")
+                    return nil
+                }
+                return DownloadedTrackItem(from: download)
+            }
+
+            print("✅ Loaded \(tracks.count) valid tracks into library")
             isLoading = false
         } catch {
             print("❌ Error loading library: \(error)")

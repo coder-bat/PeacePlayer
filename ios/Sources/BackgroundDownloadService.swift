@@ -38,6 +38,18 @@ class BackgroundDownloadService: NSObject {
         config.isDiscretionary = false
         config.sessionSendsLaunchEvents = true
 
+        // Performance optimizations for faster downloads
+        config.timeoutIntervalForRequest = 60  // 1 minute for initial connection
+        config.timeoutIntervalForResource = 600  // 10 minutes for complete download
+        config.waitsForConnectivity = true
+        config.allowsCellularAccess = true
+        config.allowsConstrainedNetworkAccess = true
+        config.allowsExpensiveNetworkAccess = true
+
+        // Increase network performance
+        config.requestCachePolicy = .reloadIgnoringLocalCacheData
+        config.urlCache = nil  // Disable URL cache for streaming downloads
+
         session = URLSession(configuration: config, delegate: self, delegateQueue: nil)
     }
 
@@ -127,7 +139,7 @@ class BackgroundDownloadService: NSObject {
     func deleteDownloadedTrack(videoId: String) {
         let context = PersistenceController.shared.viewContext
         let request: NSFetchRequest<CDDownloadedTrack> = CDDownloadedTrack.fetchRequest()
-        request.predicate = NSPredicate(format: "videoId == %@", videoId)
+        request.predicate = NSPredicate(format: "track.videoId == %@", videoId)
 
         do {
             let results = try context.fetch(request)

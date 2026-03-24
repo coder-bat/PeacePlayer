@@ -13,6 +13,7 @@ struct PlaylistDetailView: View {
     @StateObject private var playerState = PlayerState.shared
     @StateObject private var trackStore = TrackStore.shared
     @StateObject private var downloadManager = DownloadManager.shared
+    @ObservedObject private var songMemoryManager = SongMemoryManager.shared
     @State private var isEditing = false
     @State private var showDeleteConfirmation = false
     @State private var showRenameSheet = false
@@ -20,6 +21,7 @@ struct PlaylistDetailView: View {
     @State private var missingTrackIds: [String] = []
     @State private var showAddToPlaylistSheet = false
     @State private var trackToAdd: Track?
+    @State private var memoryTrack: Track?
     @State private var scrollOffset: CGFloat = 0
     @Environment(\.dismiss) private var dismiss
 
@@ -144,6 +146,7 @@ struct PlaylistDetailView: View {
                                             isEditing: isEditing,
                                             downloadTask: downloadManager.taskForTrack(track),
                                             isDownloaded: downloadManager.taskForTrack(track)?.status == .completed,
+                                            hasMemory: songMemoryManager.hasMemory(for: track),
                                             onPlay: { playTrack(track) },
                                             onDownload: {
                                                 if let task = downloadManager.taskForTrack(track), task.status.isActive {
@@ -158,6 +161,7 @@ struct PlaylistDetailView: View {
                                                 trackToAdd = track
                                                 showAddToPlaylistSheet = true
                                             },
+                                            onEditMemory: { openSongMemory(for: track) },
                                             onDelete: { deleteTrack(track) }
                                         )
                                     }
@@ -294,6 +298,14 @@ struct PlaylistDetailView: View {
                 AddToPlaylistSheet(track: track)
             }
         }
+        .sheet(item: $memoryTrack) { track in
+            SongMemorySheet(track: track)
+        }
+        .onAppear {
+            if currentPlaylist?.isSmart == true {
+                playlistManager.refreshSmartPlaylists()
+            }
+        }
     }
 
     private func playPlaylist(shuffle: Bool) {
@@ -347,6 +359,10 @@ struct PlaylistDetailView: View {
     private func deleteTrack(_ track: Track) {
         guard let playlist = currentPlaylist else { return }
         playlistManager.removeTrack(track.videoId, from: playlist.id)
+    }
+
+    private func openSongMemory(for track: Track) {
+        memoryTrack = track
     }
 }
 
@@ -592,11 +608,13 @@ struct CyberpunkTrackRow: View {
     let isEditing: Bool
     let downloadTask: DownloadTask?
     let isDownloaded: Bool
+    let hasMemory: Bool
     let onPlay: () -> Void
     let onDownload: () -> Void
     let onAddToQueue: () -> Void
     let onPlayNext: () -> Void
     let onAddToPlaylist: () -> Void
+    let onEditMemory: () -> Void
     let onDelete: () -> Void
 
     @State private var isPressed = false
@@ -658,6 +676,10 @@ struct CyberpunkTrackRow: View {
                     }
                 }
                 .lineLimit(1)
+
+                if hasMemory {
+                    SongMemoryBadge(text: nil)
+                }
             }
 
             Spacer()
@@ -712,6 +734,10 @@ struct CyberpunkTrackRow: View {
 
             Button(action: onAddToPlaylist) {
                 Label("Add to Playlist", systemImage: "music.note.list")
+            }
+
+            Button(action: onEditMemory) {
+                Label(hasMemory ? "Edit Memory" : "Add Memory", systemImage: hasMemory ? "sparkles.rectangle.stack.fill" : "square.and.pencil")
             }
 
             Divider()

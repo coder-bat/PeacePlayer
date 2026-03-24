@@ -172,31 +172,33 @@ struct SmartPlaylistCardCyberpunk: View {
                     .frame(width: 170, height: 200)
                     .blur(radius: 20)
 
-                // Decorative elements
-                Circle()
-                    .stroke(accentColor.opacity(0.2), lineWidth: 1)
-                    .frame(width: 120, height: 120)
-                    .offset(x: 40, y: -40)
+                // Centered icon with circle around it
+                ZStack {
+                    Circle()
+                        .stroke(accentColor.opacity(0.3), lineWidth: 1)
+                        .frame(width: 80, height: 80)
 
-                // Content
-                VStack(alignment: .leading, spacing: 8) {
-                    Spacer()
+                    Circle()
+                        .fill(accentColor.opacity(0.08))
+                        .frame(width: 80, height: 80)
 
                     Image(systemName: icon)
-                        .font(.system(size: 48, weight: .light))
+                        .font(.system(size: 36, weight: .light))
                         .foregroundColor(accentColor)
-                        .shadow(color: accentColor.opacity(0.5), radius: 8, x: 0, y: 0)
+                        .shadow(color: accentColor.opacity(0.6), radius: 8, x: 0, y: 0)
+                }
+                .offset(y: -20)
 
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(playlist.name)
-                            .font(.system(size: 15, weight: .bold, design: .monospaced))
-                            .foregroundColor(.white)
-                            .lineLimit(1)
+                // Text at bottom
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(playlist.name)
+                        .font(.system(size: 15, weight: .bold, design: .monospaced))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
 
-                        Text("\(playlist.trackCount) TRACKS")
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundColor(Theme.cyberDim)
-                    }
+                    Text("\(playlist.trackCount) TRACKS")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(Theme.cyberDim)
                 }
                 .padding(16)
                 .frame(width: 170, height: 200, alignment: .bottomLeading)
@@ -327,6 +329,8 @@ struct UserPlaylistGridCellCyberpunk: View {
                 // Artwork with cyberpunk border
                 PlaylistArtworkCyberpunk(trackIds: Array(playlist.trackIds.prefix(4)), thumbnailURL: playlist.thumbnailURL)
                     .frame(height: 160)
+                    .clipped()
+                    .cornerRadius(12)
                     .overlay(
                         RoundedRectangle(cornerRadius: 12)
                             .stroke(Theme.cyberCyan.opacity(0.3), lineWidth: 1)
@@ -404,22 +408,23 @@ struct PlaylistArtworkCyberpunk: View {
     var thumbnailURL: String? = nil
 
     var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 12)
-                .fill(Theme.cyberSurface)
+        GeometryReader { geo in
+            ZStack {
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Theme.cyberSurface)
 
-            if let urlString = thumbnailURL, let url = URL(string: urlString) {
-                CachedAsyncImage(url: url) {
+                if let urlString = thumbnailURL, let url = URL(string: urlString) {
+                    CachedAsyncImage(url: url) {
+                        artworkFallback
+                    }
+                    .frame(width: geo.size.width, height: geo.size.height)
+                    .clipped()
+                } else {
                     artworkFallback
                 }
-                .scaledToFill()
-                .clipped()
-                .cornerRadius(12)
-            } else {
-                artworkFallback
             }
+            .clipShape(RoundedRectangle(cornerRadius: 12))
         }
-        .cornerRadius(12)
     }
 
     @ViewBuilder
@@ -480,20 +485,22 @@ struct PlaylistArtworkMiniCyberpunk: View {
     var thumbnailURL: String? = nil
 
     var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 8)
-                .fill(Theme.cyberSurface)
+        GeometryReader { geo in
+            ZStack {
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Theme.cyberSurface)
 
-            if let urlString = thumbnailURL, let url = URL(string: urlString) {
-                CachedAsyncImage(url: url) {
+                if let urlString = thumbnailURL, let url = URL(string: urlString) {
+                    CachedAsyncImage(url: url) {
+                        miniArtworkFallback
+                    }
+                    .frame(width: geo.size.width, height: geo.size.height)
+                    .clipped()
+                } else {
                     miniArtworkFallback
                 }
-                .scaledToFill()
-                .clipped()
-                .cornerRadius(8)
-            } else {
-                miniArtworkFallback
             }
+            .clipShape(RoundedRectangle(cornerRadius: 8))
         }
     }
 

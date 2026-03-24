@@ -16,6 +16,18 @@ struct PersistenceController {
         container.viewContext
     }
 
+    /// Background context for performing Core Data operations off the main thread
+    var backgroundContext: NSManagedObjectContext {
+        let context = container.newBackgroundContext()
+        context.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
+        context.automaticallyMergesChangesFromParent = true
+        return context
+    }
+
+    func newBackgroundContext() -> NSManagedObjectContext {
+        backgroundContext
+    }
+
     init(inMemory: Bool = false) {
         container = NSPersistentContainer(name: "YTAudioPlayer")
 
@@ -52,6 +64,15 @@ struct PersistenceController {
             track.videoType = "music_video"
             track.createdAt = Date()
             track.isLiked = i % 2 == 0
+
+            if i < 2 {
+                let memory = CDSongMemory(context: viewContext)
+                memory.id = UUID()
+                memory.noteText = i == 0 ? "This track reminds me of a late-night drive home." : "Played this on repeat while building the app."
+                memory.createdAt = Date().addingTimeInterval(Double(-i) * 3600)
+                memory.updatedAt = Date().addingTimeInterval(Double(-i) * 1800)
+                memory.track = track
+            }
         }
 
         do {

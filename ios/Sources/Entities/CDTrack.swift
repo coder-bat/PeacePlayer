@@ -24,8 +24,10 @@ public class CDTrack: NSManagedObject {
     @NSManaged public var videoType: String
     @NSManaged public var createdAt: Date
     @NSManaged public var isLiked: Bool
+    @NSManaged public var memory: CDSongMemory?
     @NSManaged public var playHistory: Set<CDPlayHistory>?
     @NSManaged public var download: CDDownloadedTrack?
+    @NSManaged public var queueEntry: CDPlaybackQueue?
 }
 
 // MARK: - Generated accessors for playHistory
@@ -83,6 +85,10 @@ extension CDTrack {
     var artworkURL: URL? {
         guard let urlString = thumbnailURLs.last else { return nil }
         return URL(string: urlString)
+    }
+
+    var memoryPreviewText: String? {
+        memory?.notePreview
     }
 
     var durationText: String {

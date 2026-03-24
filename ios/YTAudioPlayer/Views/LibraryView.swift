@@ -32,11 +32,13 @@ enum LibrarySortOption: String, CaseIterable, Identifiable {
 struct LibraryView: View {
     @StateObject private var viewModel = LibraryViewModel()
     @StateObject private var playerState = PlayerState.shared
+    @ObservedObject private var songMemoryManager = SongMemoryManager.shared
     @State private var viewMode: LibraryViewMode = .grid
     @State private var showStorageInfo = false
     @State private var selectedTracks: Set<String> = []
     @State private var isEditing = false
-    
+    @State private var searchQuery = ""
+
     var body: some View {
         NavigationView {
             ZStack {
@@ -87,37 +89,37 @@ struct LibraryView: View {
                             }
                             .font(.system(size: 13, weight: .bold, design: .monospaced))
                             .foregroundColor(Theme.cyberCyan)
-                        }
-
-                        Button {
-                            viewMode = viewMode == .grid ? .list : .grid
-                        } label: {
-                            Image(systemName: viewMode == .grid ? "list.bullet" : "square.grid.2x2")
-                                .foregroundColor(Theme.cyberCyan)
-                        }
-
-                        Menu {
-                            Section("SORT BY") {
-                                ForEach(LibrarySortOption.allCases) { option in
-                                    Button {
-                                        viewModel.sortOption = option
-                                    } label: {
-                                        Label(option.rawValue,
-                                              systemImage: viewModel.sortOption == option ? "checkmark" : option.icon)
-                                    }
-                                }
-                            }
-
-                            Divider()
 
                             Button {
-                                showStorageInfo = true
+                                viewMode = viewMode == .grid ? .list : .grid
                             } label: {
-                                Label("STORAGE INFO", systemImage: "externaldrive")
+                                Image(systemName: viewMode == .grid ? "list.bullet" : "square.grid.2x2")
+                                    .foregroundColor(Theme.cyberCyan)
                             }
-                        } label: {
-                            Image(systemName: "arrow.up.arrow.down.circle")
-                                .foregroundColor(Theme.cyberCyan)
+
+                            Menu {
+                                Section("SORT BY") {
+                                    ForEach(LibrarySortOption.allCases) { option in
+                                        Button {
+                                            viewModel.sortOption = option
+                                        } label: {
+                                            Label(option.rawValue,
+                                                  systemImage: viewModel.sortOption == option ? "checkmark" : option.icon)
+                                        }
+                                    }
+                                }
+
+                                Divider()
+
+                                Button {
+                                    showStorageInfo = true
+                                } label: {
+                                    Label("STORAGE INFO", systemImage: "externaldrive")
+                                }
+                            } label: {
+                                Image(systemName: "arrow.up.arrow.down.circle")
+                                    .foregroundColor(Theme.cyberCyan)
+                            }
                         }
                     }
                 }
@@ -152,11 +154,11 @@ struct LibraryView: View {
             viewModel.loadLibrary()
         }
     }
-    
+
     private var emptyView: some View {
         EmptyStateView(type: .library)
     }
-    
+
     private var contentView: some View {
         VStack(spacing: 0) {
             // Header
@@ -172,9 +174,14 @@ struct LibraryView: View {
             .padding(.top, 8)
             .padding(.bottom, 8)
 
+            // Search bar
+            searchBar
+                .padding(.horizontal)
+                .padding(.bottom, 8)
+
             // Stats bar
             HStack {
-                Text("\(viewModel.tracks.count) TRACKS")
+                Text("\(viewModel.filteredTracks(searchQuery: searchQuery).count) TRACKS")
                     .font(.system(size: 12, design: .monospaced))
                     .foregroundColor(Theme.cyberDim)
 
@@ -195,19 +202,56 @@ struct LibraryView: View {
             }
         }
     }
-    
+
+    // MARK: - Search Bar
+
+    private var searchBar: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 14))
+                .foregroundColor(Theme.cyberDim)
+
+            TextField("Search library...", text: $searchQuery)
+                .font(.system(.body, design: .default))
+                .foregroundColor(.white)
+                .accentColor(Theme.cyberCyan)
+
+            if !searchQuery.isEmpty {
+                Button {
+                    searchQuery = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 16))
+                        .foregroundColor(Theme.cyberDim)
+                }
+                .transition(.opacity)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Theme.cyberSurface)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(Theme.cyberCyan.opacity(0.15), lineWidth: 1)
+                )
+        )
+    }
+
     private var gridView: some View {
         ScrollView {
             LazyVGrid(
                 columns: [GridItem(.flexible()), GridItem(.flexible())],
                 spacing: 16
             ) {
-                ForEach(viewModel.sortedTracks) { track in
+                ForEach(viewModel.filteredTracks(searchQuery: searchQuery)) { track in
                     GridTrackCell(
                         track: track,
                         isSelected: selectedTracks.contains(track.videoId),
                         isEditing: isEditing,
                         isPlaying: viewModel.isCurrentlyPlaying(track),
+                        memoryPreview: songMemoryManager.memory(for: track.track)?.previewText,
                         onTap: {
                             if isEditing {
                                 toggleSelection(track)
@@ -224,18 +268,19 @@ struct LibraryView: View {
             .padding(16)
         }
     }
-    
+
     private var listView: some View {
         List {
-            ForEach(viewModel.sortedTracks) { track in
-                ListTrackRow(
-                    track: track,
-                    isSelected: selectedTracks.contains(track.videoId),
-                    isEditing: isEditing,
-                    isPlaying: viewModel.isCurrentlyPlaying(track),
-                    onTap: {
-                        if isEditing {
-                            toggleSelection(track)
+            ForEach(viewModel.filteredTracks(searchQuery: searchQuery)) { track in
+                    ListTrackRow(
+                        track: track,
+                        isSelected: selectedTracks.contains(track.videoId),
+                        isEditing: isEditing,
+                        isPlaying: viewModel.isCurrentlyPlaying(track),
+                        memoryPreview: songMemoryManager.memory(for: track.track)?.previewText,
+                        onTap: {
+                            if isEditing {
+                                toggleSelection(track)
                         } else {
                             viewModel.playTrack(track)
                         }
@@ -249,7 +294,7 @@ struct LibraryView: View {
         }
         .listStyle(.plain)
     }
-    
+
     private func toggleSelection(_ track: DownloadedTrackItem) {
         let id = track.videoId
         if selectedTracks.contains(id) {
@@ -269,6 +314,7 @@ struct GridTrackCell: View {
     let isSelected: Bool
     let isEditing: Bool
     let isPlaying: Bool
+    let memoryPreview: String?
     let onTap: () -> Void
     let onPlay: () -> Void
 
@@ -295,6 +341,12 @@ struct GridTrackCell: View {
                 // Cyberpunk border
                 RoundedRectangle(cornerRadius: 12)
                     .stroke(isPlaying ? Theme.cyberCyan.opacity(0.5) : Theme.cyberCyan.opacity(0.1), lineWidth: 1)
+
+                if memoryPreview != nil {
+                    SongMemoryBadge(text: nil)
+                        .padding(8)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                }
 
                 // Playing indicator overlay
                 if isPlaying {
@@ -359,6 +411,7 @@ struct ListTrackRow: View {
     let isSelected: Bool
     let isEditing: Bool
     let isPlaying: Bool
+    let memoryPreview: String?
     let onTap: () -> Void
     let onPlay: () -> Void
 
@@ -420,6 +473,10 @@ struct ListTrackRow: View {
                 Text(track.fileSizeFormatted.uppercased())
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundColor(Theme.cyberDim.opacity(0.7))
+
+                if let memoryPreview {
+                    SongMemoryBadge(text: memoryPreview)
+                }
             }
 
             Spacer()

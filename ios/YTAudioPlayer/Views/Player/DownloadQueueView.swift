@@ -9,6 +9,8 @@ import SwiftUI
 
 struct DownloadQueueView: View {
     @StateObject private var downloadManager = DownloadManager.shared
+    @StateObject private var libraryViewModel = LibraryViewModel()
+    @State private var showHistory = false
 
     var body: some View {
         NavigationView {
@@ -18,28 +20,54 @@ struct DownloadQueueView: View {
 
                 ScrollView {
                     VStack(spacing: 24) {
+                        // Custom title header
+                        HStack {
+                            Text("Downloads")
+                                .font(.system(size: 24, weight: .bold, design: .monospaced))
+                                .foregroundColor(.white)
+                                .shadow(color: Theme.cyberCyan.opacity(0.5), radius: 10, x: 0, y: 0)
+                            Spacer()
+                            HStack(spacing: 12) {
+                                Button {
+                                    showHistory = true
+                                } label: {
+                                    Label("History", systemImage: "clock.arrow.circlepath")
+                                        .font(.system(size: 12, weight: .bold, design: .monospaced))
+                                        .foregroundColor(Theme.cyberCyan)
+                                }
+
+                                if !downloadManager.completedDownloads.isEmpty {
+                                    Button("Clear Queue") {
+                                        downloadManager.clearCompleted()
+                                    }
+                                    .font(.system(size: 12, weight: .bold, design: .monospaced))
+                                    .foregroundColor(Theme.cyberCyan)
+                                }
+                            }
+                        }
+
                         // Stats header
                         statsHeader
 
                         // Active downloads
                         activeSection
 
-                        // Completed downloads
+                        // Completed queue (current session)
                         completedSection
+
+                        // Saved downloads from Core Data
+                        savedSection
                     }
                     .padding()
+                    .padding(.bottom, 80)
                 }
             }
-            .navigationTitle("Downloads")
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    if !downloadManager.completedDownloads.isEmpty {
-                        Button("Clear All") {
-                            downloadManager.clearCompleted()
-                        }
-                        .foregroundColor(Theme.cyberCyan)
-                    }
-                }
+            .navigationTitle("")
+            .navigationBarTitleDisplayMode(.inline)
+            .navigationBarHidden(true)
+            .preferredColorScheme(.dark)
+            .sheet(isPresented: $showHistory) {
+                HistoryView()
             }
         }
     }
@@ -53,9 +81,9 @@ struct DownloadQueueView: View {
             )
 
             StatBadge(
-                icon: "checkmark.circle.fill",
-                value: "\(downloadManager.completedDownloads.filter { $0.status == .completed }.count)",
-                label: "Done"
+                icon: "internaldrive.fill",
+                value: "\(libraryViewModel.tracks.count)",
+                label: "Saved"
             )
 
             StatBadge(
@@ -63,6 +91,28 @@ struct DownloadQueueView: View {
                 value: "\(downloadManager.completedDownloads.filter { if case .failed = $0.status { return true }; return false }.count)",
                 label: "Failed"
             )
+        }
+    }
+
+    private var savedSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            SectionHeader(title: "Downloaded Files", icon: "internaldrive")
+
+            if libraryViewModel.tracks.isEmpty {
+                EmptyStateCard(
+                    icon: "internaldrive",
+                    title: "No Saved Downloads",
+                    subtitle: "Downloaded tracks appear here"
+                )
+            } else {
+                VStack(spacing: 12) {
+                    ForEach(libraryViewModel.sortedTracks) { item in
+                        SavedDownloadCard(item: item) {
+                            libraryViewModel.playTrack(item)
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -385,6 +435,75 @@ struct CompletedDownloadCard: View {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .short
         return formatter.localizedString(for: date, relativeTo: Date())
+    }
+}
+
+// MARK: - Saved Download Card (Core Data backed)
+
+struct SavedDownloadCard: View {
+    let item: DownloadedTrackItem
+    let onPlay: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            // Artwork
+            ZStack {
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Theme.cyberSurface)
+                    .frame(width: 52, height: 52)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Theme.cyberCyan.opacity(0.2), lineWidth: 1)
+                    )
+
+                if let url = item.thumbnailURL {
+                    CachedAsyncImage(url: url) {
+                        Image(systemName: "music.note")
+                            .font(.system(size: 20))
+                            .foregroundColor(Theme.cyberDim)
+                    }
+                    .scaledToFill()
+                    .frame(width: 52, height: 52)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                } else {
+                    Image(systemName: "music.note")
+                        .font(.system(size: 20))
+                        .foregroundColor(Theme.cyberDim)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(item.title)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+
+                Text(item.artist)
+                    .font(.system(size: 13))
+                    .foregroundColor(Theme.cyberDim)
+                    .lineLimit(1)
+
+                Text(item.fileSizeFormatted)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(Theme.cyberDim.opacity(0.7))
+            }
+
+            Spacer()
+
+            Button(action: onPlay) {
+                Image(systemName: "play.circle.fill")
+                    .font(.system(size: 28))
+                    .foregroundColor(Theme.cyberCyan)
+            }
+        }
+        .padding(12)
+        .background(Theme.cyberSurface)
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Theme.cyberCyan.opacity(0.15), lineWidth: 1)
+        )
+        .cornerRadius(12)
+        .onTapGesture { onPlay() }
     }
 }
 
