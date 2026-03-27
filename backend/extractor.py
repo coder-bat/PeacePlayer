@@ -6,6 +6,7 @@ Handles downloading and converting YouTube audio streams.
 import yt_dlp
 import ffmpeg
 import os
+import subprocess
 import tempfile
 import shutil
 from pathlib import Path
@@ -368,6 +369,75 @@ class AudioExtractor:
         
         return False
     
+    def generate_waveform(self, audio_path: Path, peaks: int = 200) -> List[float]:
+        """
+        Generate normalized waveform peak data from a local audio file using ffmpeg.
+
+        Decodes audio to raw 32-bit float PCM at 8000 Hz mono, splits into `peaks`
+        equal-length segments, computes RMS amplitude per segment, and normalizes to 0.0–1.0.
+
+        Args:
+            audio_path: Path to the local M4A/audio file.
+            peaks: Number of amplitude values to return (default 200).
+
+        Returns:
+            List of `peaks` floats in range [0.0, 1.0], or empty list on failure.
+        """
+        import struct
+        import math
+
+        try:
+            cmd = [
+                'ffmpeg', '-i', str(audio_path),
+                '-af', 'aresample=8000',
+                '-ac', '1',
+                '-f', 'f32le',
+                '-acodec', 'pcm_f32le',
+                'pipe:1',
+                '-loglevel', 'error'
+            ]
+            result = subprocess.run(cmd, capture_output=True, timeout=30)
+            if result.returncode != 0 or not result.stdout:
+                logger.warning(f"ffmpeg waveform extraction failed for {audio_path.name}")
+                return []
+
+            raw = result.stdout
+            sample_count = len(raw) // 4  # 4 bytes per float32
+            if sample_count < peaks:
+                logger.warning(f"Not enough samples for waveform: {sample_count}")
+                return []
+
+            samples = struct.unpack(f'{sample_count}f', raw)
+            chunk_size = sample_count // peaks
+            rms_values = []
+
+            for i in range(peaks):
+                start = i * chunk_size
+                chunk = samples[start:start + chunk_size]
+                rms = math.sqrt(sum(s * s for s in chunk) / len(chunk))
+                rms_values.append(rms)
+
+            # Normalize to 0.0–1.0
+            max_val = max(rms_values) if rms_values else 1.0
+            if max_val < 1e-8:
+                return [0.0] * peaks
+
+            normalized = [min(1.0, v / max_val) for v in rms_values]
+
+            # Light smoothing pass (3-sample moving average)
+            smoothed = normalized[:]
+            for i in range(1, len(normalized) - 1):
+                smoothed[i] = (normalized[i - 1] + normalized[i] + normalized[i + 1]) / 3.0
+
+            return smoothed
+
+        except subprocess.TimeoutExpired:
+            logger.error(f"Waveform generation timed out for {audio_path.name}")
+            return []
+        except Exception as e:
+            logger.error(f"Waveform generation error: {e}")
+            return []
+
     def _human_readable_size(self, size_bytes: int) -> str:
         """Convert bytes to human readable string."""
         for unit in ['B', 'KB', 'MB', 'GB']:

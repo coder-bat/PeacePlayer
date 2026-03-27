@@ -28,7 +28,7 @@ class APIService {
         #else
         // Set this to your Mac's Tailscale hostname or local IP
         // Example: "http://192.168.x.x:8181" or "http://your-machine-name:8181"
-        return "http://YOUR_MACHINE_HOSTNAME:8181"
+        return "http://100.77.213.42:8181"
         #endif
     }()
     
@@ -418,4 +418,35 @@ class APIService {
         
         return parsedLines.isEmpty ? [LyricsLine(time: 0, text: "No lyrics available")] : parsedLines
     }
+
+    // MARK: - Waveform
+
+    /// Fetch pre-computed waveform peaks for a video ID from the backend.
+    /// Returns a list of 200 normalized Float values (0.0–1.0).
+    func fetchWaveform(videoId: String) -> AnyPublisher<[Float], APIError> {
+        guard let url = URL(string: "\(baseURL)/waveform/\(videoId)") else {
+            return Fail(error: APIError.invalidURL).eraseToAnyPublisher()
+        }
+
+        return URLSession.shared.dataTaskPublisher(for: url)
+            .tryMap { data, response in
+                guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+                    throw APIError.networkError(URLError(.badServerResponse))
+                }
+                return data
+            }
+            .decode(type: WaveformResponse.self, decoder: JSONDecoder())
+            .map(\.peaks)
+            .mapError { error -> APIError in
+                if let apiError = error as? APIError { return apiError }
+                return APIError.networkError(error)
+            }
+            .eraseToAnyPublisher()
+    }
+}
+
+// MARK: - Waveform Response Model
+
+private struct WaveformResponse: Decodable {
+    let peaks: [Float]
 }

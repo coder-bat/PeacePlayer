@@ -12,6 +12,8 @@ struct HomeView: View {
     @StateObject private var playerState = PlayerState.shared
     @StateObject private var viewModel = HomeViewModel()
     @State private var showAllRecent = false
+    @State private var showAddToPlaylistSheet = false
+    @State private var selectedTrack: Track?
 
     var body: some View {
         NavigationView {
@@ -55,6 +57,7 @@ struct HomeView: View {
         .sheet(isPresented: $showAllRecent) {
             AllRecentlyPlayedView()
         }
+        .addToPlaylistSheet(isPresented: $showAddToPlaylistSheet, track: selectedTrack)
     }
 
     // MARK: - Header
@@ -128,6 +131,7 @@ struct HomeView: View {
     private var recentlyPlayedSection: some View {
         Group {
             if !viewModel.recentlyPlayed.isEmpty {
+                let recentTracks = Array(viewModel.recentlyPlayed.prefix(20))
                 VStack(alignment: .leading, spacing: 16) {
                     HStack {
                         Text("Recently Played")
@@ -136,7 +140,7 @@ struct HomeView: View {
 
                         Spacer()
 
-                        if viewModel.recentlyPlayed.count > 5 {
+                        if viewModel.recentlyPlayed.count > 20 {
                             Button("View All") {
                                 showAllRecent = true
                             }
@@ -146,18 +150,48 @@ struct HomeView: View {
                     }
                     .padding(.horizontal, 20)
 
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 16) {
-                            ForEach(viewModel.recentlyPlayed.prefix(8)) { track in
-                                MinimalTrackCard(track: track) {
-                                    viewModel.playTrack(track)
-                                }
-                            }
-                        }
-                        .padding(.horizontal, 20)
-                    }
+                    recentlyPlayedList(tracks: recentTracks)
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private func recentlyPlayedList(tracks: [Track]) -> some View {
+        let baseList = List {
+            ForEach(tracks) { track in
+                HomeRecentTrackRow(
+                    track: track,
+                    isDownloaded: viewModel.isDownloaded(track),
+                    onPlay: {
+                        viewModel.playTrack(track)
+                    },
+                    onAddToQueue: {
+                        viewModel.addToQueue(track)
+                    },
+                    onAddToPlaylist: {
+                        selectedTrack = track
+                        showAddToPlaylistSheet = true
+                    },
+                    onDownload: {
+                        viewModel.downloadTrack(track)
+                    }
+                )
+                .listRowInsets(EdgeInsets(top: 4, leading: 20, bottom: 4, trailing: 20))
+                .listRowSeparator(.hidden)
+                .listRowBackground(Color.clear)
+            }
+        }
+        .listStyle(.plain)
+        .environment(\.defaultMinListRowHeight, 1)
+        .frame(height: CGFloat(tracks.count) * 76)
+
+        if #available(iOS 16.0, *) {
+            baseList
+                .scrollContentBackground(.hidden)
+                .scrollDisabled(true)
+        } else {
+            baseList
         }
     }
 
@@ -645,6 +679,39 @@ class HomeViewModel: ObservableObject {
             .store(in: &cancellables)
     }
 
+    func addToQueue(_ track: Track) {
+        APIService.shared.getStreamUrl(videoId: track.videoId)
+            .handleErrors(with: .shared)
+            .sink(receiveValue: { streamInfo in
+                let item = QueueItem(
+                    track: track,
+                    streamUrl: streamInfo.streamUrl,
+                    source: .stream
+                )
+                PlayerState.shared.addToQueue(item)
+                HapticManager.success()
+            })
+            .store(in: &cancellables)
+    }
+
+    func downloadTrack(_ track: Track) {
+        if DownloadManager.shared.isDownloading(track) {
+            DownloadManager.shared.cancelDownload(for: track)
+            return
+        }
+
+        guard !isDownloaded(track) else {
+            ErrorHandler.shared.show(.downloadFailed("This track is already in your library"))
+            return
+        }
+
+        DownloadManager.shared.download(track)
+    }
+
+    func isDownloaded(_ track: Track) -> Bool {
+        DownloadManager.shared.isAlreadyDownloaded(track)
+    }
+
     func togglePlayPause() {
         PlayerState.shared.togglePlayPause()
     }
@@ -678,6 +745,90 @@ class HomeViewModel: ObservableObject {
                 HapticManager.medium()
             })
             .store(in: &cancellables)
+    }
+}
+
+struct HomeRecentTrackRow: View {
+    let track: Track
+    let isDownloaded: Bool
+    let onPlay: () -> Void
+    let onAddToQueue: () -> Void
+    let onAddToPlaylist: () -> Void
+    let onDownload: () -> Void
+
+    var body: some View {
+        Button(action: onPlay) {
+            HStack(spacing: 12) {
+                CachedAsyncImage(url: track.artworkURL) {
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color.cyberDim.opacity(0.3))
+                }
+                .frame(width: 50, height: 50)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(track.title)
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+
+                    Text(track.displayArtist)
+                        .font(.system(size: 14))
+                        .foregroundColor(.cyberDim)
+                        .lineLimit(1)
+                }
+
+                Spacer()
+
+                if isDownloaded {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 14))
+                        .foregroundColor(.cyberCyan)
+                }
+
+                Image(systemName: "play.fill")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.cyberCyan)
+                    .frame(width: 30, height: 30)
+                    .background(
+                        Circle()
+                            .fill(Color.cyberSurface)
+                            .overlay(
+                                Circle()
+                                    .stroke(Color.cyberCyan.opacity(0.3), lineWidth: 1)
+                            )
+                    )
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(Color.cyberSurface)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14)
+                            .stroke(Color.cyberCyan.opacity(0.08), lineWidth: 1)
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+        .swipeActions(edge: .leading, allowsFullSwipe: false) {
+            Button(action: onAddToQueue) {
+                Label("Queue", systemImage: "text.badge.plus")
+            }
+            .tint(.orange)
+
+            Button(action: onAddToPlaylist) {
+                Label("Playlist", systemImage: "music.note.list")
+            }
+            .tint(.blue)
+        }
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            Button(action: onDownload) {
+                Label(isDownloaded ? "Downloaded" : "Download", systemImage: isDownloaded ? "checkmark" : "arrow.down")
+            }
+            .tint(.cyberCyan)
+            .disabled(isDownloaded)
+        }
     }
 }
 

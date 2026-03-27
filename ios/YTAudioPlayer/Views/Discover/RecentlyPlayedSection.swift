@@ -66,7 +66,8 @@ struct RecentlyPlayedSection: View {
 struct DiscoverRecentlyPlayedCard: View {
     let track: Track
     @State private var isPressed = false
-    
+    @State private var cancellables = Set<AnyCancellable>()
+
     var body: some View {
         Button(action: {
             playTrack()
@@ -76,7 +77,7 @@ struct DiscoverRecentlyPlayedCard: View {
                 ZStack {
                     ArtworkThumbnail(url: track.artworkURL)
                         .frame(width: 140, height: 140)
-                    
+
                     // Play overlay
                     if isPressed {
                         Color.black.opacity(0.3)
@@ -86,13 +87,13 @@ struct DiscoverRecentlyPlayedCard: View {
                     }
                 }
                 .cornerRadius(8)
-                
+
                 // Info
                 VStack(alignment: .leading, spacing: 2) {
                     Text(track.title)
                         .font(.system(size: 14, weight: .medium))
                         .lineLimit(1)
-                    
+
                     Text(track.displayArtist)
                         .font(.system(size: 12))
                         .foregroundColor(.secondary)
@@ -108,8 +109,74 @@ struct DiscoverRecentlyPlayedCard: View {
             isPressed = pressing
         }, perform: {})
     }
-    
+
     private func playTrack() {
+        // Get all recently played tracks
+        let allRecentlyPlayed = DataManager.shared.recentlyPlayed.map { $0.toTrack }
+        guard let tappedIndex = allRecentlyPlayed.firstIndex(where: { $0.videoId == track.videoId }) else {
+            // Fallback: just play the single track
+            playSingleTrack(track)
+            return
+        }
+
+        print("🎵 Loading recently played queue with \(allRecentlyPlayed.count) tracks, starting from index \(tappedIndex)")
+
+        // Build queue starting from tapped track, then the rest before it
+        var queueTracks: [Track] = []
+        // Add tapped track and all after it
+        queueTracks.append(contentsOf: allRecentlyPlayed[tappedIndex...])
+        // Add tracks before tapped track (so they're played last)
+        if tappedIndex > 0 {
+            queueTracks.append(contentsOf: allRecentlyPlayed[0..<tappedIndex])
+        }
+
+        // Fetch stream URLs and load queue
+        var streamInfos: [(track: Track, streamUrl: String)] = []
+        let group = DispatchGroup()
+
+        for queueTrack in queueTracks {
+            group.enter()
+            APIService.shared.getStreamUrl(videoId: queueTrack.videoId)
+                .sink(
+                    receiveCompletion: { _ in group.leave() },
+                    receiveValue: { streamInfo in
+                        streamInfos.append((queueTrack, streamInfo.streamUrl))
+                    }
+                )
+                .store(in: &cancellables)
+        }
+
+        group.notify(queue: .main) {
+            // PlayerState is a singleton, safe to access directly
+            let playerState = PlayerState.shared
+
+            // Sort streamInfos to match queueTracks order
+            let orderedStreamInfos = queueTracks.compactMap { track in
+                streamInfos.first { $0.track.videoId == track.videoId }
+            }
+
+            // Clear existing queue
+            playerState.clearQueue()
+
+            // Add all tracks to queue
+            for info in orderedStreamInfos {
+                let item = QueueItem(
+                    track: info.track,
+                    streamUrl: info.streamUrl,
+                    source: .stream
+                )
+                playerState.addToQueue(item)
+            }
+
+            // Play the first track (which is the tapped track)
+            if !playerState.queue.isEmpty {
+                playerState.playQueue(at: 0)
+                print("✅ Started playing recently played queue with \(playerState.queue.count) tracks")
+            }
+        }
+    }
+
+    private func playSingleTrack(_ track: Track) {
         APIService.shared.getStreamUrl(videoId: track.videoId)
             .sink(receiveCompletion: { _ in }, receiveValue: { streamInfo in
                 let item = QueueItem(
@@ -121,8 +188,6 @@ struct DiscoverRecentlyPlayedCard: View {
             })
             .store(in: &cancellables)
     }
-    
-    @State private var cancellables = Set<AnyCancellable>()
 }
 
 struct RecentlyPlayedListView: View {

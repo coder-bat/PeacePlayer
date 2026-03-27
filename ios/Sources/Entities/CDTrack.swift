@@ -28,6 +28,7 @@ public class CDTrack: NSManagedObject {
     @NSManaged public var playHistory: Set<CDPlayHistory>?
     @NSManaged public var download: CDDownloadedTrack?
     @NSManaged public var queueEntry: CDPlaybackQueue?
+    @NSManaged public var timeCapsule: CDTimeCapsule?
 }
 
 // MARK: - Generated accessors for playHistory

@@ -391,6 +391,9 @@ class PlayerState: ObservableObject {
         
         // Set current player in crossfade manager
         CrossfadeManager.shared.setCurrentPlayer(player)
+
+        // Attach audio visualizer tap to this player item
+        AudioVisualizerEngine.shared.installTap(on: playerItem)
         
         // Setup observers
         print("🔊 Setting up observers...")
@@ -567,6 +570,9 @@ class PlayerState: ObservableObject {
             print("▶️ Stream URL expired, refreshing...")
             refreshAndPlay(item: item, at: index)
         } else {
+            // CRITICAL FIX: Set expectedDuration from track metadata before playing
+            expectedDuration = Double(item.track.durationSeconds)
+            print("🎵 playQueue: Set expectedDuration = \(expectedDuration)")
             currentIndex = index
             play(item: item, addToQueue: false)
         }
@@ -689,6 +695,9 @@ class PlayerState: ObservableObject {
 
         // Cancel quality upgrade timer
         cancelQualityUpgrade()
+
+        // Remove audio visualizer tap
+        AudioVisualizerEngine.shared.removeTap()
 
         // CRITICAL FIX: Cancel all Combine subscriptions to prevent duplicate observers
         cancellables.removeAll()
@@ -831,8 +840,15 @@ class PlayerState: ObservableObject {
     
     // MARK: - Skip Control
     
-    func nextTrack(useCrossfade: Bool = true) {
+    func nextTrack(useCrossfade: Bool = true, userSkipped: Bool = false) {
         print("⏭️ nextTrack called. Queue count: \(queue.count), currentIndex: \(currentIndex)")
+        
+        // Anti-Algorithm: track skip/complete
+        if let currentVideoId = currentItem?.track.videoId {
+            if userSkipped {
+                AntiAlgorithmEngine.shared.trackSkipped(videoId: currentVideoId)
+            }
+        }
         guard !queue.isEmpty else {
             print("⏭️ Queue is empty!")
             return
@@ -868,6 +884,10 @@ class PlayerState: ObservableObject {
     
     private func performCrossfadeToNextItem(_ item: QueueItem, at index: Int) {
         print("🔊 Performing crossfade to: \(item.track.title)")
+
+        // CRITICAL FIX: Set expectedDuration BEFORE updating UI so progress calculations use correct duration
+        expectedDuration = Double(item.track.durationSeconds)
+        print("🎵 Crossfade: Set expectedDuration = \(expectedDuration) from track.durationSeconds = \(item.track.durationSeconds)")
         
         // CRITICAL FIX: Check if crossfade is possible BEFORE updating UI
         // CrossfadeManager needs a prepared nextPlayer
@@ -1021,7 +1041,7 @@ class PlayerState: ObservableObject {
                         print("❌ Player item failed: \(error)")
                         print("❌ Error domain: \(error.domain), code: \(error.code)")
                         print("❌ Error userInfo: \(error.userInfo)")
-                        
+
                         // Retry with fresh URL if possible
                         if let self = self, self.retryCount < self.maxRetries,
                            let item = self.currentItem {
@@ -1029,7 +1049,12 @@ class PlayerState: ObservableObject {
                             print("🔄 Retrying playback (attempt \(self.retryCount)/\(self.maxRetries))...")
                             self.refreshAndPlayCurrentItem()
                         } else {
-                            self?.playbackState = .error("Playback failed: \(error.localizedDescription)")
+                            // CRITICAL FIX: After max retries, skip to next track instead of staying in error
+                            print("❌ Max retries reached, skipping to next track")
+                            self?.playbackState = .error("Playback failed, skipping...")
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+                                self?.nextTrack()
+                            }
                         }
                     }
                 case .unknown:
@@ -1218,6 +1243,11 @@ class PlayerState: ObservableObject {
         }
 
         print("🏁 Advancing to next track after completion")
+
+        // Anti-Algorithm: track completed
+        if let currentVideoId = currentItem?.track.videoId {
+            AntiAlgorithmEngine.shared.trackCompleted(videoId: currentVideoId)
+        }
 
         // Move to next track on main thread
         DispatchQueue.main.async { [weak self] in

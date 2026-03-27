@@ -373,16 +373,19 @@ class DownloadManager: ObservableObject {
     private func handleDownloadSuccess(_ id: UUID, path: String) {
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
-            
+
             if let index = self.activeDownloads.firstIndex(where: { $0.id == id }) {
                 var task = self.activeDownloads[index]
                 task.progress = 1.0
                 task.status = .completed
                 task.completionTime = Date()
-                
+
+                // Pre-warm waveform cache for this downloaded track
+                WaveformService.shared.prefetch(videoId: task.track.videoId)
+
                 self.activeDownloads.remove(at: index)
                 self.completedDownloads.append(task)
-                
+
                 HapticManager.success()
             }
         }

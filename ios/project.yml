@@ -33,6 +33,7 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.ytaudioplayer.app
+        PRODUCT_NAME: PeacePlayer
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: 4Y85577Z4G
         SWIFT_VERSION: "5.9"
@@ -47,6 +48,8 @@ targets:
     info:
       path: YTAudioPlayer/Info.plist
       properties:
+        CFBundleDisplayName: PeacePlayer
+        CFBundleName: PeacePlayer
         CFBundleShortVersionString: "1.0"
         CFBundleVersion: "1"
         UILaunchStoryboardName: LaunchScreen
@@ -57,6 +60,7 @@ targets:
         UIBackgroundModes:
           - audio
           - airplay
+        NSMotionUsageDescription: Adaptive Walk DJ detects when you are walking so it can suggest a song at the right moment.
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
         CFBundleURLTypes:
@@ -74,6 +78,7 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.ytaudioplayer.app.widget
+        PRODUCT_NAME: PeacePlayerWidget
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: 4Y85577Z4G
         SWIFT_VERSION: "5.9"
@@ -83,5 +88,7 @@ targets:
     info:
       path: PeacePlayerWidget/Info.plist
       properties:
+        CFBundleDisplayName: PeacePlayer
+        CFBundleName: PeacePlayer
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension

@@ -38,6 +38,8 @@ private let darwinControlCallback: CFNotificationCallback = { _, _, name, _, _ i
                     currentVolume: Float(v)
                 ))
             }
+        case DarwinCmd.executeShortcut:
+            _ = ShortcutPlaybackController.shared.executePendingCommand()
         default: break
         }
         // Handled live via Darwin — clear the UserDefaults fallback command so it
@@ -70,7 +72,8 @@ final class WidgetSyncService {
 
         for name in [DarwinCmd.playPause, DarwinCmd.skipNext, DarwinCmd.skipPrevious,
                      DarwinCmd.seekForward, DarwinCmd.seekBackward,
-                     DarwinCmd.volumeUp, DarwinCmd.volumeDown, DarwinCmd.setVolume] {
+                     DarwinCmd.volumeUp, DarwinCmd.volumeDown, DarwinCmd.setVolume,
+                     DarwinCmd.executeShortcut] {
             CFNotificationCenterAddObserver(
                 center,
                 observer,

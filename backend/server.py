@@ -457,7 +457,11 @@ async def download_track(request: DownloadRequest):
         
         if not result_path:
             raise HTTPException(status_code=500, detail="Download or conversion failed")
-        
+
+        # Write sidecar .id file so waveform endpoint can find this track by video_id
+        id_file = result_path.with_suffix('.id')
+        id_file.write_text(request.video_id)
+
         return DownloadResponse(
             status="completed",
             filePath=str(result_path)
@@ -517,9 +521,59 @@ async def delete_library_file(filename: str):
         raise HTTPException(status_code=500, detail=f"Delete failed: {str(e)}")
 
 
+# Waveform endpoint
+@app.get("/waveform/{video_id}")
+async def get_waveform(video_id: str):
+    """
+    Return pre-computed waveform peaks (200 normalized floats) for a video ID.
+    Checks a disk cache first, then generates from a downloaded M4A file.
+    Returns 404 if no downloaded file is available (iOS will use pseudo-waveform fallback).
+    """
+    import json as _json
+
+    try:
+        extractor = get_extractor()
+        cache_dir = extractor.output_dir / ".waveform_cache"
+        cache_dir.mkdir(exist_ok=True)
+        cache_file = cache_dir / f"{video_id}.json"
+
+        # Serve from cache if available
+        if cache_file.exists():
+            data = _json.loads(cache_file.read_text())
+            return data
+
+        # Find downloaded file for this video_id using sidecar .id file
+        target_path = None
+        for m4a in extractor.output_dir.glob("*.m4a"):
+            id_file = m4a.with_suffix('.id')
+            if id_file.exists() and id_file.read_text().strip() == video_id:
+                target_path = m4a
+                break
+
+        if not target_path:
+            raise HTTPException(
+                status_code=404,
+                detail="No downloaded file found for this video_id"
+            )
+
+        # Generate waveform peaks
+        peaks = extractor.generate_waveform(target_path, peaks=200)
+        if not peaks:
+            raise HTTPException(status_code=500, detail="Waveform generation failed")
+
+        result = {"videoId": video_id, "peaks": peaks}
+        cache_file.write_text(_json.dumps(result))
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Waveform error: {str(e)}")
+
+
 # Local file streaming
 @app.get("/local-play/{filename}")
-async def play_local_file(filename: str):
+async def local_play(filename: str):
     """
     Stream a local M4A file.
     Supports HTTP range requests for seeking.

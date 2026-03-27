@@ -30,6 +30,7 @@ enum DarwinCmd {
     static let volumeUp     = "com.peaceplayer.cmd.volumeUp"
     static let volumeDown   = "com.peaceplayer.cmd.volumeDown"
     static let setVolume    = "com.peaceplayer.cmd.setVolume"
+    static let executeShortcut = "com.peaceplayer.cmd.executeShortcut"
 }
 
 // MARK: - Snapshot Models (Codable for App Group UserDefaults)
@@ -100,6 +101,25 @@ struct LibrarySnapshot: Codable {
     static let empty = LibrarySnapshot(likedTrackCount: 0, playlists: [])
 }
 
+struct ShortcutPlaybackCommand: Codable {
+    enum Action: String, Codable {
+        case shuffleLibrary
+        case playRecentlyPlayed
+        case playPlaylist
+    }
+
+    let action: Action
+    let playlistName: String?
+    let playlistId: String?
+
+    static let shuffleLibrary = ShortcutPlaybackCommand(action: .shuffleLibrary, playlistName: nil, playlistId: nil)
+    static let playRecentlyPlayed = ShortcutPlaybackCommand(action: .playRecentlyPlayed, playlistName: nil, playlistId: nil)
+
+    static func playPlaylist(name: String, id: String? = nil) -> ShortcutPlaybackCommand {
+        ShortcutPlaybackCommand(action: .playPlaylist, playlistName: name, playlistId: id)
+    }
+}
+
 // MARK: - Shared State I/O
 
 struct SharedNowPlayingState {
@@ -156,6 +176,21 @@ struct SharedNowPlayingState {
               let cmd = Command(rawValue: raw) else { return nil }
         d.removeObject(forKey: "pp_cmd")
         return cmd
+    }
+
+    // MARK: Shortcut Playback Command
+
+    static func writePendingShortcutCommand(_ command: ShortcutPlaybackCommand) {
+        guard let data = try? JSONEncoder().encode(command) else { return }
+        defaults.set(data, forKey: "pp_shortcut_cmd")
+    }
+
+    static func readAndClearPendingShortcutCommand() -> ShortcutPlaybackCommand? {
+        let d = defaults
+        guard let data = d.data(forKey: "pp_shortcut_cmd"),
+              let command = try? JSONDecoder().decode(ShortcutPlaybackCommand.self, from: data) else { return nil }
+        d.removeObject(forKey: "pp_shortcut_cmd")
+        return command
     }
 
     // MARK: Volume Level (widget tap-to-set; widget writes, app reads on Darwin signal)

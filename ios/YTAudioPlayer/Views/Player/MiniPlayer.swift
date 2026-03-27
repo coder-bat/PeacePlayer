@@ -73,7 +73,7 @@ struct MiniPlayer: View {
 
                 Button(action: {
                     HapticManager.light()
-                    playerState.nextTrack()
+                    playerState.nextTrack(userSkipped: true)
                 }) {
                     Image(systemName: "forward.fill")
                         .font(.system(size: 18))
@@ -157,7 +157,7 @@ struct MiniPlayer: View {
                             if horizontalTranslation < -80 || horizontalVelocity < -300 {
                                 // Swipe left - next track
                                 HapticManager.medium()
-                                playerState.nextTrack()
+                                playerState.nextTrack(userSkipped: true)
                                 offset = 0
                             } else if horizontalTranslation > 80 || horizontalVelocity > 300 {
                                 // Swipe right - previous track

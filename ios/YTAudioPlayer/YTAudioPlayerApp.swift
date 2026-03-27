@@ -8,11 +8,13 @@ import CoreData
 
 @main
 struct YTAudioPlayerApp: App {
+    @UIApplicationDelegateAdaptor(WalkDJAppDelegate.self) private var appDelegate
     let persistenceController = PersistenceController.shared
     @Environment(\.scenePhase) private var scenePhase
 
     // Initialise singletons that must start with the app
     private let widgetSync = WidgetSyncService.shared
+    private let adaptiveWalkDJ = AdaptiveWalkDJManager.shared
 
     init() {
         DataMigrationService.shared.performMigrationIfNeeded()
@@ -35,7 +37,10 @@ struct YTAudioPlayerApp: App {
                 if let cmd = SharedNowPlayingState.readAndClearCommand() {
                     executeWidgetCommand(cmd)
                 }
+                _ = ShortcutPlaybackController.shared.executePendingCommand()
             }
+
+            adaptiveWalkDJ.handleScenePhaseChange(isActive: phase == .active)
         }
     }
 
@@ -55,6 +60,10 @@ struct YTAudioPlayerApp: App {
                 .queryItems?.first(where: { $0.name == "id" })?.value {
                 playPlaylist(id: idStr)
             }
+        case "shortcut":
+            handleShortcutDeepLink(url)
+        case "walk-dj":
+            adaptiveWalkDJ.handleWalkDJURL(url)
         default:
             break
         }
@@ -81,6 +90,23 @@ struct YTAudioPlayerApp: App {
               let firstId = playlist.trackIds.first,
               let track = TrackStore.shared.getTrack(videoId: firstId) else { return }
         PlayerState.shared.play(track: track)
+    }
+
+    private func handleShortcutDeepLink(_ url: URL) {
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let action = components.queryItems?.first(where: { $0.name == "action" })?.value,
+              let shortcutAction = ShortcutPlaybackCommand.Action(rawValue: action) else { return }
+
+        let playlistName = components.queryItems?.first(where: { $0.name == "playlistName" })?.value
+        let playlistId = components.queryItems?.first(where: { $0.name == "playlistId" })?.value
+
+        ShortcutPlaybackController.shared.execute(
+            ShortcutPlaybackCommand(
+                action: shortcutAction,
+                playlistName: playlistName,
+                playlistId: playlistId
+            )
+        )
     }
 
     // MARK: - Widget Command Fallback

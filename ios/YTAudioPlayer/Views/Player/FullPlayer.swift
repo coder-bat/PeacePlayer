@@ -10,6 +10,7 @@ import MediaPlayer
 import AVKit
 import CoreImage
 import CoreImage.CIFilterBuiltins
+import CoreHaptics
 
 struct FullPlayer: View {
     @ObservedObject private var playerState = PlayerState.shared
@@ -37,6 +38,12 @@ struct FullPlayer: View {
     @State private var scrubberHideTask: Task<Void, Never>? = nil
     @State private var isTrackInfoExpanded = false
     @State private var likePulse = false
+    @State private var waveformPeaks: [Float]? = nil
+    @State private var showingVisualizer = false
+    @State private var showTimeCapsule = false
+    @State private var showTimeCapsuleVault = false
+    @State private var showAntiAlgorithm = false
+    @StateObject private var hapticEngine = HapticSymphonyEngine.shared
 
     private var currentTrack: Track? {
         playerState.currentItem?.track
@@ -139,6 +146,17 @@ struct FullPlayer: View {
                 if let track = playerState.currentItem?.track {
                     SongMemorySheet(track: track)
                 }
+            }
+            .sheet(isPresented: $showTimeCapsule) {
+                if let track = playerState.currentItem?.track {
+                    TimeCapsuleSheet(track: track)
+                }
+            }
+            .sheet(isPresented: $showTimeCapsuleVault) {
+                TimeCapsuleVaultView()
+            }
+            .sheet(isPresented: $showAntiAlgorithm) {
+                AntiAlgorithmView()
             }
             .offset(y: dragOffset)
             .onAppear {
@@ -318,47 +336,78 @@ struct FullPlayer: View {
         GeometryReader { geometry in
             let size = min(geometry.size.width - 48, 380)
             ZStack {
-                ArtworkImage(
-                    url: playerState.currentItem?.track.artworkURL,
-                    size: size
-                )
+                // Artwork view
+                ZStack {
+                    ArtworkImage(
+                        url: playerState.currentItem?.track.artworkURL,
+                        size: size
+                    )
 
-                // Loading overlay
-                if playerState.playbackState.isLoading {
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(Color.black.opacity(0.5))
-
-                    VStack(spacing: 16) {
-                        ProgressView()
-                            .scaleEffect(1.5)
-                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
-
-                        Text("Loading...")
-                            .font(.subheadline)
-                            .foregroundColor(.white)
+                    if playerState.playbackState.isLoading {
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(Color.black.opacity(0.5))
+                        VStack(spacing: 16) {
+                            ProgressView()
+                                .scaleEffect(1.5)
+                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                            Text("Loading...")
+                                .font(.subheadline)
+                                .foregroundColor(.white)
+                        }
                     }
                 }
+                .opacity(showingVisualizer ? 0 : 1)
+                .rotation3DEffect(.degrees(showingVisualizer ? -90 : 0), axis: (x: 0, y: 1, z: 0))
+
+                // Visualizer view
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(Color.black)
+
+                    NeuralFreqVisualizer(engine: AudioVisualizerEngine.shared, style: .neural)
+                        .frame(width: size, height: size)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                }
+                .opacity(showingVisualizer ? 1 : 0)
+                .rotation3DEffect(.degrees(showingVisualizer ? 0 : 90), axis: (x: 0, y: 1, z: 0))
             }
             .frame(width: size, height: size)
             .clipShape(RoundedRectangle(cornerRadius: 12))
             .overlay(
                 RoundedRectangle(cornerRadius: 12)
-                    .stroke(currentTrackIsLiked ? Color.red.opacity(0.55) : Color.clear, lineWidth: currentTrackIsLiked ? 1.5 : 0)
+                    .stroke(
+                        showingVisualizer ? Color.cyberCyan.opacity(0.6) :
+                            (currentTrackIsLiked ? Color.red.opacity(0.55) : Color.clear),
+                        lineWidth: (showingVisualizer || currentTrackIsLiked) ? 1.5 : 0
+                    )
             )
             .shadow(
-                color: currentTrackIsLiked ? Color.red.opacity(likePulse ? 0.45 : 0.22) : Color.black.opacity(0.3),
-                radius: currentTrackIsLiked ? (likePulse ? 26 : 18) : 20,
-                x: 0,
-                y: 10
+                color: showingVisualizer
+                    ? Color.cyberCyan.opacity(0.35)
+                    : (currentTrackIsLiked ? Color.red.opacity(likePulse ? 0.45 : 0.22) : Color.black.opacity(0.3)),
+                radius: showingVisualizer ? 24 : (currentTrackIsLiked ? (likePulse ? 26 : 18) : 20),
+                x: 0, y: 10
             )
             .scaleEffect(playerState.playbackState.isPlaying ? 1.0 : 0.94)
+            .animation(.spring(response: 0.5, dampingFraction: 0.75), value: showingVisualizer)
             .animation(.spring(response: 0.3, dampingFraction: 0.8), value: playerState.playbackState.isPlaying)
             .animation(.easeInOut(duration: 0.25), value: currentTrackIsLiked)
             .animation(.easeInOut(duration: 0.25), value: likePulse)
             .frame(maxWidth: .infinity, alignment: .center)
             .onTapGesture(count: 2) {
-                toggleCurrentTrackLike()
+                if !showingVisualizer { toggleCurrentTrackLike() }
             }
+            .gesture(
+                DragGesture(minimumDistance: 30, coordinateSpace: .local)
+                    .onEnded { value in
+                        let horizontal = abs(value.translation.width)
+                        let vertical = abs(value.translation.height)
+                        guard horizontal > vertical else { return }
+                        withAnimation(.spring(response: 0.5, dampingFraction: 0.75)) {
+                            showingVisualizer.toggle()
+                        }
+                    }
+            )
         }
         .aspectRatio(1, contentMode: .fit)
     }
@@ -397,67 +446,96 @@ struct FullPlayer: View {
     // MARK: - Progress Section
     private var progressSection: some View {
         VStack(spacing: 4) {
-            // Progress bar
-            GeometryReader { geometry in
-                ZStack(alignment: .leading) {
-                    // Track
-                    RoundedRectangle(cornerRadius: 2)
-                        .fill(Color.white.opacity(0.2))
-                        .frame(height: 4)
-                    
-                    // Progress
-                    RoundedRectangle(cornerRadius: 2)
-                        .fill(Color.white)
-                        .frame(width: max(0, geometry.size.width * CGFloat(playerState.progress)), height: 4)
-                    
-                    // Draggable knob (hidden until touched)
-                    Circle()
-                        .fill(Color.white)
-                        .frame(width: 14, height: 14)
-                        .shadow(radius: 4)
-                        .offset(x: max(0, geometry.size.width * CGFloat(playerState.progress)) - 7)
-                        .opacity(showScrubberThumb ? 1 : 0)
-                        .animation(.easeInOut(duration: 0.15), value: showScrubberThumb)
-                }
-                .contentShape(Rectangle())
-                .gesture(
-                    DragGesture(minimumDistance: 0)
-                        .onChanged { value in
-                            let newProgress = min(max(0, Double(value.location.x / geometry.size.width)), 1)
-                            playerState.seek(to: newProgress)
-                            withAnimation(.easeIn(duration: 0.15)) {
-                                showScrubberThumb = true
+            if let peaks = waveformPeaks {
+                // WAVEFORM_SEEK: SoundCloud-style symmetric waveform scrubber
+                WaveformSeekBar(
+                    peaks: peaks,
+                    progress: Binding(
+                        get: { playerState.progress },
+                        set: { _ in }
+                    ),
+                    onSeek: { newProgress in
+                        playerState.seek(to: newProgress)
+                        withAnimation(.easeIn(duration: 0.15)) { showScrubberThumb = true }
+                        scrubberHideTask?.cancel()
+                        scrubberHideTask = Task {
+                            try? await Task.sleep(nanoseconds: 2_000_000_000)
+                            guard !Task.isCancelled else { return }
+                            await MainActor.run {
+                                withAnimation(.easeOut(duration: 0.2)) { showScrubberThumb = false }
                             }
-                            scrubberHideTask?.cancel()
                         }
-                        .onEnded { _ in
-                            HapticManager.light()
-                            scrubberHideTask?.cancel()
-                            scrubberHideTask = Task {
-                                try? await Task.sleep(nanoseconds: 2_000_000_000)
-                                guard !Task.isCancelled else { return }
-                                await MainActor.run {
-                                    withAnimation(.easeOut(duration: 0.2)) {
-                                        showScrubberThumb = false
+                    },
+                    onDragChange: { isDragging in
+                        withAnimation(.easeInOut(duration: 0.15)) { showScrubberThumb = isDragging }
+                    }
+                )
+                .frame(height: 48)
+                .transition(.opacity)
+            } else {
+                // Fallback flat bar while waveform loads
+                GeometryReader { geometry in
+                    ZStack(alignment: .leading) {
+                        RoundedRectangle(cornerRadius: 2)
+                            .fill(Color.white.opacity(0.2))
+                            .frame(height: 4)
+
+                        RoundedRectangle(cornerRadius: 2)
+                            .fill(Color.white)
+                            .frame(width: max(0, geometry.size.width * CGFloat(playerState.progress)), height: 4)
+
+                        Circle()
+                            .fill(Color.white)
+                            .frame(width: 14, height: 14)
+                            .shadow(radius: 4)
+                            .offset(x: max(0, geometry.size.width * CGFloat(playerState.progress)) - 7)
+                            .opacity(showScrubberThumb ? 1 : 0)
+                            .animation(.easeInOut(duration: 0.15), value: showScrubberThumb)
+                    }
+                    .contentShape(Rectangle())
+                    .gesture(
+                        DragGesture(minimumDistance: 0)
+                            .onChanged { value in
+                                let newProgress = min(max(0, Double(value.location.x / geometry.size.width)), 1)
+                                playerState.seek(to: newProgress)
+                                withAnimation(.easeIn(duration: 0.15)) { showScrubberThumb = true }
+                                scrubberHideTask?.cancel()
+                            }
+                            .onEnded { _ in
+                                HapticManager.light()
+                                scrubberHideTask?.cancel()
+                                scrubberHideTask = Task {
+                                    try? await Task.sleep(nanoseconds: 2_000_000_000)
+                                    guard !Task.isCancelled else { return }
+                                    await MainActor.run {
+                                        withAnimation(.easeOut(duration: 0.2)) { showScrubberThumb = false }
                                     }
                                 }
                             }
-                        }
-                )
+                    )
+                }
+                .frame(height: 20)
             }
-            .frame(height: 20)
-            
+
             // Time labels
             HStack {
                 Text(playerState.currentTimeFormatted)
                     .font(.system(size: 12, weight: .medium, design: .monospaced))
                     .foregroundColor(.gray)
-                
+
                 Spacer()
-                
+
                 Text(playerState.durationFormatted)
                     .font(.system(size: 12, weight: .medium, design: .monospaced))
                     .foregroundColor(.gray)
+            }
+        }
+        .task(id: currentTrack?.videoId) {
+            waveformPeaks = nil
+            guard let videoId = currentTrack?.videoId else { return }
+            let peaks = await WaveformService.shared.waveform(for: videoId)
+            withAnimation(.easeIn(duration: 0.3)) {
+                waveformPeaks = peaks
             }
         }
     }
@@ -520,12 +598,11 @@ struct FullPlayer: View {
                 isEnabled: playerState.hasNextTrack,
                 action: {
                     HapticManager.medium()
-                    playerState.nextTrack()
+                    playerState.nextTrack(userSkipped: true)
                 }
             )
         }
     }
-
     private func toggleCurrentTrackLike() {
         guard let trackId = currentTrack?.videoId else { return }
 
@@ -617,6 +694,46 @@ struct FullPlayer: View {
                 action: {
                     HapticManager.light()
                     showSongMemory = true
+                }
+            )
+
+            // Haptic Symphony
+            if CHHapticEngine.capabilitiesForHardware().supportsHaptics {
+                MoreActionButton(
+                    icon: hapticEngine.isActive ? "waveform.path.ecg.rectangle.fill" : "waveform.path.ecg.rectangle",
+                    title: "Haptic",
+                    action: {
+                        HapticManager.light()
+                        if hapticEngine.isActive {
+                            hapticEngine.stop()
+                        } else {
+                            hapticEngine.start()
+                        }
+                    }
+                )
+            }
+
+            // Time Capsule (tap = bury, long-press = vault)
+            Button {
+                HapticManager.light()
+                showTimeCapsule = true
+            } label: {
+                VStack(spacing: 6) {
+                    Image(systemName: "hourglass")
+                        .font(.system(size: 20))
+                        .foregroundColor(.white)
+                    Text("Capsule")
+                        .font(.caption)
+                        .foregroundColor(.gray)
+                }
+                .frame(maxWidth: .infinity)
+                .frame(height: 60)
+            }
+            .buttonStyle(.plain)
+            .simultaneousGesture(
+                LongPressGesture(minimumDuration: 0.5).onEnded { _ in
+                    HapticManager.medium()
+                    showTimeCapsuleVault = true
                 }
             )
             
@@ -894,6 +1011,7 @@ struct AirPlayRoutePickerView: UIViewRepresentable {
 // MARK: - Audio Settings View
 struct AudioSettingsView: View {
     @StateObject private var crossfadeManager = CrossfadeManager.shared
+    @ObservedObject private var adaptiveWalkDJ = AdaptiveWalkDJManager.shared
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -987,6 +1105,54 @@ struct AudioSettingsView: View {
                             .foregroundColor(.cyberDim)
                     } footer: {
                         Text("Gapless playback automatically removes silence between consecutive tracks from the same album.")
+                            .foregroundColor(.cyberDim)
+                    }
+
+                    Section {
+                        Toggle(isOn: Binding(
+                            get: { adaptiveWalkDJ.isEnabled },
+                            set: { adaptiveWalkDJ.setEnabled($0) }
+                        )) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Adaptive Walk DJ")
+                                    .font(.body)
+                                    .foregroundColor(.white)
+                                Text("Suggest a song when you're walking and nothing is currently playing")
+                                    .font(.caption)
+                                    .foregroundColor(.cyberDim)
+                            }
+                        }
+                        .tint(Color.cyberCyan)
+                        .listRowBackground(Color.cyberSurface)
+
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(adaptiveWalkDJ.statusText)
+                                .font(.subheadline)
+                                .foregroundColor(.white)
+
+                            if let lastSuggestionSummary = adaptiveWalkDJ.lastSuggestionSummary {
+                                Text(lastSuggestionSummary)
+                                    .font(.caption)
+                                    .foregroundColor(.cyberDim)
+                            }
+
+                            Button {
+                                adaptiveWalkDJ.triggerTestSuggestion()
+                            } label: {
+                                Label("Test Walk Suggestion", systemImage: "figure.walk")
+                                    .font(.system(size: 13, weight: .bold, design: .monospaced))
+                                    .foregroundColor(.cyberCyan)
+                            }
+                            .disabled(!adaptiveWalkDJ.isEnabled)
+                        }
+                        .padding(.vertical, 4)
+                        .listRowBackground(Color.cyberSurface)
+                    } header: {
+                        Text("CONTEXT")
+                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                            .foregroundColor(.cyberDim)
+                    } footer: {
+                        Text("Walk DJ uses motion activity and notifications to suggest a seed song, then hands off to the existing related-song flow.")
                             .foregroundColor(.cyberDim)
                     }
 
