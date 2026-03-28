@@ -45,6 +45,7 @@ struct FullPlayer: View {
     @State private var showTimeCapsuleVault = false
     @State private var showAntiAlgorithm = false
     @State private var showGestureHints = false
+    @State private var playbackSpeed: Float = 1.0
     @AppStorage("hasSeenGestureHints") private var hasSeenGestureHints = false
     @StateObject private var hapticEngine = HapticSymphonyEngine.shared
     @Environment(\.accessibilityReduceMotion) var reduceMotion
@@ -254,7 +255,7 @@ struct FullPlayer: View {
                         size: artworkSize
                     )
                     if playerState.playbackState.isLoading {
-                        RoundedRectangle(cornerRadius: 12)
+                        RoundedRectangle(cornerRadius: CornerRadius.md)
                             .fill(Color.black.opacity(0.5))
                         VStack(spacing: 16) {
                             ProgressView()
@@ -267,9 +268,9 @@ struct FullPlayer: View {
                     }
                 }
                 .frame(width: artworkSize, height: artworkSize)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 12)
+                    RoundedRectangle(cornerRadius: CornerRadius.md)
                         .stroke(currentTrackIsLiked ? Color.red.opacity(0.55) : Color.clear, lineWidth: currentTrackIsLiked ? 1.5 : 0)
                 )
                 .shadow(
@@ -391,7 +392,7 @@ struct FullPlayer: View {
                     )
 
                     if playerState.playbackState.isLoading {
-                        RoundedRectangle(cornerRadius: 12)
+                        RoundedRectangle(cornerRadius: CornerRadius.md)
                             .fill(Color.black.opacity(0.5))
                         VStack(spacing: 16) {
                             ProgressView()
@@ -408,20 +409,20 @@ struct FullPlayer: View {
 
                 // Visualizer view
                 ZStack {
-                    RoundedRectangle(cornerRadius: 12)
+                    RoundedRectangle(cornerRadius: CornerRadius.md)
                         .fill(Color.black)
 
                     NeuralFreqVisualizer(engine: AudioVisualizerEngine.shared, style: .neural)
                         .frame(width: size, height: size)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
                 }
                 .opacity(showingVisualizer ? 1 : 0)
                 .rotation3DEffect(.degrees(showingVisualizer ? 0 : 90), axis: (x: 0, y: 1, z: 0))
             }
             .frame(width: size, height: size)
-            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
             .overlay(
-                RoundedRectangle(cornerRadius: 12)
+                RoundedRectangle(cornerRadius: CornerRadius.md)
                     .stroke(
                         showingVisualizer ? Color.cyberCyan.opacity(0.6) :
                             (currentTrackIsLiked ? Color.red.opacity(0.55) : Color.clear),
@@ -476,6 +477,17 @@ struct FullPlayer: View {
             .buttonStyle(.plain)
             .disabled(currentTrack == nil)
 
+            if playerState.contentType == .liveRadio {
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(Theme.cyberMagenta)
+                        .frame(width: 8, height: 8)
+                    Text("LIVE")
+                        .font(.system(size: 12, weight: .heavy, design: .monospaced))
+                        .foregroundColor(Theme.cyberMagenta)
+                }
+            }
+
             if let memory = songMemoryManager.memory(for: currentTrack) {
                 Button {
                     HapticManager.light()
@@ -522,11 +534,11 @@ struct FullPlayer: View {
                 // Fallback flat bar while waveform loads
                 GeometryReader { geometry in
                     ZStack(alignment: .leading) {
-                        RoundedRectangle(cornerRadius: 2)
+                        RoundedRectangle(cornerRadius: CornerRadius.xxs)
                             .fill(Color.white.opacity(0.2))
                             .frame(height: 4)
 
-                        RoundedRectangle(cornerRadius: 2)
+                        RoundedRectangle(cornerRadius: CornerRadius.xxs)
                             .fill(Color.white)
                             .frame(width: max(0, geometry.size.width * CGFloat(playerState.progress)), height: 4)
 
@@ -588,9 +600,21 @@ struct FullPlayer: View {
 
     private var playbackControlsSection: some View {
         VStack(spacing: 8) {
-            progressSection
+            if playerState.contentType != .liveRadio {
+                progressSection
+            }
             primaryControlsSection
                 .padding(.bottom, 6)
+            if playerState.contentType == .podcastEpisode {
+                Button(action: { cyclePlaybackSpeed() }) {
+                    Text(playbackSpeedText)
+                        .font(.system(size: 13, weight: .bold, design: .monospaced))
+                        .foregroundColor(Theme.cyberCyan)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Capsule().fill(Theme.cyberSurface))
+                }
+            }
             secondaryControlsRow
         }
     }
@@ -598,16 +622,30 @@ struct FullPlayer: View {
     // MARK: - Primary Controls
     private var primaryControlsSection: some View {
         HStack(spacing: 34) {
-            // Previous
-            PlayerControlButton(
-                icon: "backward.fill",
-                size: 28,
-                isEnabled: playerState.hasPreviousTrack,
-                action: {
-                    HapticManager.medium()
-                    playerState.previousTrack()
+            // Previous / Skip backward
+            if playerState.contentType == .liveRadio {
+                Spacer().frame(width: 28)
+            } else if playerState.contentType == .podcastEpisode {
+                Button(action: {
+                    HapticManager.light()
+                    playerState.skipBackward(15)
+                }) {
+                    Image(systemName: "gobackward.15")
+                        .font(.system(size: 24))
+                        .foregroundColor(.white)
                 }
-            )
+                .frame(width: 44, height: 44)
+            } else {
+                PlayerControlButton(
+                    icon: "backward.fill",
+                    size: 28,
+                    isEnabled: playerState.hasPreviousTrack,
+                    action: {
+                        HapticManager.medium()
+                        playerState.previousTrack()
+                    }
+                )
+            }
             
             // Play/Pause (larger) with loading state
             ZStack {
@@ -637,16 +675,30 @@ struct FullPlayer: View {
                 }
             }
             
-            // Next
-            PlayerControlButton(
-                icon: "forward.fill",
-                size: 28,
-                isEnabled: playerState.hasNextTrack,
-                action: {
-                    HapticManager.medium()
-                    playerState.nextTrack(userSkipped: true)
+            // Next / Skip forward
+            if playerState.contentType == .liveRadio {
+                Spacer().frame(width: 28)
+            } else if playerState.contentType == .podcastEpisode {
+                Button(action: {
+                    HapticManager.light()
+                    playerState.skipForward(15)
+                }) {
+                    Image(systemName: "goforward.15")
+                        .font(.system(size: 24))
+                        .foregroundColor(.white)
                 }
-            )
+                .frame(width: 44, height: 44)
+            } else {
+                PlayerControlButton(
+                    icon: "forward.fill",
+                    size: 28,
+                    isEnabled: playerState.hasNextTrack,
+                    action: {
+                        HapticManager.medium()
+                        playerState.nextTrack(userSkipped: true)
+                    }
+                )
+            }
         }
     }
     private func toggleCurrentTrackLike() {
@@ -664,6 +716,22 @@ struct FullPlayer: View {
                 likePulse = false
             }
         }
+    }
+
+    // MARK: - Playback Speed (Podcast)
+    private var playbackSpeedText: String {
+        playbackSpeed == 1.0 ? "1x" : String(format: "%.1fx", playbackSpeed)
+    }
+
+    private func cyclePlaybackSpeed() {
+        let speeds: [Float] = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0]
+        if let currentIndex = speeds.firstIndex(of: playbackSpeed) {
+            playbackSpeed = speeds[(currentIndex + 1) % speeds.count]
+        } else {
+            playbackSpeed = 1.0
+        }
+        playerState.setPlaybackRate(playbackSpeed)
+        HapticManager.light()
     }
 
     // MARK: - Secondary Controls Row (Shuffle, Repeat, Queue, Sleep)
@@ -718,7 +786,7 @@ struct FullPlayer: View {
         }
         .padding(.vertical, 12)
         .background(Color.white.opacity(0.05))
-        .cornerRadius(12)
+        .cornerRadius(CornerRadius.md)
     }
     
     // MARK: - More Actions Row (Lyrics, Memory, Audio, Share, AirPlay)
@@ -836,12 +904,12 @@ struct VolumeSlider: View {
             GeometryReader { geometry in
                 ZStack(alignment: .leading) {
                     // Track
-                    RoundedRectangle(cornerRadius: 2)
+                    RoundedRectangle(cornerRadius: CornerRadius.xxs)
                         .fill(Color.white.opacity(0.2))
                         .frame(height: 4)
 
                     // Fill
-                    RoundedRectangle(cornerRadius: 2)
+                    RoundedRectangle(cornerRadius: CornerRadius.xxs)
                         .fill(Color.white)
                         .frame(width: max(0, geometry.size.width * CGFloat(volume)), height: 4)
 
@@ -879,7 +947,7 @@ struct VolumeSlider: View {
         .padding(.horizontal, 8)
         .padding(.vertical, 8)
         .background(Color.white.opacity(0.05))
-        .cornerRadius(8)
+        .cornerRadius(CornerRadius.sm)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Volume \(Int(volume * 100)) percent")
         .accessibilityValue("\(Int(volume * 100))%")
@@ -968,7 +1036,7 @@ struct ArtworkImage: View {
     var body: some View {
         ZStack {
             // Placeholder
-            RoundedRectangle(cornerRadius: 12)
+            RoundedRectangle(cornerRadius: CornerRadius.md)
                 .fill(Color.cyberDim.opacity(0.2))
                 .overlay(
                     Image(systemName: "music.note")
@@ -990,7 +1058,7 @@ struct ArtworkImage: View {
             }
         }
         .frame(width: size, height: size)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
     }
 }
 
@@ -1312,14 +1380,14 @@ struct ShareSheet: View {
                         .resizable()
                         .aspectRatio(contentMode: .fit)
                         .frame(height: 300)
-                        .cornerRadius(12)
+                        .cornerRadius(CornerRadius.md)
                         .shadow(radius: 8)
                 } else if isGenerating {
                     ProgressView("Generating card...")
                         .frame(height: 300)
                 } else {
                     // Placeholder
-                    RoundedRectangle(cornerRadius: 12)
+                    RoundedRectangle(cornerRadius: CornerRadius.md)
                         .fill(Theme.tertiaryText.opacity(0.2))
                         .frame(height: 300)
                         .overlay(
@@ -1449,7 +1517,7 @@ struct ShareActionButton: View {
             .frame(maxWidth: .infinity)
             .padding(.vertical, 16)
             .background(Color(.systemGray6))
-            .cornerRadius(12)
+            .cornerRadius(CornerRadius.md)
         }
         .buttonStyle(.plain)
     }
@@ -1469,7 +1537,7 @@ struct QRCodeView: View {
                         .resizable()
                         .interpolation(.none)
                         .frame(width: 250, height: 250)
-                        .cornerRadius(12)
+                        .cornerRadius(CornerRadius.md)
                 } else {
                     ProgressView()
                         .frame(width: 250, height: 250)

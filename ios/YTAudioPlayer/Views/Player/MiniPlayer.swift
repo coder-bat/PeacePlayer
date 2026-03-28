@@ -32,11 +32,22 @@ struct MiniPlayer: View {
                 onExpand()
             }) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(playerState.currentItem?.track.title ?? "")
-                        .font(.system(size: 15, weight: .semibold))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-                        .foregroundColor(.white)
+                    HStack(spacing: 6) {
+                        Text(playerState.currentItem?.track.title ?? "")
+                            .font(.system(size: 15, weight: .semibold))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                            .foregroundColor(.white)
+
+                        if playerState.contentType == .liveRadio {
+                            Text("LIVE")
+                                .font(.system(size: 9, weight: .heavy, design: .monospaced))
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Capsule().fill(Theme.cyberMagenta))
+                        }
+                    }
 
                     Text(playerState.currentItem?.track.displayArtist ?? "")
                         .font(.system(size: 13))
@@ -100,15 +111,17 @@ struct MiniPlayer: View {
             }
         )
         .overlay(alignment: .top) {
-            // Playback progress bar
-            GeometryReader { geo in
-                let progress = playerState.duration > 0
-                    ? CGFloat(playerState.currentTime / playerState.duration)
-                    : 0
-                Color.cyberCyan
-                    .frame(width: geo.size.width * progress, height: 2)
+            // Playback progress bar (hidden for live radio)
+            if playerState.contentType != .liveRadio {
+                GeometryReader { geo in
+                    let progress = playerState.duration > 0
+                        ? CGFloat(playerState.currentTime / playerState.duration)
+                        : 0
+                    Color.cyberCyan
+                        .frame(width: geo.size.width * progress, height: 2)
+                }
+                .frame(height: 2)
             }
-            .frame(height: 2)
         }
         .overlay(alignment: .top) {
             Color.cyberCyan.opacity(0.15).frame(height: 0.5)
