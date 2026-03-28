@@ -56,12 +56,10 @@ struct TimeCapsuleSheet: View {
 
     private var headerSection: some View {
         HStack(spacing: 14) {
-            AsyncImage(url: track.artworkURL) { phase in
-                if let image = phase.image {
-                    image.resizable().aspectRatio(contentMode: .fill)
-                } else {
-                    Color.gray.opacity(0.3)
-                }
+            CachedAsyncImage(url: track.artworkURL) { image in
+                image.resizable().aspectRatio(contentMode: .fill)
+            } placeholder: {
+                Color.gray.opacity(0.3)
             }
             .frame(width: 60, height: 60)
             .cornerRadius(10)
@@ -71,10 +69,12 @@ struct TimeCapsuleSheet: View {
                     .font(.headline)
                     .foregroundColor(.white)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.8)
                 Text(track.displayArtist)
                     .font(.subheadline)
                     .foregroundColor(.gray)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.8)
             }
             Spacer()
         }

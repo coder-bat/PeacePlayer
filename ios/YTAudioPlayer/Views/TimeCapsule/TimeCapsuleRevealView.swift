@@ -54,7 +54,7 @@ struct TimeCapsuleRevealView: View {
                             .foregroundColor(.white)
                         Text(capsule.trackArtist)
                             .font(.subheadline)
-                            .foregroundColor(.gray)
+                            .foregroundColor(.cyberDim)
                     }
                     .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
@@ -107,7 +107,7 @@ struct TimeCapsuleRevealView: View {
                         }
 
                         Button("Close") { dismiss() }
-                            .foregroundColor(.gray)
+                            .foregroundColor(.cyberDim)
                     }
                     .padding(.horizontal, 32)
                     .padding(.bottom, 40)
@@ -155,12 +155,10 @@ struct TimeCapsuleRevealView: View {
     }
 
     private var artworkView: some View {
-        AsyncImage(url: capsule.artworkURL) { phase in
-            if let image = phase.image {
-                image.resizable().aspectRatio(contentMode: .fill)
-            } else {
-                Color.gray.opacity(0.2)
-            }
+        CachedAsyncImage(url: capsule.artworkURL) { image in
+            image.resizable().aspectRatio(contentMode: .fill)
+        } placeholder: {
+            Color.cyberDim.opacity(0.2)
         }
         .frame(width: 240, height: 240)
         .cornerRadius(20)

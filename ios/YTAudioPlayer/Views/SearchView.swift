@@ -469,9 +469,19 @@ struct SearchView: View {
 
                                         Spacer()
 
-                                        Image(systemName: "arrow.up.left")
-                                            .font(.system(size: 12))
-                                            .foregroundColor(.cyberDim)
+                                        Button {
+                                            withAnimation(.easeInOut(duration: 0.25)) {
+                                                viewModel.removeRecentSearch(query)
+                                            }
+                                            HapticManager.medium()
+                                        } label: {
+                                            Image(systemName: "xmark")
+                                                .font(.system(size: 10, weight: .bold))
+                                                .foregroundColor(.cyberDim)
+                                                .padding(6)
+                                                .contentShape(Circle())
+                                        }
+                                        .buttonStyle(.plain)
                                     }
                                     .padding(.horizontal, 14)
                                     .padding(.vertical, 12)
@@ -484,6 +494,16 @@ struct SearchView: View {
                                 }
                                 .buttonStyle(.plain)
                                 .padding(.horizontal)
+                                .contextMenu {
+                                    Button(role: .destructive) {
+                                        withAnimation(.easeInOut(duration: 0.25)) {
+                                            viewModel.removeRecentSearch(query)
+                                        }
+                                    } label: {
+                                        Label("Delete", systemImage: "trash")
+                                    }
+                                }
+                                .transition(.opacity.combined(with: .move(edge: .trailing)))
                             }
                         }
                     }
@@ -828,7 +848,45 @@ struct SearchResultRow: View {
                 Label(playlistManager.isLiked(trackId: track.videoId) ? "Unlike" : "Like",
                       systemImage: playlistManager.isLiked(trackId: track.videoId) ? "heart.fill" : "heart")
             }
-            
+
+            Button {
+                ShareHelper.shareTrack(
+                    title: track.title,
+                    artist: track.displayArtist,
+                    videoId: track.videoId
+                )
+            } label: {
+                Label("Share", systemImage: "square.and.arrow.up")
+            }
+
+            Button {
+                ShareHelper.copyTrackInfo(
+                    title: track.title,
+                    artist: track.displayArtist
+                )
+            } label: {
+                Label("Copy Info", systemImage: "doc.on.doc")
+            }
+
+            Button {
+                Task {
+                    if let card = await ShareCardGenerator.generateCard(for: track) {
+                        let activityVC = UIActivityViewController(activityItems: [card], applicationActivities: nil)
+                        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                           let rootVC = windowScene.windows.first?.rootViewController {
+                            if let popover = activityVC.popoverPresentationController {
+                                popover.sourceView = rootVC.view
+                                popover.sourceRect = CGRect(x: rootVC.view.bounds.midX, y: rootVC.view.bounds.midY, width: 0, height: 0)
+                                popover.permittedArrowDirections = []
+                            }
+                            rootVC.present(activityVC, animated: true)
+                        }
+                    }
+                }
+            } label: {
+                Label("Share Card", systemImage: "rectangle.on.rectangle")
+            }
+
             Divider()
             
             Button(action: onDownload) {
@@ -903,10 +961,19 @@ class SearchViewModel: ObservableObject {
         recentSearches = searches
         UserDefaults.standard.set(searches, forKey: "recentSearches")
     }
+
+    func removeRecentSearch(_ query: String) {
+        recentSearches.removeAll { $0 == query }
+        UserDefaults.standard.set(recentSearches, forKey: "recentSearches")
+    }
     
     func refreshDownloadedIds() {
         APIService.shared.fetchLibrary()
-            .sink(receiveCompletion: { _ in },
+            .sink(receiveCompletion: { completion in
+                if case .failure(let error) = completion {
+                    print("⚠️ [SearchView] Request failed: \(error.localizedDescription)")
+                }
+            },
                   receiveValue: { [weak self] tracks in
                 self?.downloadedVideoIds = Set(tracks.compactMap { track -> String? in
                     let title = track.parsedTitle.lowercased().trimmingCharacters(in: .whitespaces)
@@ -940,7 +1007,11 @@ class SearchViewModel: ObservableObject {
             .handleErrors(with: .shared, retry: { [weak self] in
                 self?.search(query: query)
             })
-            .sink(receiveCompletion: { _ in },
+            .sink(receiveCompletion: { completion in
+                if case .failure(let error) = completion {
+                    print("⚠️ [SearchView] Request failed: \(error.localizedDescription)")
+                }
+            },
                   receiveValue: { [weak self] tracks in
                 self?.results = tracks
                 self?.refreshDownloadedIds()
@@ -977,7 +1048,11 @@ class SearchViewModel: ObservableObject {
             .handleErrors(with: .shared, retry: { [weak self] in
                 self?.performPlayTrack(track)
             })
-            .sink(receiveCompletion: { _ in },
+            .sink(receiveCompletion: { completion in
+                if case .failure(let error) = completion {
+                    print("⚠️ [SearchView] Request failed: \(error.localizedDescription)")
+                }
+            },
                   receiveValue: { streamInfo in
                 let item = QueueItem(
                     track: track,

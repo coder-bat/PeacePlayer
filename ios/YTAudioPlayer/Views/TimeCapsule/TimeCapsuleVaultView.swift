@@ -8,7 +8,7 @@
 import SwiftUI
 
 struct TimeCapsuleVaultView: View {
-    @ObservedObject private var capsuleManager = TimeCapsuleManager.shared
+    @StateObject private var capsuleManager = TimeCapsuleManager.shared
     @State private var revealCapsule: TimeCapsuleSnapshot? = nil
     @Environment(\.dismiss) private var dismiss
 
@@ -54,7 +54,7 @@ struct TimeCapsuleVaultView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Close") { dismiss() }
-                        .foregroundColor(.gray)
+                        .foregroundColor(.cyberDim)
                 }
             }
             .fullScreenCover(item: $revealCapsule) { capsule in
@@ -69,13 +69,13 @@ struct TimeCapsuleVaultView: View {
         VStack(spacing: 16) {
             Image(systemName: "hourglass")
                 .font(.system(size: 48))
-                .foregroundColor(.gray.opacity(0.4))
+                .foregroundColor(.cyberDim.opacity(0.4))
             Text("No Time Capsules Yet")
                 .font(.headline)
-                .foregroundColor(.gray)
+                .foregroundColor(.cyberDim)
             Text("Bury a capsule from the player to\nsend a message to your future self")
                 .font(.caption)
-                .foregroundColor(.gray.opacity(0.7))
+                .foregroundColor(.cyberDim.opacity(0.8))
                 .multilineTextAlignment(.center)
         }
     }
@@ -103,12 +103,10 @@ private struct CapsuleCard: View {
     var body: some View {
         HStack(spacing: 14) {
             // Artwork (blurred if sealed)
-            AsyncImage(url: capsule.artworkURL) { phase in
-                if let image = phase.image {
-                    image.resizable().aspectRatio(contentMode: .fill)
-                } else {
-                    Color.gray.opacity(0.2)
-                }
+            CachedAsyncImage(url: capsule.artworkURL) { image in
+                image.resizable().aspectRatio(contentMode: .fill)
+            } placeholder: {
+                Color.cyberDim.opacity(0.2)
             }
             .frame(width: 56, height: 56)
             .cornerRadius(10)
@@ -127,6 +125,7 @@ private struct CapsuleCard: View {
                     .font(.headline)
                     .foregroundColor(.white)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.8)
 
                 if style == .sealed {
                     let days = capsule.daysUntilUnlock
@@ -140,7 +139,7 @@ private struct CapsuleCard: View {
                 } else {
                     Text("Opened \(capsule.openedAt?.formatted(.dateTime.month().day()) ?? "")")
                         .font(.caption)
-                        .foregroundColor(.gray)
+                        .foregroundColor(.cyberDim)
                 }
             }
 

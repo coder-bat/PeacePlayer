@@ -7,9 +7,11 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		BBBB000100010001BBBB0001 /* ShareHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBBB000200020002BBBB0002 /* ShareHelper.swift */; };
 		AAAA000100010001AAAA0001 /* UndoService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AAAA000200020002AAAA0002 /* UndoService.swift */; };
 		AAAA000300030003AAAA0003 /* UndoToastView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AAAA000400040004AAAA0004 /* UndoToastView.swift */; };
 		3BAF49F42AC1B8D9453BC565 /* GestureCoachOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CEE2161DC363294A5C20BAD /* GestureCoachOverlay.swift */; };
+		CCCC000100010001CCCC0001 /* CachedAsyncImage.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCCC000200020002CCCC0002 /* CachedAsyncImage.swift */; };
 		784D55472A7AA2E908B44675 /* NetworkMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 928CA01AEFAF7FDA09762683 /* NetworkMonitor.swift */; };
 		017ECF92A19304984CAAB334 /* TrackStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8BDBAB24D7F33E11F8D0EA48 /* TrackStore.swift */; };
 		05571F6649D3C29409B4485D /* PeacePlayerShortcuts.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1C43AF05755A03C07C3199D /* PeacePlayerShortcuts.swift */; };
@@ -136,6 +138,7 @@
 
 /* Begin PBXFileReference section */
 		5CEE2161DC363294A5C20BAD /* GestureCoachOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GestureCoachOverlay.swift; sourceTree = "<group>"; };
+		CCCC000200020002CCCC0002 /* CachedAsyncImage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CachedAsyncImage.swift; sourceTree = "<group>"; };
 		928CA01AEFAF7FDA09762683 /* NetworkMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkMonitor.swift; sourceTree = "<group>"; };
 		0080BED852F91FC0AFA9DE17 /* YTAudioPlayerApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = YTAudioPlayerApp.swift; sourceTree = "<group>"; };
 		00CA580AB7F5354A0D5782EA /* SongMemoryBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SongMemoryBadge.swift; sourceTree = "<group>"; };
@@ -166,6 +169,7 @@
 		A1B2C3D4E5F60005A1B2C3D4 /* CDExplorationSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CDExplorationSession.swift; sourceTree = "<group>"; };
 		3038FFEB319F49CD9E1A1175 /* AudioVisualizerEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioVisualizerEngine.swift; sourceTree = "<group>"; };
 		AAAA000200020002AAAA0002 /* UndoService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UndoService.swift; sourceTree = "<group>"; };
+		BBBB000200020002BBBB0002 /* ShareHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareHelper.swift; sourceTree = "<group>"; };
 		AAAA000400040004AAAA0004 /* UndoToastView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UndoToastView.swift; sourceTree = "<group>"; };
 		F4BAE1768725482082331515 /* WaveformService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WaveformService.swift; sourceTree = "<group>"; };
 		2750AE85A37F46BD87CA3BFC /* NeuralFreqVisualizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeuralFreqVisualizer.swift; sourceTree = "<group>"; };
@@ -420,6 +424,7 @@
 				052F62264ACE5847C9690E2C /* DesignSystem */,
 				CE0536C22C903F7D3E743673 /* Models */,
 				AAAA000500050005AAAA0005 /* Services */,
+				BBBB000300030003BBBB0003 /* Helpers */,
 				11AFA6949CB68AF96A7DFB56 /* Views */,
 			);
 			path = YTAudioPlayer;
@@ -433,9 +438,18 @@
 			path = Services;
 			sourceTree = "<group>";
 		};
+		BBBB000300030003BBBB0003 /* Helpers */ = {
+			isa = PBXGroup;
+			children = (
+				BBBB000200020002BBBB0002 /* ShareHelper.swift */,
+			);
+			path = Helpers;
+			sourceTree = "<group>";
+		};
 		AC08B4BDDD8B335844F6B329 /* Components */ = {
 			isa = PBXGroup;
 			children = (
+				CCCC000200020002CCCC0002 /* CachedAsyncImage.swift */,
 				B81D655E3DE40EE89C5400B4 /* EmptyStateView.swift */,
 				CD44B40105E0AC2CC5C0781B /* ErrorView.swift */,
 				5CEE2161DC363294A5C20BAD /* GestureCoachOverlay.swift */,
@@ -586,6 +600,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				BBBB000100010001BBBB0001 /* ShareHelper.swift in Sources */,
 				3BAF49F42AC1B8D9453BC565 /* GestureCoachOverlay.swift in Sources */,
 				784D55472A7AA2E908B44675 /* NetworkMonitor.swift in Sources */,
 				4C726AD1EF1C2CDF7FDEAE4A /* APIService.swift in Sources */,
@@ -622,6 +637,7 @@
 				571D3F2F6C4A72685CCB351C /* DownloadManager.swift in Sources */,
 				F1BDDD059138B2D12ACD1238 /* DownloadQueueView.swift in Sources */,
 				88A50F33382CF82BBEAD774A /* EmptyStateView.swift in Sources */,
+				CCCC000100010001CCCC0001 /* CachedAsyncImage.swift in Sources */,
 				CB0764F958EFA4E8850BC676 /* ErrorHandler.swift in Sources */,
 				CDB01CAE6DCC374351226883 /* ErrorView.swift in Sources */,
 				A0479382B5B66EE7F526B8CA /* FullPlayer.swift in Sources */,

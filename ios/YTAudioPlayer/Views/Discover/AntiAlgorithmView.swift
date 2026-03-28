@@ -8,7 +8,7 @@
 import SwiftUI
 
 struct AntiAlgorithmView: View {
-    @ObservedObject private var engine = AntiAlgorithmEngine.shared
+    @StateObject private var engine = AntiAlgorithmEngine.shared
     @Environment(\.dismiss) private var dismiss
     @State private var tasteProfile: (artists: [(String, Int)], seedCount: Int)?
 
@@ -36,8 +36,11 @@ struct AntiAlgorithmView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Close") { dismiss() }
-                        .foregroundColor(.gray)
+                    Button("Close") {
+                        HapticManager.light()
+                        dismiss()
+                    }
+                        .foregroundColor(.cyberDim)
                 }
             }
         }
@@ -65,7 +68,7 @@ struct AntiAlgorithmView: View {
 
             Text("We'll analyze your listening habits and\nqueue songs just outside your comfort zone")
                 .font(.subheadline)
-                .foregroundColor(.gray)
+                .foregroundColor(.cyberDim)
                 .multilineTextAlignment(.center)
 
             // Taste preview
@@ -82,17 +85,18 @@ struct AntiAlgorithmView: View {
                                 .foregroundColor(.white)
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 6)
-                                .background(Color.white.opacity(0.08))
+                                .background(Color.cyberSurface.opacity(0.08))
                                 .cornerRadius(8)
                         }
                     }
                 }
                 .padding()
-                .background(Color.white.opacity(0.03))
+                .background(Color.cyberSurface.opacity(0.03))
                 .cornerRadius(12)
             }
 
             Button {
+                HapticManager.medium()
                 engine.startExplorationSession()
             } label: {
                 HStack {
@@ -119,7 +123,7 @@ struct AntiAlgorithmView: View {
                 .scaleEffect(1.5)
             Text("Finding your frontier...")
                 .font(.subheadline)
-                .foregroundColor(.gray)
+                .foregroundColor(.cyberDim)
         }
         .frame(height: 200)
     }
@@ -136,8 +140,11 @@ struct AntiAlgorithmView: View {
                     .font(.headline)
                     .foregroundColor(.orange)
                 Spacer()
-                Button("End") { engine.endExplorationSession() }
-                    .foregroundColor(.gray)
+                Button("End") {
+                    HapticManager.light()
+                    engine.endExplorationSession()
+                }
+                    .foregroundColor(.cyberDim)
             }
             .padding()
             .background(Color.orange.opacity(0.08))
@@ -152,12 +159,10 @@ struct AntiAlgorithmView: View {
 
                     ForEach(engine.explorationQueue) { track in
                         HStack(spacing: 12) {
-                            AsyncImage(url: track.artworkURL) { phase in
-                                if let image = phase.image {
-                                    image.resizable().aspectRatio(contentMode: .fill)
-                                } else {
-                                    Color.gray.opacity(0.2)
-                                }
+                            CachedAsyncImage(url: track.artworkURL) { image in
+                                image.resizable().aspectRatio(contentMode: .fill)
+                            } placeholder: {
+                                Color.cyberDim.opacity(0.2)
                             }
                             .frame(width: 44, height: 44)
                             .cornerRadius(8)
@@ -167,10 +172,12 @@ struct AntiAlgorithmView: View {
                                     .font(.subheadline)
                                     .foregroundColor(.white)
                                     .lineLimit(1)
+                                    .minimumScaleFactor(0.8)
                                 Text(track.displayArtist)
                                     .font(.caption)
-                                    .foregroundColor(.gray)
+                                    .foregroundColor(.cyberDim)
                                     .lineLimit(1)
+                                    .minimumScaleFactor(0.8)
                             }
 
                             Spacer()
@@ -186,7 +193,7 @@ struct AntiAlgorithmView: View {
                     }
                 }
                 .padding()
-                .background(Color.white.opacity(0.03))
+                .background(Color.cyberSurface.opacity(0.03))
                 .cornerRadius(12)
             }
 
@@ -221,7 +228,7 @@ struct AntiAlgorithmView: View {
                 }
             }
             .padding()
-            .background(Color.white.opacity(0.03))
+            .background(Color.cyberSurface.opacity(0.03))
             .cornerRadius(12)
         )
     }
@@ -241,7 +248,7 @@ private struct StatPill: View {
                 .foregroundColor(color)
             Text(label)
                 .font(.caption2)
-                .foregroundColor(.gray)
+                .foregroundColor(.cyberDim)
         }
     }
 }
@@ -257,11 +264,11 @@ private struct StatBlock: View {
                 .foregroundColor(.orange)
             Text(title)
                 .font(.caption)
-                .foregroundColor(.gray)
+                .foregroundColor(.cyberDim)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 12)
-        .background(Color.white.opacity(0.05))
+        .background(Color.cyberSurface.opacity(0.05))
         .cornerRadius(10)
     }
 }

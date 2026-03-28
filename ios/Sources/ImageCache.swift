@@ -22,6 +22,7 @@ class ImageCache {
     
     private var cancellables = Set<AnyCancellable>()
     private var activeDownloads: [URL: AnyCancellable] = [:]
+    private var cleanupTimer: Timer?
 
     // Thread safety for disk cache operations
     private let diskCleanupLock = NSLock()
@@ -55,9 +56,14 @@ class ImageCache {
         )
         
         // Periodic cleanup every hour
-        Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) { [weak self] _ in
+        self.cleanupTimer = Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) { [weak self] _ in
             self?.enforceCacheLimits()
         }
+    }
+    
+    deinit {
+        cleanupTimer?.invalidate()
+        NotificationCenter.default.removeObserver(self)
     }
     
     // MARK: - Public Methods
@@ -309,63 +315,4 @@ private extension NSString {
     }
 }
 
-// MARK: - SwiftUI View Extension
 
-struct CachedAsyncImage<Placeholder: View>: View {
-    let url: URL?
-    let placeholder: Placeholder
-    
-    @State private var image: UIImage?
-    @State private var isLoaded = false
-    @State private var cancellable: AnyCancellable?
-    
-    init(url: URL?, @ViewBuilder placeholder: () -> Placeholder) {
-        self.url = url
-        self.placeholder = placeholder()
-    }
-    
-    var body: some View {
-        ZStack {
-            if let image = image {
-                Image(uiImage: image)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .opacity(isLoaded ? 1 : 0)
-                    .onAppear {
-                        withAnimation(.easeIn(duration: 0.2)) {
-                            isLoaded = true
-                        }
-                    }
-            } else {
-                placeholder
-            }
-        }
-        .onAppear {
-            loadImage()
-        }
-        .onChange(of: url) { _ in
-            cancellable?.cancel()
-            image = nil
-            isLoaded = false
-            loadImage()
-        }
-        .onDisappear {
-            cancellable?.cancel()
-        }
-    }
-    
-    private func loadImage() {
-        guard let url = url else {
-            image = nil
-            return
-        }
-        
-        cancellable = ImageCache.shared.image(for: url)
-            .receive(on: DispatchQueue.main)
-            .sink { loadedImage in
-                if let loadedImage = loadedImage {
-                    self.image = loadedImage
-                }
-            }
-    }
-}
