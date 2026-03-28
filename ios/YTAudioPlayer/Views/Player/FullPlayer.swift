@@ -19,7 +19,7 @@ struct FullPlayer: View {
     @Binding var isPresented: Bool
 
     private func dismiss() {
-        withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
+        withAnimation(reduceMotion ? .none : .spring(response: 0.45, dampingFraction: 0.85)) {
             isPresented = false
         }
     }
@@ -47,6 +47,7 @@ struct FullPlayer: View {
     @State private var showGestureHints = false
     @AppStorage("hasSeenGestureHints") private var hasSeenGestureHints = false
     @StateObject private var hapticEngine = HapticSymphonyEngine.shared
+    @Environment(\.accessibilityReduceMotion) var reduceMotion
 
     private var currentTrack: Track? {
         playerState.currentItem?.track
@@ -74,7 +75,7 @@ struct FullPlayer: View {
                 dominantColor
                     .opacity(0.25)
                     .ignoresSafeArea()
-                    .animation(.easeInOut(duration: 0.35), value: dominantColor)
+                    .animation(reduceMotion ? .none : .easeInOut(duration: 0.35), value: dominantColor)
 
                 // Optional blur background from artwork
                 ArtworkBackground(url: playerState.currentItem?.track.artworkURL)
@@ -89,7 +90,7 @@ struct FullPlayer: View {
                 // First-run gesture coach marks
                 if showGestureHints {
                     GestureCoachOverlay {
-                        withAnimation(.easeOut(duration: 0.3)) {
+                        withAnimation(reduceMotion ? .none : .easeOut(duration: 0.3)) {
                             showGestureHints = false
                             hasSeenGestureHints = true
                         }
@@ -112,7 +113,7 @@ struct FullPlayer: View {
                     }
                     .onEnded { value in
                         guard !isLandscape, scrollAtTop else {
-                            withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
+                            withAnimation(reduceMotion ? .none : .spring(response: 0.35, dampingFraction: 0.75)) {
                                 dragOffset = 0
                             }
                             return
@@ -121,7 +122,7 @@ struct FullPlayer: View {
                             HapticManager.medium()
                             dismiss()
                         } else {
-                            withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
+                            withAnimation(reduceMotion ? .none : .spring(response: 0.35, dampingFraction: 0.75)) {
                                 dragOffset = 0
                             }
                         }
@@ -278,8 +279,8 @@ struct FullPlayer: View {
                     y: 10
                 )
                 .scaleEffect((playerState.playbackState.isPlaying ? 1.0 : 0.94) * (likePulse ? 1.06 : 1.0))
-                .animation(.spring(response: 0.3, dampingFraction: 0.8), value: playerState.playbackState.isPlaying)
-                .animation(.spring(response: 0.25, dampingFraction: 0.6), value: likePulse)
+                .animation(reduceMotion ? .none : .spring(response: 0.3, dampingFraction: 0.8), value: playerState.playbackState.isPlaying)
+                .animation(reduceMotion ? .none : .spring(response: 0.25, dampingFraction: 0.6), value: likePulse)
                 .onTapGesture(count: 2) {
                     toggleCurrentTrackLike()
                 }
@@ -341,7 +342,7 @@ struct FullPlayer: View {
                 blue: Double(bitmap[2]) / 255.0
             )
             await MainActor.run {
-                withAnimation(.easeInOut(duration: 0.8)) {
+                withAnimation(reduceMotion ? .none : .easeInOut(duration: 0.8)) {
                     dominantColor = color
                 }
             }
@@ -423,9 +424,9 @@ struct FullPlayer: View {
                 x: 0, y: 10
             )
             .scaleEffect((playerState.playbackState.isPlaying ? 1.0 : 0.94) * (likePulse ? 1.06 : 1.0))
-            .animation(.spring(response: 0.5, dampingFraction: 0.75), value: showingVisualizer)
-            .animation(.spring(response: 0.3, dampingFraction: 0.8), value: playerState.playbackState.isPlaying)
-            .animation(.spring(response: 0.25, dampingFraction: 0.6), value: likePulse)
+            .animation(reduceMotion ? .none : .spring(response: 0.5, dampingFraction: 0.75), value: showingVisualizer)
+            .animation(reduceMotion ? .none : .spring(response: 0.3, dampingFraction: 0.8), value: playerState.playbackState.isPlaying)
+            .animation(reduceMotion ? .none : .spring(response: 0.25, dampingFraction: 0.6), value: likePulse)
             .frame(maxWidth: .infinity, alignment: .center)
             .onTapGesture(count: 2) {
                 if !showingVisualizer { toggleCurrentTrackLike() }
@@ -436,7 +437,7 @@ struct FullPlayer: View {
                         let horizontal = abs(value.translation.width)
                         let vertical = abs(value.translation.height)
                         guard horizontal > vertical else { return }
-                        withAnimation(.spring(response: 0.5, dampingFraction: 0.75)) {
+                        withAnimation(reduceMotion ? .none : .spring(response: 0.5, dampingFraction: 0.75)) {
                             showingVisualizer.toggle()
                         }
                     }
@@ -449,7 +450,7 @@ struct FullPlayer: View {
     private var trackInfoSection: some View {
         VStack(spacing: 8) {
             Button {
-                withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
+                withAnimation(reduceMotion ? .none : .spring(response: 0.28, dampingFraction: 0.82)) {
                     isTrackInfoExpanded.toggle()
                 }
             } label: {
@@ -489,18 +490,18 @@ struct FullPlayer: View {
                     ),
                     onSeek: { newProgress in
                         playerState.seek(to: newProgress)
-                        withAnimation(.easeIn(duration: 0.15)) { showScrubberThumb = true }
+                        withAnimation(reduceMotion ? .none : .easeIn(duration: 0.15)) { showScrubberThumb = true }
                         scrubberHideTask?.cancel()
                         scrubberHideTask = Task {
                             try? await Task.sleep(nanoseconds: 2_000_000_000)
                             guard !Task.isCancelled else { return }
                             await MainActor.run {
-                                withAnimation(.easeOut(duration: 0.2)) { showScrubberThumb = false }
+                                withAnimation(reduceMotion ? .none : .easeOut(duration: 0.2)) { showScrubberThumb = false }
                             }
                         }
                     },
                     onDragChange: { isDragging in
-                        withAnimation(.easeInOut(duration: 0.15)) { showScrubberThumb = isDragging }
+                        withAnimation(reduceMotion ? .none : .easeInOut(duration: 0.15)) { showScrubberThumb = isDragging }
                     }
                 )
                 .frame(height: 48)
@@ -523,7 +524,7 @@ struct FullPlayer: View {
                             .shadow(radius: 4)
                             .offset(x: max(0, geometry.size.width * CGFloat(playerState.progress)) - 7)
                             .opacity(showScrubberThumb ? 1 : 0)
-                            .animation(.easeInOut(duration: 0.15), value: showScrubberThumb)
+                            .animation(reduceMotion ? .none : .easeInOut(duration: 0.15), value: showScrubberThumb)
                     }
                     .contentShape(Rectangle())
                     .gesture(
@@ -531,7 +532,7 @@ struct FullPlayer: View {
                             .onChanged { value in
                                 let newProgress = min(max(0, Double(value.location.x / geometry.size.width)), 1)
                                 playerState.seek(to: newProgress)
-                                withAnimation(.easeIn(duration: 0.15)) { showScrubberThumb = true }
+                                withAnimation(reduceMotion ? .none : .easeIn(duration: 0.15)) { showScrubberThumb = true }
                                 scrubberHideTask?.cancel()
                             }
                             .onEnded { _ in
@@ -541,7 +542,7 @@ struct FullPlayer: View {
                                     try? await Task.sleep(nanoseconds: 2_000_000_000)
                                     guard !Task.isCancelled else { return }
                                     await MainActor.run {
-                                        withAnimation(.easeOut(duration: 0.2)) { showScrubberThumb = false }
+                                        withAnimation(reduceMotion ? .none : .easeOut(duration: 0.2)) { showScrubberThumb = false }
                                     }
                                 }
                             }
@@ -567,7 +568,7 @@ struct FullPlayer: View {
             waveformPeaks = nil
             guard let videoId = currentTrack?.videoId else { return }
             let peaks = await WaveformService.shared.waveform(for: videoId)
-            withAnimation(.easeIn(duration: 0.3)) {
+            withAnimation(reduceMotion ? .none : .easeIn(duration: 0.3)) {
                 waveformPeaks = peaks
             }
         }
@@ -642,12 +643,12 @@ struct FullPlayer: View {
         HapticManager.medium()
         playlistManager.toggleLike(trackId: trackId)
 
-        withAnimation(.easeInOut(duration: 0.18)) {
+        withAnimation(reduceMotion ? .none : .easeInOut(duration: 0.18)) {
             likePulse = true
         }
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.28) {
-            withAnimation(.easeInOut(duration: 0.22)) {
+            withAnimation(reduceMotion ? .none : .easeInOut(duration: 0.22)) {
                 likePulse = false
             }
         }

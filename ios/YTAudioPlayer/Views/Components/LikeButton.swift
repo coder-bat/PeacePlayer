@@ -11,6 +11,7 @@ struct LikeButton: View {
     let trackId: String?
     @StateObject private var playlistManager = PlaylistManager.shared
     @State private var isAnimating = false
+    @Environment(\.accessibilityReduceMotion) var reduceMotion
     
     private var isLiked: Bool {
         guard let trackId = trackId else { return false }
@@ -21,8 +22,10 @@ struct LikeButton: View {
         Button(action: toggleLike) {
             Image(systemName: isLiked ? "heart.fill" : "heart")
                 .font(.system(size: 20))
-                .foregroundColor(isLiked ? .pink : .gray)
+                .foregroundColor(isLiked ? .cyberMagenta : .cyberDim)
                 .scaleEffect(isAnimating ? 1.3 : 1.0)
+                .animation(reduceMotion ? .none : .spring(response: 0.3, dampingFraction: 0.5), value: isAnimating)
+                .animation(reduceMotion ? .none : .easeInOut(duration: 0.2), value: isLiked)
         }
         .accessibilityLabel(isLiked ? "Unlike" : "Like")
         .disabled(trackId == nil)
@@ -32,15 +35,11 @@ struct LikeButton: View {
         guard let trackId = trackId else { return }
 
         HapticManager.medium()
-        withAnimation(.spring(response: 0.3, dampingFraction: 0.5)) {
-            isAnimating = true
-            playlistManager.toggleLike(trackId: trackId)
-        }
+        isAnimating = true
+        playlistManager.toggleLike(trackId: trackId)
         
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            withAnimation {
-                isAnimating = false
-            }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            isAnimating = false
         }
     }
 }

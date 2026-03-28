@@ -262,6 +262,18 @@ struct LibraryView: View {
                         },
                         onPlay: {
                             viewModel.playTrack(track)
+                        },
+                        onPlayNext: {
+                            HapticManager.light()
+                            viewModel.playNextTrack(track)
+                        },
+                        onAddToQueue: {
+                            HapticManager.light()
+                            viewModel.addToQueue(track)
+                        },
+                        onDelete: {
+                            HapticManager.medium()
+                            viewModel.deleteTracks([track.videoId])
                         }
                     )
                 }
@@ -286,16 +298,27 @@ struct LibraryView: View {
                         onTap: {
                             if isEditing {
                                 toggleSelection(track)
-                        } else {
+                            } else {
+                                viewModel.playTrack(track)
+                            }
+                        },
+                        onPlay: {
                             viewModel.playTrack(track)
+                        },
+                        onPlayNext: {
+                            HapticManager.light()
+                            viewModel.playNextTrack(track)
+                        },
+                        onAddToQueue: {
+                            HapticManager.light()
+                            viewModel.addToQueue(track)
+                        },
+                        onDelete: {
+                            HapticManager.medium()
+                            viewModel.deleteTracks([track.videoId])
                         }
-                    },
-                    onPlay: {
-                        viewModel.playTrack(track)
-                    }
-                )
+                    )
             }
-            .onDelete(perform: isEditing ? nil : viewModel.deleteTrackAt)
         }
         .listStyle(.plain)
         .refreshable {
@@ -326,6 +349,9 @@ struct GridTrackCell: View {
     let memoryPreview: String?
     let onTap: () -> Void
     let onPlay: () -> Void
+    let onPlayNext: () -> Void
+    let onAddToQueue: () -> Void
+    let onDelete: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -413,6 +439,25 @@ struct GridTrackCell: View {
         }
         .contentShape(Rectangle())
         .onTapGesture(perform: onTap)
+        .contextMenu {
+            Button(action: onPlay) {
+                Label(isPlaying ? "Now Playing" : "Play", systemImage: "play.fill")
+            }
+
+            Button(action: onPlayNext) {
+                Label("Play Next", systemImage: "text.badge.plus")
+            }
+
+            Button(action: onAddToQueue) {
+                Label("Add to Queue", systemImage: "plus")
+            }
+
+            Divider()
+
+            Button(role: .destructive, action: onDelete) {
+                Label("Remove from Library", systemImage: "trash")
+            }
+        }
     }
 }
 
@@ -425,6 +470,9 @@ struct ListTrackRow: View {
     let memoryPreview: String?
     let onTap: () -> Void
     let onPlay: () -> Void
+    let onPlayNext: () -> Void
+    let onAddToQueue: () -> Void
+    let onDelete: () -> Void
 
     var body: some View {
         HStack(spacing: 12) {
@@ -512,6 +560,37 @@ struct ListTrackRow: View {
         )
         .contentShape(Rectangle())
         .onTapGesture(perform: onTap)
+        .contextMenu {
+            Button(action: onPlay) {
+                Label(isPlaying ? "Now Playing" : "Play", systemImage: "play.fill")
+            }
+
+            Button(action: onPlayNext) {
+                Label("Play Next", systemImage: "text.badge.plus")
+            }
+
+            Button(action: onAddToQueue) {
+                Label("Add to Queue", systemImage: "plus")
+            }
+
+            Divider()
+
+            Button(role: .destructive, action: onDelete) {
+                Label("Remove from Library", systemImage: "trash")
+            }
+        }
+        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+            Button(role: .destructive, action: onDelete) {
+                Label("Remove", systemImage: "trash")
+            }
+        }
+        .swipeActions(edge: .leading, allowsFullSwipe: false) {
+            Button(action: onPlayNext) {
+                Label("Next", systemImage: "text.badge.plus")
+            }
+            .tint(Theme.cyberMagenta)
+        }
+        .accessibilityElement(children: .combine)
     }
 }
 

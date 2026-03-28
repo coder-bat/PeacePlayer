@@ -92,8 +92,9 @@ struct HistoryView: View {
     // MARK: - History List
 
     private var historyListView: some View {
-        ScrollView {
-            LazyVStack(spacing: 0) {
+        List {
+            // Header & stats in a single row
+            VStack(spacing: 0) {
                 headerSection
 
                 // Stats section
@@ -115,32 +116,40 @@ struct HistoryView: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
-                .background(Color.cyberBackground)
+            }
+            .listRowInsets(EdgeInsets())
+            .listRowSeparator(.hidden)
+            .listRowBackground(Color.cyberBackground)
 
-                // History items
-                ForEach(Array(viewModel.historyItems.enumerated()), id: \.element.id) { index, item in
-                    HistoryRow(
-                        item: item,
-                        memoryPreview: songMemoryManager.memory(for: item.track)?.previewText,
-                        onTap: {
-                            playTrack(item)
-                        },
-                        onEditMemory: {
-                            memoryTrack = item.track
-                        },
-                        onDelete: {
-                            viewModel.deleteHistoryItem(item)
-                        }
-                    )
-
-                    if index < viewModel.historyItems.count - 1 {
-                        Divider()
-                            .background(Color.cyberSurface)
-                            .padding(.leading, 68)
+            // History items
+            ForEach(viewModel.historyItems) { item in
+                HistoryRow(
+                    item: item,
+                    memoryPreview: songMemoryManager.memory(for: item.track)?.previewText,
+                    onTap: {
+                        playTrack(item)
+                    },
+                    onEditMemory: {
+                        memoryTrack = item.track
+                    },
+                    onDelete: {
+                        viewModel.deleteHistoryItem(item)
+                    },
+                    onPlayNext: {
+                        HapticManager.light()
+                        viewModel.addToQueueNext(item)
+                    },
+                    onAddToQueue: {
+                        HapticManager.light()
+                        viewModel.addToQueue(item)
                     }
-                }
+                )
+                .listRowInsets(EdgeInsets())
+                .listRowSeparator(.hidden)
+                .listRowBackground(Color.cyberBackground)
             }
         }
+        .listStyle(.plain)
         .refreshable {
             viewModel.loadHistory()
         }
@@ -238,6 +247,8 @@ struct HistoryRow: View {
     let onTap: () -> Void
     let onEditMemory: () -> Void
     let onDelete: () -> Void
+    let onPlayNext: () -> Void
+    let onAddToQueue: () -> Void
 
     @State private var showingOptions = false
 
@@ -329,6 +340,42 @@ struct HistoryRow: View {
             }
             Button("Cancel", role: .cancel) {}
         }
+        .contextMenu {
+            Button(action: onTap) {
+                Label("Play Now", systemImage: "play.fill")
+            }
+
+            Button(action: onPlayNext) {
+                Label("Play Next", systemImage: "text.badge.plus")
+            }
+
+            Button(action: onAddToQueue) {
+                Label("Add to Queue", systemImage: "plus")
+            }
+
+            Button(action: onEditMemory) {
+                Label(memoryPreview == nil ? "Add Memory" : "Edit Memory",
+                      systemImage: memoryPreview == nil ? "square.and.pencil" : "sparkles.rectangle.stack.fill")
+            }
+
+            Divider()
+
+            Button(role: .destructive, action: onDelete) {
+                Label("Remove from History", systemImage: "trash")
+            }
+        }
+        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+            Button(role: .destructive, action: onDelete) {
+                Label("Remove", systemImage: "trash")
+            }
+        }
+        .swipeActions(edge: .leading, allowsFullSwipe: false) {
+            Button(action: onPlayNext) {
+                Label("Next", systemImage: "text.badge.plus")
+            }
+            .tint(Theme.cyberMagenta)
+        }
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -486,6 +533,38 @@ class HistoryViewModel: ObservableObject {
             } catch {
                 print("❌ Error deleting history item: \(error)")
             }
+        }
+    }
+
+    func addToQueueNext(_ item: HistoryItem) {
+        let track = item.track
+        let localURL = AudioFileManager.shared.localFileURL(for: track.videoId)
+        if FileManager.default.fileExists(atPath: localURL.path) {
+            let queueItem = QueueItem(track: track, streamUrl: localURL.absoluteString, source: .local(path: localURL.path))
+            PlayerState.shared.addToQueueNext(queueItem)
+        } else {
+            APIService.shared.getStreamUrl(videoId: track.videoId)
+                .sink(receiveCompletion: { _ in }, receiveValue: { streamInfo in
+                    let queueItem = QueueItem(track: track, streamUrl: streamInfo.streamUrl, source: .stream)
+                    PlayerState.shared.addToQueueNext(queueItem)
+                })
+                .store(in: &cancellables)
+        }
+    }
+
+    func addToQueue(_ item: HistoryItem) {
+        let track = item.track
+        let localURL = AudioFileManager.shared.localFileURL(for: track.videoId)
+        if FileManager.default.fileExists(atPath: localURL.path) {
+            let queueItem = QueueItem(track: track, streamUrl: localURL.absoluteString, source: .local(path: localURL.path))
+            PlayerState.shared.addToQueue(queueItem)
+        } else {
+            APIService.shared.getStreamUrl(videoId: track.videoId)
+                .sink(receiveCompletion: { _ in }, receiveValue: { streamInfo in
+                    let queueItem = QueueItem(track: track, streamUrl: streamInfo.streamUrl, source: .stream)
+                    PlayerState.shared.addToQueue(queueItem)
+                })
+                .store(in: &cancellables)
         }
     }
 

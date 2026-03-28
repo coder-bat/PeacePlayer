@@ -778,6 +778,7 @@ struct CyberpunkTrackRow: View {
             }
             .tint(Theme.cyberMagenta)
         }
+        .accessibilityElement(children: .combine)
     }
 }
 

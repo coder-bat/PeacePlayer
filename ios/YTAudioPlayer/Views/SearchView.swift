@@ -693,6 +693,7 @@ struct SearchResultRow: View {
     let onAddToQueue: () -> Void
     let onPlayNext: () -> Void
     let onAddToPlaylist: () -> Void
+    @StateObject private var playlistManager = PlaylistManager.shared
     
     var body: some View {
         HStack(spacing: 12) {
@@ -819,6 +820,14 @@ struct SearchResultRow: View {
             Button(action: onAddToPlaylist) {
                 Label("Add to Playlist", systemImage: "music.note.list")
             }
+
+            Button {
+                playlistManager.toggleLike(trackId: track.videoId)
+                HapticManager.medium()
+            } label: {
+                Label(playlistManager.isLiked(trackId: track.videoId) ? "Unlike" : "Like",
+                      systemImage: playlistManager.isLiked(trackId: track.videoId) ? "heart.fill" : "heart")
+            }
             
             Divider()
             
@@ -843,6 +852,7 @@ struct SearchResultRow: View {
             }
             .tint(.cyberMagenta)
         }
+        .accessibilityElement(children: .combine)
     }
 }
 

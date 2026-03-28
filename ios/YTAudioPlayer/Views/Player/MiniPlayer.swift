@@ -14,6 +14,7 @@ struct MiniPlayer: View {
     @State private var offset: CGFloat = 0
     @State private var isDragging = false
     @GestureState private var dragState = CGSize.zero
+    @Environment(\.accessibilityReduceMotion) var reduceMotion
     
     var body: some View {
         HStack(spacing: 12) {
@@ -72,7 +73,7 @@ struct MiniPlayer: View {
                         .frame(width: 44, height: 44)
                         .opacity(playerState.playbackState.isLoading ? 1 : 0)
                 }
-                .animation(.easeInOut(duration: 0.2), value: playerState.playbackState.isLoading)
+                .animation(reduceMotion ? .none : .easeInOut(duration: 0.2), value: playerState.playbackState.isLoading)
 
                 Button(action: {
                     HapticManager.light()
@@ -156,7 +157,7 @@ struct MiniPlayer: View {
                     // Determine primary direction
                     if abs(horizontalTranslation) > abs(verticalTranslation) {
                         // Horizontal swipe - handle track skipping
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                        withAnimation(reduceMotion ? .none : .spring(response: 0.3, dampingFraction: 0.8)) {
                             if horizontalTranslation < -80 || horizontalVelocity < -300 {
                                 // Swipe left - next track
                                 HapticManager.medium()

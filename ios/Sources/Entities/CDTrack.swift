@@ -80,7 +80,7 @@ extension CDTrack {
     }
 
     var displayArtist: String {
-        artists.joined(separator: ", ")
+        artists.isEmpty ? "Unknown Artist" : artists.joined(separator: ", ")
     }
 
     var artworkURL: URL? {

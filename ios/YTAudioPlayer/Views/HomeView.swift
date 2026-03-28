@@ -246,6 +246,7 @@ struct HomeView: View {
 // MARK: - Cyber Background
 struct CyberBackground: View {
     @State private var animate = false
+    @Environment(\.accessibilityReduceMotion) var reduceMotion
 
     var body: some View {
         ZStack {
@@ -276,6 +277,7 @@ struct CyberBackground: View {
             }
         }
         .onAppear {
+            guard !reduceMotion else { return }
             withAnimation(.easeInOut(duration: 3).repeatForever(autoreverses: true)) {
                 animate.toggle()
             }

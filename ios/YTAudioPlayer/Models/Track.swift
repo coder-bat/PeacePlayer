@@ -22,7 +22,7 @@ struct Track: Identifiable, Codable, Equatable {
     
     var displayTitle: String { title }
     
-    var displayArtist: String { artists.joined(separator: ", ") }
+    var displayArtist: String { artists.isEmpty ? "Unknown Artist" : artists.joined(separator: ", ") }
     
     var durationText: String {
         let minutes = durationSeconds / 60

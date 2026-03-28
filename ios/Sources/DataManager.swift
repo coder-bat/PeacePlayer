@@ -55,9 +55,13 @@ class DataManager: ObservableObject {
         tracksPlayedCount = defaults.integer(forKey: Keys.tracksPlayedCount)
         
         // Load saved queue
-        if let data = defaults.data(forKey: Keys.savedQueue),
-           let decoded = try? decoder.decode([QueueItemSnapshot].self, from: data) {
-            savedQueue = decoded
+        if let data = defaults.data(forKey: Keys.savedQueue) {
+            do {
+                savedQueue = try decoder.decode([QueueItemSnapshot].self, from: data)
+            } catch {
+                print("⚠️ Failed to decode saved queue: \(error.localizedDescription)")
+                defaults.removeObject(forKey: Keys.savedQueue)
+            }
         }
     }
     
@@ -206,8 +210,11 @@ class DataManager: ObservableObject {
     
     func saveQueue(_ items: [QueueItem]) {
         savedQueue = items.map { QueueItemSnapshot(from: $0) }
-        if let data = try? encoder.encode(savedQueue) {
+        do {
+            let data = try encoder.encode(savedQueue)
             defaults.set(data, forKey: Keys.savedQueue)
+        } catch {
+            print("⚠️ Failed to encode queue (\(items.count) items): \(error.localizedDescription)")
         }
     }
     
@@ -286,7 +293,7 @@ struct RecentTrack: Codable, Identifiable {
     }
     
     var displayArtist: String {
-        artists.joined(separator: ", ")
+        artists.isEmpty ? "Unknown Artist" : artists.joined(separator: ", ")
     }
     
     var artworkURL: URL? {
