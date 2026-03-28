@@ -366,6 +366,206 @@ class APIService {
             .eraseToAnyPublisher()
     }
     
+    // MARK: - Radio Stations
+    
+    func searchRadioStations(query: String, limit: Int = 20) -> AnyPublisher<[RadioStation], APIError> {
+        guard var components = URLComponents(string: "\(baseURL)/radio-stations/search") else {
+            return Fail(error: APIError.invalidURL).eraseToAnyPublisher()
+        }
+        components.queryItems = [
+            URLQueryItem(name: "query", value: query),
+            URLQueryItem(name: "limit", value: "\(limit)")
+        ]
+        guard let url = components.url else {
+            return Fail(error: APIError.invalidURL).eraseToAnyPublisher()
+        }
+        
+        return session.dataTaskPublisher(for: url)
+            .mapError { APIError.networkError($0) }
+            .flatMap { data, response -> AnyPublisher<Data, APIError> in
+                guard let httpResponse = response as? HTTPURLResponse else {
+                    return Fail(error: APIError.invalidResponse).eraseToAnyPublisher()
+                }
+                if httpResponse.statusCode != 200 {
+                    return Fail(error: APIError.httpError(statusCode: httpResponse.statusCode, message: "")).eraseToAnyPublisher()
+                }
+                return Just(data).setFailureType(to: APIError.self).eraseToAnyPublisher()
+            }
+            .decode(type: [RadioStation].self, decoder: JSONDecoder())
+            .mapError { APIError.decodingError($0) }
+            .receive(on: DispatchQueue.main)
+            .eraseToAnyPublisher()
+    }
+    
+    func getRadioStationsByGenre(tag: String, limit: Int = 30) -> AnyPublisher<[RadioStation], APIError> {
+        guard var components = URLComponents(string: "\(baseURL)/radio-stations/genre/\(tag)") else {
+            return Fail(error: APIError.invalidURL).eraseToAnyPublisher()
+        }
+        components.queryItems = [
+            URLQueryItem(name: "limit", value: "\(limit)")
+        ]
+        guard let url = components.url else {
+            return Fail(error: APIError.invalidURL).eraseToAnyPublisher()
+        }
+        
+        return session.dataTaskPublisher(for: url)
+            .mapError { APIError.networkError($0) }
+            .flatMap { data, response -> AnyPublisher<Data, APIError> in
+                guard let httpResponse = response as? HTTPURLResponse else {
+                    return Fail(error: APIError.invalidResponse).eraseToAnyPublisher()
+                }
+                if httpResponse.statusCode != 200 {
+                    return Fail(error: APIError.httpError(statusCode: httpResponse.statusCode, message: "")).eraseToAnyPublisher()
+                }
+                return Just(data).setFailureType(to: APIError.self).eraseToAnyPublisher()
+            }
+            .decode(type: [RadioStation].self, decoder: JSONDecoder())
+            .mapError { APIError.decodingError($0) }
+            .receive(on: DispatchQueue.main)
+            .eraseToAnyPublisher()
+    }
+    
+    func getTopRadioStations(limit: Int = 30) -> AnyPublisher<[RadioStation], APIError> {
+        guard var components = URLComponents(string: "\(baseURL)/radio-stations/top") else {
+            return Fail(error: APIError.invalidURL).eraseToAnyPublisher()
+        }
+        components.queryItems = [
+            URLQueryItem(name: "limit", value: "\(limit)")
+        ]
+        guard let url = components.url else {
+            return Fail(error: APIError.invalidURL).eraseToAnyPublisher()
+        }
+        
+        return session.dataTaskPublisher(for: url)
+            .mapError { APIError.networkError($0) }
+            .flatMap { data, response -> AnyPublisher<Data, APIError> in
+                guard let httpResponse = response as? HTTPURLResponse else {
+                    return Fail(error: APIError.invalidResponse).eraseToAnyPublisher()
+                }
+                if httpResponse.statusCode != 200 {
+                    return Fail(error: APIError.httpError(statusCode: httpResponse.statusCode, message: "")).eraseToAnyPublisher()
+                }
+                return Just(data).setFailureType(to: APIError.self).eraseToAnyPublisher()
+            }
+            .decode(type: [RadioStation].self, decoder: JSONDecoder())
+            .mapError { APIError.decodingError($0) }
+            .receive(on: DispatchQueue.main)
+            .eraseToAnyPublisher()
+    }
+    
+    func registerRadioClick(stationuuid: String) -> AnyPublisher<Void, APIError> {
+        guard let url = URL(string: "\(baseURL)/radio-stations/\(stationuuid)/click") else {
+            return Fail(error: APIError.invalidURL).eraseToAnyPublisher()
+        }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        
+        return session.dataTaskPublisher(for: request)
+            .mapError { APIError.networkError($0) }
+            .flatMap { data, response -> AnyPublisher<Void, APIError> in
+                guard let httpResponse = response as? HTTPURLResponse else {
+                    return Fail(error: APIError.invalidResponse).eraseToAnyPublisher()
+                }
+                if httpResponse.statusCode != 200 {
+                    return Fail(error: APIError.httpError(statusCode: httpResponse.statusCode, message: "")).eraseToAnyPublisher()
+                }
+                return Just(()).setFailureType(to: APIError.self).eraseToAnyPublisher()
+            }
+            .receive(on: DispatchQueue.main)
+            .eraseToAnyPublisher()
+    }
+    
+    // MARK: - Podcasts
+    
+    func searchPodcasts(query: String, limit: Int = 20) -> AnyPublisher<[PodcastShow], APIError> {
+        guard var components = URLComponents(string: "\(baseURL)/podcasts/search") else {
+            return Fail(error: APIError.invalidURL).eraseToAnyPublisher()
+        }
+        components.queryItems = [
+            URLQueryItem(name: "query", value: query),
+            URLQueryItem(name: "limit", value: "\(limit)")
+        ]
+        guard let url = components.url else {
+            return Fail(error: APIError.invalidURL).eraseToAnyPublisher()
+        }
+        
+        return session.dataTaskPublisher(for: url)
+            .mapError { APIError.networkError($0) }
+            .flatMap { data, response -> AnyPublisher<Data, APIError> in
+                guard let httpResponse = response as? HTTPURLResponse else {
+                    return Fail(error: APIError.invalidResponse).eraseToAnyPublisher()
+                }
+                if httpResponse.statusCode != 200 {
+                    return Fail(error: APIError.httpError(statusCode: httpResponse.statusCode, message: "")).eraseToAnyPublisher()
+                }
+                return Just(data).setFailureType(to: APIError.self).eraseToAnyPublisher()
+            }
+            .decode(type: [PodcastShow].self, decoder: JSONDecoder())
+            .mapError { APIError.decodingError($0) }
+            .receive(on: DispatchQueue.main)
+            .eraseToAnyPublisher()
+    }
+    
+    func getPodcastEpisodes(feedUrl: String, limit: Int = 50) -> AnyPublisher<[PodcastEpisode], APIError> {
+        guard var components = URLComponents(string: "\(baseURL)/podcasts/episodes") else {
+            return Fail(error: APIError.invalidURL).eraseToAnyPublisher()
+        }
+        components.queryItems = [
+            URLQueryItem(name: "feedUrl", value: feedUrl),
+            URLQueryItem(name: "limit", value: "\(limit)")
+        ]
+        guard let url = components.url else {
+            return Fail(error: APIError.invalidURL).eraseToAnyPublisher()
+        }
+        
+        return session.dataTaskPublisher(for: url)
+            .mapError { APIError.networkError($0) }
+            .flatMap { data, response -> AnyPublisher<Data, APIError> in
+                guard let httpResponse = response as? HTTPURLResponse else {
+                    return Fail(error: APIError.invalidResponse).eraseToAnyPublisher()
+                }
+                if httpResponse.statusCode != 200 {
+                    return Fail(error: APIError.httpError(statusCode: httpResponse.statusCode, message: "")).eraseToAnyPublisher()
+                }
+                return Just(data).setFailureType(to: APIError.self).eraseToAnyPublisher()
+            }
+            .decode(type: [PodcastEpisode].self, decoder: JSONDecoder())
+            .mapError { APIError.decodingError($0) }
+            .receive(on: DispatchQueue.main)
+            .eraseToAnyPublisher()
+    }
+    
+    func getTopPodcasts(genre: String = "", limit: Int = 20) -> AnyPublisher<[PodcastShow], APIError> {
+        guard var components = URLComponents(string: "\(baseURL)/podcasts/top") else {
+            return Fail(error: APIError.invalidURL).eraseToAnyPublisher()
+        }
+        var queryItems = [URLQueryItem(name: "limit", value: "\(limit)")]
+        if !genre.isEmpty {
+            queryItems.append(URLQueryItem(name: "genre", value: genre))
+        }
+        components.queryItems = queryItems
+        guard let url = components.url else {
+            return Fail(error: APIError.invalidURL).eraseToAnyPublisher()
+        }
+        
+        return session.dataTaskPublisher(for: url)
+            .mapError { APIError.networkError($0) }
+            .flatMap { data, response -> AnyPublisher<Data, APIError> in
+                guard let httpResponse = response as? HTTPURLResponse else {
+                    return Fail(error: APIError.invalidResponse).eraseToAnyPublisher()
+                }
+                if httpResponse.statusCode != 200 {
+                    return Fail(error: APIError.httpError(statusCode: httpResponse.statusCode, message: "")).eraseToAnyPublisher()
+                }
+                return Just(data).setFailureType(to: APIError.self).eraseToAnyPublisher()
+            }
+            .decode(type: [PodcastShow].self, decoder: JSONDecoder())
+            .mapError { APIError.decodingError($0) }
+            .receive(on: DispatchQueue.main)
+            .eraseToAnyPublisher()
+    }
+    
     // MARK: - Lyrics Parsing
     
     private func parseLyrics(_ lyricsText: String) -> [LyricsLine] {
