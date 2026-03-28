@@ -11,13 +11,9 @@ import WidgetKit
 import SwiftUI
 import UIKit
 
-private let cyberCyan    = Color(red: 0,    green: 0.9,  blue: 1.0)
-private let cyberMagenta = Color(red: 1.0,  green: 0,    blue: 0.8)
-private let cyberBg      = Color(red: 0.04, green: 0.04, blue: 0.09)
-private let cyberSurface = Color(red: 0.1,  green: 0.1,  blue: 0.16)
 
 // MARK: - Background modifier
-// Puts cyberBg + blurred artwork into containerBackground so the system
+// Puts WidgetTheme.cyberBg + blurred artwork into containerBackground so the system
 // draws it edge-to-edge *outside* the content margins — eliminating the
 // "inner card" that appears when the view draws its own background.
 
@@ -35,7 +31,7 @@ private struct FullWidgetBg: ViewModifier {
     @ViewBuilder
     private var bg: some View {
         ZStack {
-            cyberBg
+            WidgetTheme.cyberBg
             if let img = artworkImage {
                 Image(uiImage: img)
                     .resizable()
@@ -126,7 +122,7 @@ private struct PlayingContent: View {
                     HStack(spacing: 4) {
                         Text("NEXT")
                             .font(.system(size: 8, weight: .bold, design: .monospaced))
-                            .foregroundColor(cyberCyan.opacity(0.7))
+                            .foregroundColor(WidgetTheme.cyberCyan.opacity(0.7))
                         Text("·")
                             .font(.system(size: 8))
                             .foregroundColor(.white.opacity(0.3))
@@ -148,10 +144,10 @@ private struct PlayingContent: View {
                 VStack(spacing: 2) {
                     Image(systemName: "list.bullet.below.rectangle")
                         .font(.system(size: 14))
-                        .foregroundColor(cyberCyan.opacity(0.85))
+                        .foregroundColor(WidgetTheme.cyberCyan.opacity(0.85))
                     Text("QUEUE")
                         .font(.system(size: 6, weight: .bold, design: .monospaced))
-                        .foregroundColor(cyberCyan.opacity(0.6))
+                        .foregroundColor(WidgetTheme.cyberCyan.opacity(0.6))
                 }
             }
         }
@@ -164,10 +160,10 @@ private struct PlayingContent: View {
                     .resizable()
                     .aspectRatio(contentMode: .fill)
             } else {
-                cyberSurface.overlay(
+                WidgetTheme.cyberSurface.overlay(
                     Image(systemName: "waveform")
                         .font(.system(size: 18))
-                        .foregroundColor(cyberCyan.opacity(0.65))
+                        .foregroundColor(WidgetTheme.cyberCyan.opacity(0.65))
                 )
             }
         }
@@ -175,7 +171,7 @@ private struct PlayingContent: View {
         .clipShape(RoundedRectangle(cornerRadius: 9))
         .overlay(
             RoundedRectangle(cornerRadius: 9)
-                .strokeBorder(cyberCyan.opacity(0.25), lineWidth: 0.5)
+                .strokeBorder(WidgetTheme.cyberCyan.opacity(0.25), lineWidth: 0.5)
         )
     }
 
@@ -194,14 +190,14 @@ private struct PlayingContent: View {
                     ZStack(alignment: .trailing) {
                         Capsule()
                             .fill(LinearGradient(
-                                colors: [cyberCyan, cyberMagenta],
+                                colors: [WidgetTheme.cyberCyan, WidgetTheme.cyberMagenta],
                                 startPoint: .leading, endPoint: .trailing
                             ))
                             .frame(width: w, height: 3)
                         Circle()
-                            .fill(cyberCyan)
+                            .fill(WidgetTheme.cyberCyan)
                             .frame(width: 7, height: 7)
-                            .shadow(color: cyberCyan.opacity(0.9), radius: 4)
+                            .shadow(color: WidgetTheme.cyberCyan.opacity(0.9), radius: 4)
                     }
                 }
                 .frame(height: 3)
@@ -277,10 +273,10 @@ private struct PlayingContent: View {
                 Image(systemName: "gobackward.15").font(.system(size: 14)).foregroundColor(.white.opacity(0.3)).frame(width: 28, height: 32)
                 Image(systemName: "backward.fill").font(.system(size: 15)).foregroundColor(.white.opacity(0.4)).frame(width: 26, height: 32)
                 ZStack {
-                    Circle().fill(cyberCyan.opacity(0.15)).frame(width: 34, height: 34)
+                    Circle().fill(WidgetTheme.cyberCyan.opacity(0.15)).frame(width: 34, height: 34)
                     Image(systemName: entry.snapshot.isPlaying ? "pause.fill" : "play.fill")
                         .font(.system(size: 15, weight: .bold))
-                        .foregroundColor(cyberCyan)
+                        .foregroundColor(WidgetTheme.cyberCyan)
                 }
                 Image(systemName: "forward.fill").font(.system(size: 15)).foregroundColor(.white.opacity(0.4)).frame(width: 26, height: 32)
                 Image(systemName: "goforward.15").font(.system(size: 14)).foregroundColor(.white.opacity(0.3)).frame(width: 28, height: 32)
@@ -333,11 +329,11 @@ private struct PlayingContent: View {
     private func playPauseCircle(isPlaying: Bool) -> some View {
         ZStack {
             Circle()
-                .fill(cyberCyan.opacity(0.18))
+                .fill(WidgetTheme.cyberCyan.opacity(0.18))
                 .frame(width: 34, height: 34)
             Image(systemName: isPlaying ? "pause.fill" : "play.fill")
                 .font(.system(size: 15, weight: .bold))
-                .foregroundColor(cyberCyan)
+                .foregroundColor(WidgetTheme.cyberCyan)
         }
     }
 
@@ -345,7 +341,7 @@ private struct PlayingContent: View {
     private func vuSegment(index i: Int, filled: Int, total: Int) -> some View {
         let on = i < filled
         let bar = RoundedRectangle(cornerRadius: 1.5)
-            .fill(on ? cyberCyan.opacity(0.5 + Double(i) * 0.045) : Color.white.opacity(0.1))
+            .fill(on ? WidgetTheme.cyberCyan.opacity(0.5 + Double(i) * 0.045) : Color.white.opacity(0.1))
             .frame(width: 4, height: CGFloat(on ? 7 + i : 5))
         if #available(iOSApplicationExtension 17.0, *) {
             let intent: WidgetSetVolumeIntent = {
@@ -369,7 +365,7 @@ private struct IdleContent: View {
             HStack(alignment: .bottom, spacing: 3) {
                 ForEach([12, 20, 28, 20, 14, 22, 26], id: \.self) { h in
                     RoundedRectangle(cornerRadius: 2)
-                        .fill(cyberCyan.opacity(0.3))
+                        .fill(WidgetTheme.cyberCyan.opacity(0.3))
                         .frame(width: 4, height: CGFloat(h))
                 }
             }
@@ -382,11 +378,11 @@ private struct IdleContent: View {
                     Image(systemName: "play.fill").font(.system(size: 10))
                     Text("OPEN PEACEPLAYER").font(.system(size: 10, weight: .bold, design: .monospaced))
                 }
-                .foregroundColor(cyberCyan)
+                .foregroundColor(WidgetTheme.cyberCyan)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 7)
-                .background(cyberCyan.opacity(0.12))
-                .overlay(Capsule().strokeBorder(cyberCyan.opacity(0.5), lineWidth: 0.5))
+                .background(WidgetTheme.cyberCyan.opacity(0.12))
+                .overlay(Capsule().strokeBorder(WidgetTheme.cyberCyan.opacity(0.5), lineWidth: 0.5))
                 .clipShape(Capsule())
             }
         }

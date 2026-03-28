@@ -10,9 +10,6 @@
 import WidgetKit
 import SwiftUI
 
-private let cyberCyan    = Color(red: 0,    green: 0.9, blue: 1.0)
-private let cyberMagenta = Color(red: 1.0,  green: 0,   blue: 0.8)
-private let cyberBg      = Color(red: 0.04, green: 0.04, blue: 0.09)
 
 // MARK: - Shared Entry & Provider
 
@@ -77,11 +74,11 @@ struct ShuffleFavoritesWidgetView: View {
 
     var body: some View {
         ZStack {
-            cyberBg
+            WidgetTheme.cyberBg
 
             // Radial magenta glow
             RadialGradient(
-                colors: [cyberMagenta.opacity(0.22), Color.clear],
+                colors: [WidgetTheme.cyberMagenta.opacity(0.22), Color.clear],
                 center: .center,
                 startRadius: 0,
                 endRadius: 90
@@ -91,7 +88,7 @@ struct ShuffleFavoritesWidgetView: View {
             RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .strokeBorder(
                     LinearGradient(
-                        colors: [cyberMagenta.opacity(0.5), cyberCyan.opacity(0.25)],
+                        colors: [WidgetTheme.cyberMagenta.opacity(0.5), WidgetTheme.cyberCyan.opacity(0.25)],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
                     ),
@@ -113,14 +110,14 @@ struct ShuffleFavoritesWidgetView: View {
         VStack(spacing: 8) {
             ZStack {
                 Circle()
-                    .fill(cyberMagenta.opacity(0.15))
+                    .fill(WidgetTheme.cyberMagenta.opacity(0.15))
                     .frame(width: 54, height: 54)
                 Circle()
-                    .strokeBorder(cyberMagenta.opacity(0.3), lineWidth: 1)
+                    .strokeBorder(WidgetTheme.cyberMagenta.opacity(0.3), lineWidth: 1)
                     .frame(width: 54, height: 54)
                 Image(systemName: "shuffle")
                     .font(.system(size: 24, weight: .semibold))
-                    .foregroundColor(cyberMagenta)
+                    .foregroundColor(WidgetTheme.cyberMagenta)
             }
 
             VStack(spacing: 2) {
@@ -134,10 +131,10 @@ struct ShuffleFavoritesWidgetView: View {
 
             Text("SHUFFLE")
                 .font(.system(size: 8, weight: .bold, design: .monospaced))
-                .foregroundColor(cyberMagenta)
+                .foregroundColor(WidgetTheme.cyberMagenta)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 3)
-                .background(cyberMagenta.opacity(0.15))
+                .background(WidgetTheme.cyberMagenta.opacity(0.15))
                 .clipShape(Capsule())
         }
         .padding(12)
@@ -149,20 +146,20 @@ struct ShuffleFavoritesWidgetView: View {
         HStack(spacing: 18) {
             ZStack {
                 Circle()
-                    .fill(cyberMagenta.opacity(0.15))
+                    .fill(WidgetTheme.cyberMagenta.opacity(0.15))
                     .frame(width: 72, height: 72)
                 Circle()
-                    .strokeBorder(cyberMagenta.opacity(0.3), lineWidth: 1)
+                    .strokeBorder(WidgetTheme.cyberMagenta.opacity(0.3), lineWidth: 1)
                     .frame(width: 72, height: 72)
                 Image(systemName: "shuffle")
                     .font(.system(size: 32, weight: .semibold))
-                    .foregroundColor(cyberMagenta)
+                    .foregroundColor(WidgetTheme.cyberMagenta)
             }
 
             VStack(alignment: .leading, spacing: 5) {
                 Text("SHUFFLE")
                     .font(.system(size: 10, weight: .bold, design: .monospaced))
-                    .foregroundColor(cyberMagenta)
+                    .foregroundColor(WidgetTheme.cyberMagenta)
 
                 HStack(alignment: .firstTextBaseline, spacing: 4) {
                     Text("\(entry.library.likedTrackCount)")
@@ -182,10 +179,10 @@ struct ShuffleFavoritesWidgetView: View {
                 HStack(spacing: 4) {
                     Image(systemName: "heart.fill")
                         .font(.system(size: 9))
-                        .foregroundColor(cyberMagenta)
+                        .foregroundColor(WidgetTheme.cyberMagenta)
                     Text("TAP TO SHUFFLE ALL")
                         .font(.system(size: 9, weight: .bold, design: .monospaced))
-                        .foregroundColor(cyberMagenta.opacity(0.8))
+                        .foregroundColor(WidgetTheme.cyberMagenta.opacity(0.8))
                 }
             }
 
@@ -219,7 +216,7 @@ struct PlaylistsWidgetView: View {
 
     var body: some View {
         ZStack {
-            cyberBg
+            WidgetTheme.cyberBg
 
             VStack(spacing: 0) {
                 widgetHeader
@@ -240,10 +237,10 @@ struct PlaylistsWidgetView: View {
         HStack {
             Image(systemName: "music.note.list")
                 .font(.system(size: 11))
-                .foregroundColor(cyberCyan)
+                .foregroundColor(WidgetTheme.cyberCyan)
             Text("PLAYLISTS")
                 .font(.system(size: 10, weight: .bold, design: .monospaced))
-                .foregroundColor(cyberCyan)
+                .foregroundColor(WidgetTheme.cyberCyan)
             Spacer()
             Text("\(entry.library.playlists.count)")
                 .font(.system(size: 10, design: .monospaced))
@@ -256,7 +253,7 @@ struct PlaylistsWidgetView: View {
 
     private var divider: some View {
         Rectangle()
-            .fill(cyberCyan.opacity(0.2))
+            .fill(WidgetTheme.cyberCyan.opacity(0.2))
             .frame(height: 0.5)
             .padding(.horizontal, 14)
     }
@@ -293,11 +290,11 @@ struct PlaylistsWidgetView: View {
                 HStack(spacing: 10) {
                     ZStack {
                         RoundedRectangle(cornerRadius: 8)
-                            .fill(cyberMagenta.opacity(0.18))
+                            .fill(WidgetTheme.cyberMagenta.opacity(0.18))
                             .frame(width: 34, height: 34)
                         Image(systemName: "shuffle")
                             .font(.system(size: 14))
-                            .foregroundColor(cyberMagenta)
+                            .foregroundColor(WidgetTheme.cyberMagenta)
                     }
                     VStack(alignment: .leading, spacing: 1) {
                         Text("Shuffle Favorites")
@@ -354,7 +351,7 @@ private struct PlaylistRow: View {
                     RoundedRectangle(cornerRadius: 7)
                         .fill(
                             LinearGradient(
-                                colors: [cyberCyan.opacity(0.22), cyberMagenta.opacity(0.14)],
+                                colors: [WidgetTheme.cyberCyan.opacity(0.22), WidgetTheme.cyberMagenta.opacity(0.14)],
                                 startPoint: .topLeading,
                                 endPoint: .bottomTrailing
                             )
@@ -362,7 +359,7 @@ private struct PlaylistRow: View {
                         .frame(width: 32, height: 32)
                     Image(systemName: "music.note")
                         .font(.system(size: 12))
-                        .foregroundColor(cyberCyan)
+                        .foregroundColor(WidgetTheme.cyberCyan)
                 }
 
                 VStack(alignment: .leading, spacing: 1) {
@@ -379,7 +376,7 @@ private struct PlaylistRow: View {
 
                 Image(systemName: "play.fill")
                     .font(.system(size: 9))
-                    .foregroundColor(cyberCyan.opacity(0.55))
+                    .foregroundColor(WidgetTheme.cyberCyan.opacity(0.55))
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 8)

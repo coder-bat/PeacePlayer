@@ -592,7 +592,7 @@ struct ListTrackRow: View {
 
             if !isEditing {
                 Button(action: onPlay) {
-                    Image(systemName: isPlaying ? "waveform" : "play.circle.fill")
+                    Image(systemName: isPlaying ? "waveform" : "play.fill")
                         .font(.system(size: 26))
                         .foregroundColor(isPlaying ? Theme.cyberCyan : Theme.cyberDim)
                 }

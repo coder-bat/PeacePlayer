@@ -22,6 +22,7 @@
 		0BD64E5C60DB9B0C94498DF4 /* MainContainerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3981584A595276084E907877 /* MainContainerView.swift */; };
 		0C684DD7C8633A9C17BF88EA /* AdaptiveWalkDJManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7AA9786473E2C2E65D4458E8 /* AdaptiveWalkDJManager.swift */; };
 		14461908F534167F8F408F53 /* NowPlayingFullWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCA4035534F1C659AA5290B2 /* NowPlayingFullWidget.swift */; };
+		DDDD000100000001DDDD0001 /* WidgetTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDDD000200000002DDDD0002 /* WidgetTheme.swift */; };
 		15C000EA5C3F4602E36A019B /* MiniPlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD9433711FA4B32991B869ED /* MiniPlayer.swift */; };
 		1AC5D2294272E30DF4857304 /* PeacePlayerWidgetIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56AF7CCCA582C56C371F11A0 /* PeacePlayerWidgetIntents.swift */; };
 		1D7074E03ED46E71BA83F90C /* CDDownloadedTrack.swift in Sources */ = {isa = PBXBuildFile; fileRef = 785DCEDCD8EB51E04FA7944C /* CDDownloadedTrack.swift */; };
@@ -244,6 +245,7 @@
 		F2E26BF4B015550CCC0C308B /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		F89C2506A14768CB685B2A7C /* ViewExtensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewExtensions.swift; sourceTree = "<group>"; };
 		FE24218BB5E3D48C193C8663 /* PeacePlayerWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeacePlayerWidget.swift; sourceTree = "<group>"; };
+		DDDD000200000002DDDD0002 /* WidgetTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetTheme.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -409,6 +411,7 @@
 				0F15FD3F181894856FF634D2 /* PeacePlayerWidgetBundle.swift */,
 				56AF7CCCA582C56C371F11A0 /* PeacePlayerWidgetIntents.swift */,
 				56CE1E3E13C142FD71EAE1CE /* ResumeWidget.swift */,
+				DDDD000200000002DDDD0002 /* WidgetTheme.swift */,
 			);
 			path = PeacePlayerWidget;
 			sourceTree = "<group>";
@@ -592,6 +595,7 @@
 				A7D37324FCFE5908B5D0E85A /* PeacePlayerWidgetBundle.swift in Sources */,
 				1AC5D2294272E30DF4857304 /* PeacePlayerWidgetIntents.swift in Sources */,
 				E06930EDFBFCCD1AAFC5CA26 /* ResumeWidget.swift in Sources */,
+				DDDD000100000001DDDD0001 /* WidgetTheme.swift in Sources */,
 				B2E798633D3FE21CFA1B4EA7 /* SharedNowPlayingState.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

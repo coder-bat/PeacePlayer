@@ -10,9 +10,6 @@ import WidgetKit
 import SwiftUI
 import UIKit
 
-private let cyberCyan    = Color(red: 0,   green: 0.9, blue: 1.0)
-private let cyberMagenta = Color(red: 1.0, green: 0,   blue: 0.8)
-private let cyberBg      = Color(red: 0.04, green: 0.04, blue: 0.09)
 
 // MARK: - Entry & Provider
 
@@ -103,7 +100,7 @@ struct SmallResumeView: View {
 
     var body: some View {
         ZStack {
-            cyberBg
+            WidgetTheme.cyberBg
 
             if let img = entry.artworkImage {
                 Image(uiImage: img)
@@ -118,7 +115,7 @@ struct SmallResumeView: View {
             RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .strokeBorder(
                     LinearGradient(
-                        colors: [cyberCyan.opacity(0.6), cyberMagenta.opacity(0.3)],
+                        colors: [WidgetTheme.cyberCyan.opacity(0.6), WidgetTheme.cyberMagenta.opacity(0.3)],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
                     ),
@@ -139,10 +136,10 @@ struct SmallResumeView: View {
                     Text("RESUME")
                         .font(.system(size: 8, weight: .bold, design: .monospaced))
                 }
-                .foregroundColor(cyberCyan)
+                .foregroundColor(WidgetTheme.cyberCyan)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 4)
-                .background(cyberCyan.opacity(0.12))
+                .background(WidgetTheme.cyberCyan.opacity(0.12))
                 .clipShape(Capsule())
             }
             .padding(10)
@@ -158,11 +155,11 @@ struct SmallResumeView: View {
                     .resizable()
                     .aspectRatio(contentMode: .fill)
             } else {
-                cyberBg
+                WidgetTheme.cyberBg
                     .overlay(
                         Image(systemName: "waveform")
                             .font(.system(size: size * 0.38))
-                            .foregroundColor(cyberCyan.opacity(0.7))
+                            .foregroundColor(WidgetTheme.cyberCyan.opacity(0.7))
                     )
             }
         }
@@ -170,7 +167,7 @@ struct SmallResumeView: View {
         .clipShape(RoundedRectangle(cornerRadius: 10))
         .overlay(
             RoundedRectangle(cornerRadius: 10)
-                .strokeBorder(cyberCyan.opacity(0.35), lineWidth: 0.5)
+                .strokeBorder(WidgetTheme.cyberCyan.opacity(0.35), lineWidth: 0.5)
         )
     }
 }
@@ -184,7 +181,7 @@ struct MediumResumeView: View {
 
     var body: some View {
         ZStack {
-            cyberBg
+            WidgetTheme.cyberBg
 
             if let img = entry.artworkImage {
                 Image(uiImage: img)
@@ -202,11 +199,11 @@ struct MediumResumeView: View {
                     // Status chip
                     HStack(spacing: 5) {
                         Circle()
-                            .fill(entry.snapshot.isPlaying ? cyberCyan : Color.gray)
+                            .fill(entry.snapshot.isPlaying ? WidgetTheme.cyberCyan : Color.gray)
                             .frame(width: 5, height: 5)
                         Text(entry.snapshot.isPlaying ? "PLAYING" : "PAUSED")
                             .font(.system(size: 8, weight: .bold, design: .monospaced))
-                            .foregroundColor(entry.snapshot.isPlaying ? cyberCyan : .gray)
+                            .foregroundColor(entry.snapshot.isPlaying ? WidgetTheme.cyberCyan : .gray)
                     }
 
                     Text(entry.snapshot.hasContent ? entry.snapshot.title : "Nothing Playing")
@@ -233,7 +230,7 @@ struct MediumResumeView: View {
                                 Capsule()
                                     .fill(
                                         LinearGradient(
-                                            colors: [cyberCyan, cyberMagenta],
+                                            colors: [WidgetTheme.cyberCyan, WidgetTheme.cyberMagenta],
                                             startPoint: .leading,
                                             endPoint: .trailing
                                         )
@@ -253,7 +250,7 @@ struct MediumResumeView: View {
                         Text("TAP TO RESUME")
                             .font(.system(size: 9, weight: .bold, design: .monospaced))
                     }
-                    .foregroundColor(cyberCyan)
+                    .foregroundColor(WidgetTheme.cyberCyan)
                 }
 
                 Spacer(minLength: 0)
@@ -271,11 +268,11 @@ struct MediumResumeView: View {
                     .resizable()
                     .aspectRatio(contentMode: .fill)
             } else {
-                cyberBg
+                WidgetTheme.cyberBg
                     .overlay(
                         Image(systemName: "waveform")
                             .font(.system(size: size * 0.38))
-                            .foregroundColor(cyberCyan.opacity(0.7))
+                            .foregroundColor(WidgetTheme.cyberCyan.opacity(0.7))
                     )
             }
         }
@@ -285,7 +282,7 @@ struct MediumResumeView: View {
             RoundedRectangle(cornerRadius: 12)
                 .strokeBorder(
                     LinearGradient(
-                        colors: [cyberCyan.opacity(0.5), cyberMagenta.opacity(0.3)],
+                        colors: [WidgetTheme.cyberCyan.opacity(0.5), WidgetTheme.cyberMagenta.opacity(0.3)],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
                     ),

@@ -10,8 +10,6 @@ import WidgetKit
 import SwiftUI
 import UIKit
 
-// Cyberpunk accent colour (matches Theme.cyberCyan) — inline since Theme.swift is main-app-only
-private let cyberCyan = Color(red: 0, green: 0.9, blue: 1.0)
 
 // MARK: - Timeline Entry
 
@@ -161,20 +159,20 @@ struct SmallNowPlayingView: View {
                         Button(intent: WidgetPlayPauseIntent()) {
                             Image(systemName: "pause.circle.fill")
                                 .font(.system(size: 26))
-                                .foregroundColor(cyberCyan)
+                                .foregroundColor(WidgetTheme.cyberCyan)
                         }
                         .buttonStyle(.plain)
                     } else {
                         Link(destination: URL(string: "peaceplayer://resume")!) {
                             Image(systemName: "play.circle.fill")
                                 .font(.system(size: 26))
-                                .foregroundColor(cyberCyan)
+                                .foregroundColor(WidgetTheme.cyberCyan)
                         }
                     }
                 } else {
                     Image(systemName: entry.snapshot.isPlaying ? "pause.circle.fill" : "play.circle.fill")
                         .font(.system(size: 26))
-                        .foregroundColor(cyberCyan)
+                        .foregroundColor(WidgetTheme.cyberCyan)
                 }
             }
             .padding(12)
@@ -234,7 +232,7 @@ struct MediumNowPlayingView: View {
                             .fill(Color.white.opacity(0.2))
                             .frame(height: 3)
                         RoundedRectangle(cornerRadius: 2)
-                            .fill(cyberCyan)
+                            .fill(WidgetTheme.cyberCyan)
                             .frame(width: max(0, geo.size.width * CGFloat(entry.snapshot.progress)), height: 3)
                     }
                 }
@@ -254,14 +252,14 @@ struct MediumNowPlayingView: View {
                             Button(intent: WidgetPlayPauseIntent()) {
                                 Image(systemName: "pause.fill")
                                     .font(.system(size: 20, weight: .bold))
-                                    .foregroundColor(cyberCyan)
+                                    .foregroundColor(WidgetTheme.cyberCyan)
                             }
                             .buttonStyle(.plain)
                         } else {
                             Link(destination: URL(string: "peaceplayer://resume")!) {
                                 Image(systemName: "play.fill")
                                     .font(.system(size: 20, weight: .bold))
-                                    .foregroundColor(cyberCyan)
+                                    .foregroundColor(WidgetTheme.cyberCyan)
                             }
                         }
 
@@ -280,7 +278,7 @@ struct MediumNowPlayingView: View {
                             .foregroundColor(.white.opacity(0.4))
                         Image(systemName: entry.snapshot.isPlaying ? "pause.fill" : "play.fill")
                             .font(.system(size: 20, weight: .bold))
-                            .foregroundColor(cyberCyan)
+                            .foregroundColor(WidgetTheme.cyberCyan)
                         Image(systemName: "forward.fill")
                             .font(.system(size: 16))
                             .foregroundColor(.white.opacity(0.4))

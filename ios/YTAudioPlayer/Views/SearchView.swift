@@ -814,7 +814,7 @@ struct SearchResultRow: View {
                 }
 
                 Button(action: onPlay) {
-                    Image(systemName: isPlaying ? "waveform" : "play.circle.fill")
+                    Image(systemName: isPlaying ? "waveform" : "play.fill")
                         .font(.system(size: 28))
                         .foregroundColor(.cyberCyan)
                 }

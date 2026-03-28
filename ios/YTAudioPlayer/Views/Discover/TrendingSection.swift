@@ -215,7 +215,7 @@ struct TrendingRow: View {
                 Spacer()
 
                 // Play button — always visible
-                Image(systemName: "play.circle.fill")
+                Image(systemName: "play.fill")
                     .font(.system(size: 28))
                     .foregroundColor(.accentColor)
             }

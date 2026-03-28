@@ -43,7 +43,7 @@ struct UndoToastView: View {
             .padding(.vertical, 12)
             .background(
                 RoundedRectangle(cornerRadius: 16)
-                    .fill(Color(red: 0.12, green: 0.13, blue: 0.18))
+                    .fill(Theme.cyberSurface)
                     .overlay(
                         RoundedRectangle(cornerRadius: 16)
                             .stroke(Theme.cyberCyan.opacity(0.3), lineWidth: 1)

@@ -711,7 +711,7 @@ struct CyberpunkTrackRow: View {
 
                 // Play button
                 Button(action: onPlay) {
-                    Image(systemName: isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                    Image(systemName: isPlaying ? "pause.fill" : "play.fill")
                         .font(.system(size: 26))
                         .foregroundColor(isPlaying ? Theme.cyberCyan : Theme.cyberDim)
                 }

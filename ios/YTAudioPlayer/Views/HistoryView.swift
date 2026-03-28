@@ -215,7 +215,7 @@ struct HistoryView: View {
                 StatCard(
                     value: viewModel.totalPlaysFormatted,
                     label: "Total Plays",
-                    icon: "play.circle.fill"
+                    icon: "play.fill"
                 )
 
                 StatCard(

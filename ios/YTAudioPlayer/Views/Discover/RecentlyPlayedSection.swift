@@ -239,7 +239,7 @@ struct SimpleTrackRow: View {
                 Spacer()
                 
                 // Play button
-                Image(systemName: "play.circle.fill")
+                Image(systemName: "play.fill")
                     .font(.system(size: 28))
                     .foregroundColor(.accentColor)
                     .opacity(isHovered ? 1 : 0)
