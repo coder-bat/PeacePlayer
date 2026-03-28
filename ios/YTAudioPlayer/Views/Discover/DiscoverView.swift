@@ -34,7 +34,7 @@ struct DiscoverView: View {
             viewModel.cancelAllRequests()
         }
         .sheet(isPresented: $showSearch) {
-            SearchView()
+            SearchView(viewModel: SearchViewModel())
         }
         .sheet(item: $selectedTrackForPlaylist) { track in
             AddToPlaylistSheet(track: track)

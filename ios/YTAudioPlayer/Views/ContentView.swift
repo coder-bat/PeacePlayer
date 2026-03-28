@@ -9,6 +9,7 @@ import UIKit
 struct ContentView: View {
     @StateObject private var playerState = PlayerState.shared
     @StateObject private var networkMonitor = NetworkMonitor.shared
+    @StateObject private var searchViewModel = SearchViewModel()
     @State private var selectedTab = 0
     @State private var showFullPlayer = false
     @State private var showRestorePrompt = false
@@ -24,7 +25,7 @@ struct ContentView: View {
                     .safeAreaInset(edge: .bottom, spacing: 0) { miniPlayerView }
                     .tag(0)
 
-                SearchView()
+                SearchView(viewModel: searchViewModel)
                     .safeAreaInset(edge: .bottom, spacing: 0) { miniPlayerView }
                     .tag(1)
 

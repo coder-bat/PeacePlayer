@@ -17,13 +17,11 @@ enum SearchFilter: String, CaseIterable, Identifiable {
 }
 
 struct SearchView: View {
-    @StateObject private var viewModel = SearchViewModel()
+    @ObservedObject var viewModel: SearchViewModel
     @StateObject private var downloadManager = DownloadManager.shared
-    @State private var searchText = ""
     @State private var searchDebounceTask: Task<Void, Never>?
     @State private var selectedTrackForPlaylist: Track?
     @State private var selectedYouTubePlaylist: YouTubePlaylist?
-    @State private var activeFilter: SearchFilter = .all
     @State private var cancellables = Set<AnyCancellable>()
     @FocusState private var isSearchFocused: Bool
 
@@ -45,9 +43,9 @@ struct SearchView: View {
                     HStack(spacing: 12) {
                         Image(systemName: "magnifyingglass")
                             .font(.system(size: 15, weight: .medium))
-                            .foregroundColor(isSearchFocused || !searchText.isEmpty ? .cyberCyan : .cyberDim)
+                            .foregroundColor(isSearchFocused || !viewModel.searchText.isEmpty ? .cyberCyan : .cyberDim)
 
-                        TextField("", text: $searchText,
+                        TextField("", text: $viewModel.searchText,
                                   prompt: Text("FIND MUSIC...")
                                       .foregroundColor(Color.cyberDim)
                                       .font(.system(size: 15, design: .monospaced)))
@@ -58,17 +56,17 @@ struct SearchView: View {
                             .autocorrectionDisabled()
                             .textInputAutocapitalization(.never)
                             .onSubmit {
-                                guard !searchText.isEmpty else { return }
+                                guard !viewModel.searchText.isEmpty else { return }
                                 HapticManager.medium()
-                                viewModel.search(query: searchText)
+                                viewModel.search(query: viewModel.searchText)
                                 isSearchFocused = false
                             }
 
-                        if !searchText.isEmpty {
+                        if !viewModel.searchText.isEmpty {
                             Button {
-                                searchText = ""
+                                viewModel.searchText = ""
                                 viewModel.clearSearch()
-                                activeFilter = .all
+                                viewModel.activeFilter = .all
                             } label: {
                                 Image(systemName: "xmark.circle.fill")
                                     .font(.system(size: 16))
@@ -80,15 +78,15 @@ struct SearchView: View {
                     .padding(.vertical, 12)
                     .background(Color.cyberSurface)
                     .overlay(
-                        RoundedRectangle(cornerRadius: 12)
+                        RoundedRectangle(cornerRadius: Theme.CornerRadius.md)
                             .stroke(
-                                isSearchFocused || !searchText.isEmpty
+                                isSearchFocused || !viewModel.searchText.isEmpty
                                     ? Color.cyberCyan.opacity(0.5)
                                     : Color.cyberDim.opacity(0.3),
                                 lineWidth: 1
                             )
                     )
-                    .cornerRadius(12)
+                    .cornerRadius(Theme.CornerRadius.md)
                     .padding(.horizontal)
                     .animation(.easeInOut(duration: 0.2), value: isSearchFocused)
                 }
@@ -127,12 +125,12 @@ struct SearchView: View {
             .onChange(of: downloadManager.completedDownloads.count) { _ in
                 viewModel.refreshDownloadedIds()
             }
-            .onChange(of: searchText) { newValue in
+            .onChange(of: viewModel.searchText) { newValue in
                 searchDebounceTask?.cancel()
                 if newValue.isEmpty {
                     if viewModel.hasSearched {
                         viewModel.clearSearch()
-                        activeFilter = .all
+                        viewModel.activeFilter = .all
                     }
                 } else {
                     searchDebounceTask = Task {
@@ -165,10 +163,10 @@ struct SearchView: View {
                             FilterChip(
                                 title: filter.rawValue,
                                 count: resultCount(for: filter),
-                                isSelected: activeFilter == filter
+                                isSelected: viewModel.activeFilter == filter
                             ) {
                                 withAnimation(.spring()) {
-                                    activeFilter = filter
+                                    viewModel.activeFilter = filter
                                 }
                             }
                         }
@@ -267,7 +265,7 @@ struct SearchView: View {
         .listStyle(.insetGrouped)
         .modifier(ScrollDismissesKeyboardModifier())
         .refreshable {
-            let query = searchText
+            let query = viewModel.searchText
             if !query.isEmpty {
                 viewModel.search(query: query)
                 for _ in 0..<100 {
@@ -279,11 +277,11 @@ struct SearchView: View {
     }
 
     private var shouldShowSongs: Bool {
-        activeFilter == .all || activeFilter == .songs
+        viewModel.activeFilter == .all || viewModel.activeFilter == .songs
     }
     
     private var shouldShowPlaylists: Bool {
-        activeFilter == .all || activeFilter == .playlists
+        viewModel.activeFilter == .all || viewModel.activeFilter == .playlists
     }
     
     private func resultCount(for filter: SearchFilter) -> Int {
@@ -349,18 +347,18 @@ struct SearchView: View {
         List {
             ForEach(0..<8, id: \.self) { _ in
                 HStack(spacing: 12) {
-                    RoundedRectangle(cornerRadius: 8)
+                    RoundedRectangle(cornerRadius: Theme.CornerRadius.sm)
                         .fill(Color.cyberDim.opacity(0.2))
                         .frame(width: 60, height: 60)
                         .shimmer()
 
                     VStack(alignment: .leading, spacing: 8) {
-                        RoundedRectangle(cornerRadius: 4)
+                        RoundedRectangle(cornerRadius: Theme.CornerRadius.xs)
                             .fill(Color.cyberDim.opacity(0.2))
                             .frame(width: 180, height: 16)
                             .shimmer()
 
-                        RoundedRectangle(cornerRadius: 4)
+                        RoundedRectangle(cornerRadius: Theme.CornerRadius.xs)
                             .fill(Color.cyberDim.opacity(0.2))
                             .frame(width: 120, height: 14)
                             .shimmer()
@@ -385,7 +383,7 @@ struct SearchView: View {
                     .font(.system(size: 70))
                     .foregroundColor(.cyberDim)
 
-                Text("No results for \"\(searchText)\"")
+                Text("No results for \"\(viewModel.searchText)\"")
                     .font(.title3)
                     .fontWeight(.semibold)
                     .foregroundColor(.white)
@@ -394,9 +392,9 @@ struct SearchView: View {
                     .foregroundColor(.cyberDim)
 
                 Button("Clear Search") {
-                    searchText = ""
+                    viewModel.searchText = ""
                     viewModel.clearSearch()
-                    activeFilter = .all
+                    viewModel.activeFilter = .all
                 }
                 .foregroundColor(.cyberCyan)
                 .padding(.top, 8)
@@ -414,27 +412,27 @@ struct SearchView: View {
 
                         LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
                             GenreButton(title: "Pop", icon: "sparkles", color: .pink) {
-                                searchText = "Pop"
+                                viewModel.searchText = "Pop"
                                 viewModel.search(query: "Pop music")
                             }
                             GenreButton(title: "Trending", icon: "flame.fill", color: .orange) {
-                                searchText = "Trending"
+                                viewModel.searchText = "Trending"
                                 viewModel.search(query: "Trending music 2024")
                             }
                             GenreButton(title: "Rock", icon: "guitars.fill", color: .red) {
-                                searchText = "Rock"
+                                viewModel.searchText = "Rock"
                                 viewModel.search(query: "Rock and roll")
                             }
                             GenreButton(title: "Hip-Hop", icon: "mic.fill", color: .purple) {
-                                searchText = "Hip Hop"
+                                viewModel.searchText = "Hip Hop"
                                 viewModel.search(query: "Hip hop rap")
                             }
                             GenreButton(title: "Electronic", icon: "waveform", color: .cyan) {
-                                searchText = "Electronic"
+                                viewModel.searchText = "Electronic"
                                 viewModel.search(query: "Electronic dance music")
                             }
                             GenreButton(title: "Jazz", icon: "music.note", color: .indigo) {
-                                searchText = "Jazz"
+                                viewModel.searchText = "Jazz"
                                 viewModel.search(query: "Jazz classics")
                             }
                         }
@@ -452,7 +450,7 @@ struct SearchView: View {
 
                             ForEach(viewModel.recentSearches, id: \.self) { query in
                                 Button(action: {
-                                    searchText = query
+                                    viewModel.searchText = query
                                     viewModel.search(query: query)
                                 }) {
                                     HStack(spacing: 12) {
@@ -487,10 +485,10 @@ struct SearchView: View {
                                     .padding(.vertical, 12)
                                     .background(Color.cyberSurface)
                                     .overlay(
-                                        RoundedRectangle(cornerRadius: 10)
+                                        RoundedRectangle(cornerRadius: Theme.CornerRadius.smd)
                                             .stroke(Color.cyberCyan.opacity(0.15), lineWidth: 1)
                                     )
-                                    .cornerRadius(10)
+                                    .cornerRadius(Theme.CornerRadius.smd)
                                 }
                                 .buttonStyle(.plain)
                                 .padding(.horizontal)
@@ -535,7 +533,7 @@ struct FilterChip: View {
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
                         .background(isSelected ? Color.cyberCyan.opacity(0.3) : Color.cyberDim.opacity(0.2))
-                        .cornerRadius(10)
+                        .cornerRadius(Theme.CornerRadius.smd)
                 }
             }
             .foregroundColor(isSelected ? .cyberBackground : .white)
@@ -574,7 +572,7 @@ struct PlaylistSearchRow: View {
                     .padding(.horizontal, 4)
                     .padding(.vertical, 2)
                     .background(Color.black.opacity(0.7))
-                    .cornerRadius(4)
+                    .cornerRadius(Theme.CornerRadius.xs)
                     .padding(4)
             }
             
@@ -652,7 +650,7 @@ struct ArtworkThumbnail: View {
 
     var body: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 8)
+            RoundedRectangle(cornerRadius: Theme.CornerRadius.sm)
                 .fill(Color.cyberSurface)
                 .overlay(
                     Image(systemName: "music.note")
@@ -665,7 +663,7 @@ struct ArtworkThumbnail: View {
                 }
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .clipShape(RoundedRectangle(cornerRadius: Theme.CornerRadius.sm))
     }
 }
 
@@ -689,10 +687,10 @@ struct GenreButton: View {
             .foregroundColor(color)
             .padding()
             .background(
-                RoundedRectangle(cornerRadius: 12)
+                RoundedRectangle(cornerRadius: Theme.CornerRadius.md)
                     .fill(color.opacity(0.08))
                     .overlay(
-                        RoundedRectangle(cornerRadius: 12)
+                        RoundedRectangle(cornerRadius: Theme.CornerRadius.md)
                             .stroke(color.opacity(0.4), lineWidth: 1)
                     )
             )
@@ -747,7 +745,7 @@ struct SearchResultRow: View {
                         .frame(width: 16, height: 16)
                         .padding(4)
                         .background(.ultraThinMaterial)
-                        .cornerRadius(4)
+                        .cornerRadius(Theme.CornerRadius.xs)
                         .offset(x: -4, y: -4)
                 }
             }
@@ -942,6 +940,8 @@ class SearchViewModel: ObservableObject {
     @Published var hasSearched = false
     @Published var downloadedVideoIds: Set<String> = []
     @Published var recentSearches: [String] = []
+    @Published var searchText = ""
+    @Published var activeFilter: SearchFilter = .all
     
     private var cancellables = Set<AnyCancellable>()
     
@@ -1113,7 +1113,7 @@ class SearchViewModel: ObservableObject {
 
 struct SearchView_Previews: PreviewProvider {
     static var previews: some View {
-        SearchView()
+        SearchView(viewModel: SearchViewModel())
     }
 }
 
