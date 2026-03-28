@@ -253,7 +253,7 @@ struct HistoryRow: View {
                                 .foregroundColor(.cyberDim)
                         )
                 }
-                    .frame(width: 48, height: 48)
+                    .frame(width: 50, height: 50)
                     .cornerRadius(6)
 
                 // Track info

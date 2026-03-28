@@ -693,7 +693,7 @@ struct CyberpunkTrackRow: View {
             HStack(spacing: 12) {
                 if let task = downloadTask, task.status.isActive {
                     CircularProgressView(progress: task.progress)
-                        .frame(width: 20, height: 20)
+                        .frame(width: 22, height: 22)
                 } else {
                     Text(track.durationText)
                         .font(.system(size: 13, weight: .medium, design: .monospaced))
@@ -708,7 +708,7 @@ struct CyberpunkTrackRow: View {
                 }
             }
         }
-        .padding(.vertical, 12)
+        .padding(.vertical, 10)
         .padding(.horizontal, 16)
         .background(
             RoundedRectangle(cornerRadius: 12)

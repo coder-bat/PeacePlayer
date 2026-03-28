@@ -13,7 +13,10 @@ struct DiscoverView: View {
     @StateObject private var playerState = PlayerState.shared
     @State private var showSearch = false
     @State private var selectedTrackForPlaylist: Track?
-    @State private var cancellables = Set<AnyCancellable>()
+    private class CancellableHolder: ObservableObject {
+        var cancellables = Set<AnyCancellable>()
+    }
+    @StateObject private var cancellableHolder = CancellableHolder()
 
     var body: some View {
         NavigationView {
@@ -22,10 +25,13 @@ struct DiscoverView: View {
                 discoveryContentView
             }
             .navigationBarHidden(true)
-            .onAppear {
+            .task {
                 viewModel.loadTrending()
                 viewModel.loadNewReleases()
             }
+        }
+        .onDisappear {
+            viewModel.cancelAllRequests()
         }
         .sheet(isPresented: $showSearch) {
             SearchView()
@@ -42,7 +48,7 @@ struct DiscoverView: View {
                 // Header with search
                 headerSection
                     .padding(.horizontal, 20)
-                    .padding(.top, 20)
+                    .padding(.top, 24)
 
                 // Search bar
                 searchBarSection
@@ -51,7 +57,7 @@ struct DiscoverView: View {
 
                 // Quick categories
                 categorySection
-                    .padding(.top, 20)
+                    .padding(.top, 24)
 
                 // Trending
                 trendingSection
@@ -115,7 +121,7 @@ struct DiscoverView: View {
                     )
             )
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.pressable)
     }
 
     // MARK: - Category Section
@@ -171,9 +177,10 @@ struct DiscoverView: View {
                     }
                     .padding(.horizontal, 20)
                 }
+                .transition(.opacity)
             } else {
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 16) {
+                    LazyHStack(spacing: 16) {
                         ForEach(viewModel.trendingTracks.prefix(10)) { track in
                             MinimalTrackCard(track: track) {
                                 playTrack(track)
@@ -182,6 +189,7 @@ struct DiscoverView: View {
                     }
                     .padding(.horizontal, 20)
                 }
+                .transition(.opacity)
             }
         }
     }
@@ -218,9 +226,10 @@ struct DiscoverView: View {
                     }
                     .padding(.horizontal, 20)
                 }
+                .transition(.opacity)
             } else {
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 16) {
+                    LazyHStack(spacing: 16) {
                         ForEach(viewModel.newReleases.prefix(10)) { track in
                             MinimalTrackCard(track: track) {
                                 playTrack(track)
@@ -229,6 +238,7 @@ struct DiscoverView: View {
                     }
                     .padding(.horizontal, 20)
                 }
+                .transition(.opacity)
             }
         }
     }
@@ -244,7 +254,7 @@ struct DiscoverView: View {
                 )
                 PlayerState.shared.play(item: item)
             })
-            .store(in: &cancellables)
+            .store(in: &cancellableHolder.cancellables)
     }
 
     private func playAll(_ tracks: [Track]) {
@@ -264,7 +274,7 @@ struct DiscoverView: View {
                     )
                     PlayerState.shared.addToQueue(item)
                 })
-                .store(in: &cancellables)
+                .store(in: &cancellableHolder.cancellables)
         }
 
         HapticManager.medium()
@@ -285,7 +295,7 @@ struct DiscoverView: View {
                 PlayerState.shared.addToQueue(item)
                 HapticManager.light()
             })
-            .store(in: &cancellables)
+            .store(in: &cancellableHolder.cancellables)
     }
 }
 
@@ -348,6 +358,8 @@ struct CategoryChip: View {
                 Text(category.rawValue.replacingOccurrences(of: "_", with: " "))
                     .font(.system(size: 10, weight: .bold, design: .monospaced))
                     .foregroundColor(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
             }
             .frame(width: 80, height: 80)
             .background(
@@ -359,7 +371,7 @@ struct CategoryChip: View {
                     )
             )
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.pressable)
     }
 }
 
@@ -420,11 +432,13 @@ struct CyberSearchResultRow: View {
                     .font(.system(size: 16, weight: .medium))
                     .foregroundColor(.white)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.8)
 
                 Text(track.displayArtist)
                     .font(.system(size: 14))
                     .foregroundColor(.cyberDim)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.8)
             }
 
             Spacer()
@@ -505,11 +519,13 @@ struct CyberPlaylistRow: View {
                         .font(.system(size: 16, weight: .medium))
                         .foregroundColor(.white)
                         .lineLimit(1)
+                        .minimumScaleFactor(0.8)
 
                     Text(playlist.author)
                         .font(.system(size: 14))
                         .foregroundColor(.cyberDim)
                         .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                 }
 
                 Spacer()
@@ -557,27 +573,32 @@ class DiscoverViewModel: ObservableObject {
     @Published var playlistResults: [YouTubePlaylist] = []
     @Published var isLoading = false
     @Published var hasSearched = false
-    @Published var downloadedTrackIds: Set<String> = []
+    @Published var searchFailed = false
 
     @Published var trendingTracks: [Track] = []
     @Published var newReleases: [Track] = []
     @Published var isLoadingTrending = false
     @Published var isLoadingNewReleases = false
+    @Published var trendingFailed = false
+    @Published var newReleasesFailed = false
 
     private var cancellables = Set<AnyCancellable>()
 
     func search(query: String) {
         isLoading = true
         hasSearched = true
+        searchFailed = false
 
-        // Search both songs and playlists
         let songsPublisher = APIService.shared.search(query: query, limit: 20)
         let playlistsPublisher = APIService.shared.searchPlaylists(query: query, limit: 10)
 
         Publishers.Zip(songsPublisher, playlistsPublisher)
             .receive(on: DispatchQueue.main)
-            .sink(receiveCompletion: { [weak self] _ in
+            .sink(receiveCompletion: { [weak self] completion in
                 self?.isLoading = false
+                if case .failure = completion {
+                    self?.searchFailed = true
+                }
             }, receiveValue: { [weak self] songs, playlists in
                 self?.results = songs
                 self?.playlistResults = playlists
@@ -587,10 +608,14 @@ class DiscoverViewModel: ObservableObject {
 
     func loadTrending() {
         isLoadingTrending = true
+        trendingFailed = false
         APIService.shared.fetchTrending()
             .receive(on: DispatchQueue.main)
-            .sink(receiveCompletion: { [weak self] _ in
+            .sink(receiveCompletion: { [weak self] completion in
                 self?.isLoadingTrending = false
+                if case .failure = completion {
+                    self?.trendingFailed = true
+                }
             }, receiveValue: { [weak self] tracks in
                 self?.trendingTracks = tracks
             })
@@ -599,10 +624,14 @@ class DiscoverViewModel: ObservableObject {
 
     func loadNewReleases() {
         isLoadingNewReleases = true
+        newReleasesFailed = false
         APIService.shared.fetchNewReleases()
             .receive(on: DispatchQueue.main)
-            .sink(receiveCompletion: { [weak self] _ in
+            .sink(receiveCompletion: { [weak self] completion in
                 self?.isLoadingNewReleases = false
+                if case .failure = completion {
+                    self?.newReleasesFailed = true
+                }
             }, receiveValue: { [weak self] tracks in
                 self?.newReleases = tracks
             })
@@ -613,11 +642,15 @@ class DiscoverViewModel: ObservableObject {
         results = []
         playlistResults = []
         hasSearched = false
+        searchFailed = false
+    }
+
+    func cancelAllRequests() {
+        cancellables.removeAll()
     }
 
     func refreshDownloadedIds() {
-        let completed = DownloadManager.shared.completedDownloads
-        downloadedTrackIds = Set(completed.map { $0.track.videoId })
+        // No-op: download state tracked by DownloadManager.shared directly
     }
 }
 

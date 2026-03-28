@@ -74,7 +74,7 @@ struct FullPlayer: View {
                 dominantColor
                     .opacity(0.25)
                     .ignoresSafeArea()
-                    .animation(.easeInOut(duration: 0.8), value: dominantColor)
+                    .animation(.easeInOut(duration: 0.35), value: dominantColor)
 
                 // Optional blur background from artwork
                 ArtworkBackground(url: playerState.currentItem?.track.artworkURL)

@@ -502,7 +502,7 @@ struct ListTrackRow: View {
                 }
             }
         }
-        .padding(.vertical, 8)
+        .padding(.vertical, 10)
         .padding(.horizontal, 12)
         .background(isPlaying ? Theme.cyberCyan.opacity(0.05) : Theme.cyberSurface.opacity(0.5))
         .cornerRadius(12)

@@ -699,7 +699,7 @@ struct SearchResultRow: View {
             // Artwork with indicators
             ZStack(alignment: .bottomTrailing) {
                 ArtworkThumbnail(url: track.artworkURL)
-                    .frame(width: 60, height: 60)
+                    .frame(width: 50, height: 50)
                 
                 // Download status badge
                 if let task = downloadTask, task.status.isActive {
@@ -776,11 +776,11 @@ struct SearchResultRow: View {
                         ZStack {
                             Circle()
                                 .stroke(Color.cyberDim.opacity(0.3), lineWidth: 2)
-                                .frame(width: 24, height: 24)
+                                .frame(width: 22, height: 22)
                             Circle()
                                 .trim(from: 0, to: task.progress)
                                 .stroke(Color.cyberCyan, style: StrokeStyle(lineWidth: 2, lineCap: .round))
-                                .frame(width: 24, height: 24)
+                                .frame(width: 22, height: 22)
                                 .rotationEffect(.degrees(-90))
                         }
                     } else if task.status == .completed {
@@ -801,7 +801,7 @@ struct SearchResultRow: View {
                 }
             }
         }
-        .padding(.vertical, 8)
+        .padding(.vertical, 10)
         .background(isPlaying ? Color.cyberCyan.opacity(0.08) : Color.clear)
         .contextMenu {
             Button(action: onPlay) {

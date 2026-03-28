@@ -34,12 +34,14 @@ struct MiniPlayer: View {
                     Text(playerState.currentItem?.track.title ?? "")
                         .font(.system(size: 15, weight: .semibold))
                         .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                         .foregroundColor(.white)
 
                     Text(playerState.currentItem?.track.displayArtist ?? "")
                         .font(.system(size: 13))
                         .foregroundColor(.cyberDim)
                         .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                 }
                 .frame(maxWidth: 180, alignment: .leading)
             }
@@ -51,25 +53,26 @@ struct MiniPlayer: View {
             HStack(spacing: 12) {
                 // Play/Pause button with loading state
                 ZStack {
-                    if playerState.playbackState.isLoading {
-                        ProgressView()
-                            .progressViewStyle(CircularProgressViewStyle())
+                    Button(action: {
+                        HapticManager.light()
+                        playerState.togglePlayPause()
+                    }) {
+                        Image(systemName: playerState.playbackState.isPlaying ? "pause.fill" : "play.fill")
+                            .font(.system(size: 22))
+                            .foregroundColor(.cyberCyan)
                             .frame(width: 44, height: 44)
-                    } else {
-                        Button(action: {
-                            HapticManager.light()
-                            playerState.togglePlayPause()
-                        }) {
-                            Image(systemName: playerState.playbackState.isPlaying ? "pause.fill" : "play.fill")
-                                .font(.system(size: 22))
-                                .foregroundColor(.cyberCyan)
-                                .frame(width: 44, height: 44)
-                        }
-                        .accessibilityLabel(playerState.playbackState.isPlaying
-                            ? "Pause \(playerState.currentItem?.track.title ?? "")"
-                            : "Play \(playerState.currentItem?.track.title ?? "")")
                     }
+                    .opacity(playerState.playbackState.isLoading ? 0 : 1)
+                    .accessibilityLabel(playerState.playbackState.isPlaying
+                        ? "Pause \(playerState.currentItem?.track.title ?? "")"
+                        : "Play \(playerState.currentItem?.track.title ?? "")")
+
+                    ProgressView()
+                        .progressViewStyle(CircularProgressViewStyle())
+                        .frame(width: 44, height: 44)
+                        .opacity(playerState.playbackState.isLoading ? 1 : 0)
                 }
+                .animation(.easeInOut(duration: 0.2), value: playerState.playbackState.isLoading)
 
                 Button(action: {
                     HapticManager.light()
@@ -82,7 +85,7 @@ struct MiniPlayer: View {
                 }
                 .accessibilityLabel("Next track")
                 .disabled(!playerState.hasNextTrack)
-                .opacity(playerState.hasNextTrack ? 1 : 0.5)
+                .opacity(playerState.hasNextTrack ? 1 : 0.25)
             }
         }
         .padding(.horizontal, 16)
