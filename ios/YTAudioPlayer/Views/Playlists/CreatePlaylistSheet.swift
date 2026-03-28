@@ -8,10 +8,12 @@
 import SwiftUI
 
 struct CreatePlaylistSheet: View {
+    enum Field { case name, description }
     @StateObject private var playlistManager = PlaylistManager.shared
     @State private var name = ""
     @State private var description = ""
     @Environment(\.dismiss) private var dismiss
+    @FocusState private var focusedField: Field?
     
     var body: some View {
         NavigationView {
@@ -22,8 +24,16 @@ struct CreatePlaylistSheet: View {
                     Section {
                         TextField("Playlist Name", text: $name)
                             .foregroundColor(.white)
+                            .focused($focusedField, equals: .name)
+                            .submitLabel(.next)
+                            .autocorrectionDisabled()
+                            .onSubmit { focusedField = .description }
                         TextField("Description (optional)", text: $description)
                             .foregroundColor(.white)
+                            .focused($focusedField, equals: .description)
+                            .submitLabel(.done)
+                            .autocorrectionDisabled()
+                            .onSubmit { createPlaylist() }
                     }
                     .listRowBackground(Color.cyberSurface)
 

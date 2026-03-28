@@ -13,9 +13,9 @@ import CoreImage.CIFilterBuiltins
 import CoreHaptics
 
 struct FullPlayer: View {
-    @ObservedObject private var playerState = PlayerState.shared
-    @ObservedObject private var playlistManager = PlaylistManager.shared
-    @ObservedObject private var songMemoryManager = SongMemoryManager.shared
+    @StateObject private var playerState = PlayerState.shared
+    @StateObject private var playlistManager = PlaylistManager.shared
+    @StateObject private var songMemoryManager = SongMemoryManager.shared
     @Binding var isPresented: Bool
 
     private func dismiss() {
@@ -32,6 +32,7 @@ struct FullPlayer: View {
     @State private var showShareSheet = false
     @State private var showSongMemory = false
     @State private var dominantColor: Color = .clear
+    @State private var colorExtractionTask: Task<Void, Never>?
     @State private var dragOffset: CGFloat = 0
     @State private var scrollAtTop: Bool = true
     @State private var showScrubberThumb = false
@@ -43,6 +44,8 @@ struct FullPlayer: View {
     @State private var showTimeCapsule = false
     @State private var showTimeCapsuleVault = false
     @State private var showAntiAlgorithm = false
+    @State private var showGestureHints = false
+    @AppStorage("hasSeenGestureHints") private var hasSeenGestureHints = false
     @StateObject private var hapticEngine = HapticSymphonyEngine.shared
 
     private var currentTrack: Track? {
@@ -82,11 +85,24 @@ struct FullPlayer: View {
                 } else {
                     portraitContent
                 }
+
+                // First-run gesture coach marks
+                if showGestureHints {
+                    GestureCoachOverlay {
+                        withAnimation(.easeOut(duration: 0.3)) {
+                            showGestureHints = false
+                            hasSeenGestureHints = true
+                        }
+                    }
+                }
             }
             .simultaneousGesture(
-                DragGesture()
+                DragGesture(minimumDistance: 20)
                     .onChanged { value in
                         guard !isLandscape, scrollAtTop else { return }
+                        // Only respond to predominantly vertical drags so
+                        // horizontal seeks on the waveform bar aren't intercepted
+                        guard abs(value.translation.height) > abs(value.translation.width) else { return }
                         let height = value.translation.height
                         if height > 0 {
                             dragOffset = height * 0.85
@@ -161,6 +177,17 @@ struct FullPlayer: View {
             .offset(y: dragOffset)
             .onAppear {
                 extractDominantColor()
+                if !hasSeenGestureHints {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                        showGestureHints = true
+                    }
+                }
+            }
+            .onDisappear {
+                scrubberHideTask?.cancel()
+                scrubberHideTask = nil
+                colorExtractionTask?.cancel()
+                colorExtractionTask = nil
             }
             .onChange(of: playerState.currentItem?.track.videoId) { _ in
                 extractDominantColor()
@@ -215,6 +242,7 @@ struct FullPlayer: View {
                         .foregroundColor(.white.opacity(0.7))
                         .padding(20)
                 }
+                .accessibilityLabel("Dismiss player")
                 .frame(maxWidth: .infinity, alignment: .leading)
 
                 Spacer()
@@ -249,10 +277,9 @@ struct FullPlayer: View {
                     x: 0,
                     y: 10
                 )
-                .scaleEffect(playerState.playbackState.isPlaying ? 1.0 : 0.94)
+                .scaleEffect((playerState.playbackState.isPlaying ? 1.0 : 0.94) * (likePulse ? 1.06 : 1.0))
                 .animation(.spring(response: 0.3, dampingFraction: 0.8), value: playerState.playbackState.isPlaying)
-                .animation(.easeInOut(duration: 0.25), value: currentTrackIsLiked)
-                .animation(.easeInOut(duration: 0.25), value: likePulse)
+                .animation(.spring(response: 0.25, dampingFraction: 0.6), value: likePulse)
                 .onTapGesture(count: 2) {
                     toggleCurrentTrackLike()
                 }
@@ -281,9 +308,15 @@ struct FullPlayer: View {
 
     // MARK: - Dominant Color Extraction
     private func extractDominantColor() {
-        guard let url = playerState.currentItem?.track.artworkURL else { return }
-        Task.detached(priority: .userInitiated) {
+        colorExtractionTask?.cancel()
+        colorExtractionTask = Task {
+            // 300ms debounce for rapid skipping
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            guard !Task.isCancelled else { return }
+            
+            guard let url = playerState.currentItem?.track.artworkURL else { return }
             guard let (data, _) = try? await URLSession.shared.data(from: url),
+                  !Task.isCancelled,
                   let ciImage = CIImage(data: data) else { return }
 
             let extent = CIVector(cgRect: ciImage.extent)
@@ -301,6 +334,7 @@ struct FullPlayer: View {
                            format: .RGBA8,
                            colorSpace: CGColorSpaceCreateDeviceRGB())
 
+            guard !Task.isCancelled else { return }
             let color = Color(
                 red: Double(bitmap[0]) / 255.0,
                 green: Double(bitmap[1]) / 255.0,
@@ -388,11 +422,10 @@ struct FullPlayer: View {
                 radius: showingVisualizer ? 24 : (currentTrackIsLiked ? (likePulse ? 26 : 18) : 20),
                 x: 0, y: 10
             )
-            .scaleEffect(playerState.playbackState.isPlaying ? 1.0 : 0.94)
+            .scaleEffect((playerState.playbackState.isPlaying ? 1.0 : 0.94) * (likePulse ? 1.06 : 1.0))
             .animation(.spring(response: 0.5, dampingFraction: 0.75), value: showingVisualizer)
             .animation(.spring(response: 0.3, dampingFraction: 0.8), value: playerState.playbackState.isPlaying)
-            .animation(.easeInOut(duration: 0.25), value: currentTrackIsLiked)
-            .animation(.easeInOut(duration: 0.25), value: likePulse)
+            .animation(.spring(response: 0.25, dampingFraction: 0.6), value: likePulse)
             .frame(maxWidth: .infinity, alignment: .center)
             .onTapGesture(count: 2) {
                 if !showingVisualizer { toggleCurrentTrackLike() }
@@ -521,13 +554,13 @@ struct FullPlayer: View {
             HStack {
                 Text(playerState.currentTimeFormatted)
                     .font(.system(size: 12, weight: .medium, design: .monospaced))
-                    .foregroundColor(.gray)
+                    .foregroundColor(.cyberDim)
 
                 Spacer()
 
                 Text(playerState.durationFormatted)
                     .font(.system(size: 12, weight: .medium, design: .monospaced))
-                    .foregroundColor(.gray)
+                    .foregroundColor(.cyberDim)
             }
         }
         .task(id: currentTrack?.videoId) {
@@ -730,6 +763,8 @@ struct FullPlayer: View {
                 .frame(height: 60)
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Time Capsule")
+            .accessibilityHint("Tap to bury current song, hold to open vault")
             .simultaneousGesture(
                 LongPressGesture(minimumDuration: 0.5).onEnded { _ in
                     HapticManager.medium()
@@ -783,6 +818,7 @@ struct VolumeSlider: View {
             Image(systemName: "speaker.fill")
                 .font(.system(size: 14))
                 .foregroundColor(.gray)
+                .accessibilityHidden(true)
 
             GeometryReader { geometry in
                 ZStack(alignment: .leading) {
@@ -825,11 +861,15 @@ struct VolumeSlider: View {
             Image(systemName: "speaker.wave.3.fill")
                 .font(.system(size: 14))
                 .foregroundColor(.gray)
+                .accessibilityHidden(true)
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 8)
         .background(Color.white.opacity(0.05))
         .cornerRadius(8)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Volume \(Int(volume * 100)) percent")
+        .accessibilityValue("\(Int(volume * 100))%")
         .onAppear {
             volume = Double(AVAudioSession.sharedInstance().outputVolume)
         }
@@ -916,11 +956,11 @@ struct ArtworkImage: View {
         ZStack {
             // Placeholder
             RoundedRectangle(cornerRadius: 12)
-                .fill(Color.gray.opacity(0.2))
+                .fill(Color.cyberDim.opacity(0.2))
                 .overlay(
                     Image(systemName: "music.note")
                         .font(.system(size: size * 0.3))
-                        .foregroundColor(.gray)
+                        .foregroundColor(.cyberDim)
                 )
             
             // Image with fade using cache
@@ -988,6 +1028,7 @@ struct AirPlayIcon: View {
         Image(systemName: "airplayaudio")
             .font(.system(size: 20))
             .foregroundColor(.white)
+            .accessibilityLabel("AirPlay")
     }
 }
 
@@ -1011,7 +1052,7 @@ struct AirPlayRoutePickerView: UIViewRepresentable {
 // MARK: - Audio Settings View
 struct AudioSettingsView: View {
     @StateObject private var crossfadeManager = CrossfadeManager.shared
-    @ObservedObject private var adaptiveWalkDJ = AdaptiveWalkDJManager.shared
+    @StateObject private var adaptiveWalkDJ = AdaptiveWalkDJManager.shared
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {

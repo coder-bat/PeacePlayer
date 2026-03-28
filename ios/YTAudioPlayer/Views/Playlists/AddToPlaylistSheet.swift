@@ -39,11 +39,13 @@ struct AddToPlaylistSheet: View {
                                     .font(.headline)
                                     .foregroundColor(.white)
                                     .lineLimit(1)
+                                    .minimumScaleFactor(0.8)
 
                                 Text(track.displayArtist)
                                     .font(.subheadline)
                                     .foregroundColor(.cyberDim)
                                     .lineLimit(1)
+                                    .minimumScaleFactor(0.8)
                             }
                         }
                         .padding(.vertical, 4)
@@ -56,6 +58,9 @@ struct AddToPlaylistSheet: View {
                             HStack {
                                 TextField("Playlist Name", text: $newPlaylistName)
                                     .foregroundColor(.white)
+                                    .submitLabel(.done)
+                                    .autocorrectionDisabled()
+                                    .onSubmit { createPlaylist() }
 
                                 Button("Create") {
                                     createPlaylist()
@@ -230,21 +235,21 @@ struct PlaylistArtworkMini: View {
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 6)
-                .fill(Color.gray.opacity(0.2))
+                .fill(Color.cyberDim.opacity(0.2))
             
             if trackIds.isEmpty {
                 Image(systemName: "music.note")
-                    .foregroundColor(.gray)
+                    .foregroundColor(.cyberDim)
             } else if trackIds.count == 1 {
                 // Single track - show music note with placeholder
                 Image(systemName: "music.note")
-                    .foregroundColor(.gray)
+                    .foregroundColor(.cyberDim)
             } else {
                 // Multiple tracks - show grid
                 LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 2) {
                     ForEach(0..<min(4, trackIds.count), id: \.self) { _ in
                         Rectangle()
-                            .fill(Color.gray.opacity(0.3))
+                            .fill(Color.cyberDim.opacity(0.3))
                     }
                 }
                 .padding(2)
