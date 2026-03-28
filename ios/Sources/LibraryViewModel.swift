@@ -50,13 +50,19 @@ struct DownloadedTrackItem: Identifiable {
 }
 
 class LibraryViewModel: ObservableObject {
-    @Published var tracks: [DownloadedTrackItem] = []
-    @Published var sortOption: LibrarySortOption = .recentlyAdded
+    @Published var tracks: [DownloadedTrackItem] = [] {
+        didSet { _sortedCache = nil; _filteredCache = nil }
+    }
+    @Published var sortOption: LibrarySortOption = .recentlyAdded {
+        didSet { _sortedCache = nil; _filteredCache = nil }
+    }
     @Published var showDeleteConfirmation = false
     @Published var isLoading = false
 
     private var cancellables = Set<AnyCancellable>()
     private let persistence = PersistenceController.shared
+    private var _sortedCache: [DownloadedTrackItem]?
+    private var _filteredCache: (query: String, result: [DownloadedTrackItem])?
 
     var totalSize: Int64 {
         tracks.reduce(0) { $0 + $1.fileSize }
@@ -69,30 +75,42 @@ class LibraryViewModel: ObservableObject {
     }
 
     var sortedTracks: [DownloadedTrackItem] {
+        if let cached = _sortedCache { return cached }
+        let sorted: [DownloadedTrackItem]
         switch sortOption {
         case .recentlyAdded:
-            return tracks.sorted { $0.downloadedAt > $1.downloadedAt }
+            sorted = tracks.sorted { $0.downloadedAt > $1.downloadedAt }
         case .title:
-            return tracks.sorted { $0.title.lowercased() < $1.title.lowercased() }
+            sorted = tracks.sorted { $0.title.lowercased() < $1.title.lowercased() }
         case .artist:
-            return tracks.sorted { $0.artist.lowercased() < $1.artist.lowercased() }
+            sorted = tracks.sorted { $0.artist.lowercased() < $1.artist.lowercased() }
         case .size:
-            return tracks.sorted { $0.fileSize > $1.fileSize }
+            sorted = tracks.sorted { $0.fileSize > $1.fileSize }
         }
+        _sortedCache = sorted
+        return sorted
     }
 
-    /// Returns tracks filtered by search query
+    /// Returns tracks filtered by search query (cached per render cycle)
     func filteredTracks(searchQuery: String) -> [DownloadedTrackItem] {
         let query = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !query.isEmpty else {
-            return sortedTracks
+        
+        if let cached = _filteredCache, cached.query == query {
+            return cached.result
         }
-
-        return sortedTracks.filter { track in
-            track.title.lowercased().contains(query) ||
-            track.artist.lowercased().contains(query) ||
-            track.album.lowercased().contains(query)
+        
+        let result: [DownloadedTrackItem]
+        if query.isEmpty {
+            result = sortedTracks
+        } else {
+            result = sortedTracks.filter { track in
+                track.title.lowercased().contains(query) ||
+                track.artist.lowercased().contains(query) ||
+                track.album.lowercased().contains(query)
+            }
         }
+        _filteredCache = (query, result)
+        return result
     }
 
     init() {
@@ -111,16 +129,20 @@ class LibraryViewModel: ObservableObject {
 
         let request: NSFetchRequest<CDDownloadedTrack> = CDDownloadedTrack.fetchRequest()
         request.sortDescriptors = [NSSortDescriptor(keyPath: \CDDownloadedTrack.downloadedAt, ascending: false)]
+        request.fetchBatchSize = 50
 
         do {
             let results = try persistence.viewContext.fetch(request)
 
-            // Debug logging
-            print("📚 Library fetch: \(results.count) downloaded track records found")
-            for download in results {
-                let trackInfo = download.track
-                let fileExists = FileManager.default.fileExists(atPath: download.localPath)
-                print("  - \(trackInfo?.title ?? "Unknown") (videoId: \(trackInfo?.videoId ?? "nil")) - File exists: \(fileExists)")
+            // Debug logging — move file I/O off main thread
+            let resultSnapshots = results.map { (title: $0.track?.title, videoId: $0.track?.videoId, path: $0.localPath) }
+            let count = results.count
+            Task.detached(priority: .utility) {
+                print("📚 Library fetch: \(count) downloaded track records found")
+                for info in resultSnapshots {
+                    let fileExists = FileManager.default.fileExists(atPath: info.path)
+                    print("  - \(info.title ?? "Unknown") (videoId: \(info.videoId ?? "nil")) - File exists: \(fileExists)")
+                }
             }
 
             // Filter out records with missing files or invalid data
@@ -172,6 +194,28 @@ class LibraryViewModel: ObservableObject {
 
         // Delete them all
         deleteTracks(allVideoIds)
+    }
+
+    func playNextTrack(_ track: DownloadedTrackItem) {
+        let trackObj = track.track
+        let localURL = AudioFileManager.shared.localFileURL(for: track.videoId)
+        let item = QueueItem(
+            track: trackObj,
+            streamUrl: localURL.absoluteString,
+            source: .local(path: localURL.path)
+        )
+        PlayerState.shared.addToQueueNext(item)
+    }
+
+    func addToQueue(_ track: DownloadedTrackItem) {
+        let trackObj = track.track
+        let localURL = AudioFileManager.shared.localFileURL(for: track.videoId)
+        let item = QueueItem(
+            track: trackObj,
+            streamUrl: localURL.absoluteString,
+            source: .local(path: localURL.path)
+        )
+        PlayerState.shared.addToQueue(item)
     }
 
     func isCurrentlyPlaying(_ track: DownloadedTrackItem) -> Bool {
