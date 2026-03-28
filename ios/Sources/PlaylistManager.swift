@@ -26,6 +26,7 @@ class PlaylistManager: ObservableObject {
     private let persistence = PersistenceController.shared
     private let defaults = UserDefaults.standard
     var cancellables = Set<AnyCancellable>()
+    private var streamCancellables = Set<AnyCancellable>()
     
     private enum Keys {
         static let playlists = "user.playlists"
@@ -319,6 +320,7 @@ class PlaylistManager: ObservableObject {
         let group = DispatchGroup()
         let processingQueue = DispatchQueue(label: "com.ytaudio.playlistplay", attributes: .concurrent)
         
+        streamCancellables.removeAll()
         for track in tracks.prefix(20) {
             group.enter()
             APIService.shared.getStreamUrl(videoId: track.videoId)
@@ -332,7 +334,7 @@ class PlaylistManager: ObservableObject {
                         streamInfos.append((track, streamInfo.streamUrl))
                     }
                 })
-                .store(in: &cancellables)
+                .store(in: &streamCancellables)
         }
         
         group.notify(queue: .main) {
@@ -371,6 +373,7 @@ class PlaylistManager: ObservableObject {
         
         let playerState = PlayerState.shared
         
+        streamCancellables.removeAll()
         for track in tracks.prefix(20) {
             APIService.shared.getStreamUrl(videoId: track.videoId)
                 .sink(receiveCompletion: { completion in
@@ -385,7 +388,7 @@ class PlaylistManager: ObservableObject {
                     )
                     playerState.addToQueue(item)
                 })
-                .store(in: &cancellables)
+                .store(in: &streamCancellables)
         }
     }
     
@@ -449,6 +452,7 @@ class PlaylistManager: ObservableObject {
         let group = DispatchGroup()
         let processingQueue = DispatchQueue(label: "com.ytaudio.ytplaylistplay", attributes: .concurrent)
         
+        streamCancellables.removeAll()
         for track in tracks.prefix(20) {
             group.enter()
             APIService.shared.getStreamUrl(videoId: track.videoId)
@@ -462,7 +466,7 @@ class PlaylistManager: ObservableObject {
                         streamInfos.append((track, streamInfo.streamUrl))
                     }
                 })
-                .store(in: &cancellables)
+                .store(in: &streamCancellables)
         }
         
         group.notify(queue: .main) {
@@ -497,6 +501,7 @@ class PlaylistManager: ObservableObject {
         
         let playerState = PlayerState.shared
         
+        streamCancellables.removeAll()
         for track in tracks.prefix(20) {
             APIService.shared.getStreamUrl(videoId: track.videoId)
                 .sink(receiveCompletion: { completion in
@@ -511,7 +516,7 @@ class PlaylistManager: ObservableObject {
                     )
                     playerState.addToQueue(item)
                 })
-                .store(in: &cancellables)
+                .store(in: &streamCancellables)
         }
     }
     

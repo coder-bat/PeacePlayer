@@ -184,13 +184,16 @@ struct HomeView: View {
                         viewModel.playTrack(track)
                     },
                     onAddToQueue: {
+                        HapticManager.light()
                         viewModel.addToQueue(track)
                     },
                     onAddToPlaylist: {
+                        HapticManager.light()
                         selectedTrack = track
                         showAddToPlaylistSheet = true
                     },
                     onDownload: {
+                        HapticManager.light()
                         viewModel.downloadTrack(track)
                     }
                 )
@@ -644,6 +647,7 @@ class HomeViewModel: ObservableObject {
 
     private let dataManager = DataManager.shared
     private var cancellables = Set<AnyCancellable>()
+    private var vibeCancellables = Set<AnyCancellable>()
 
     init() {
         dataManager.$recentlyPlayed
@@ -755,10 +759,14 @@ class HomeViewModel: ObservableObject {
 
                 self.playTrack(tracks[0])
 
+                self.vibeCancellables.removeAll()
                 for track in tracks.dropFirst() {
                     APIService.shared.getStreamUrl(videoId: track.videoId)
-                        .sink(receiveCompletion: { _ in },
-                              receiveValue: { streamInfo in
+                        .sink(receiveCompletion: { completion in
+                            if case .failure(let error) = completion {
+                                print("⚠️ [HomeView] Stream URL failed: \(error.localizedDescription)")
+                            }
+                        }, receiveValue: { streamInfo in
                             let item = QueueItem(
                                 track: track,
                                 streamUrl: streamInfo.streamUrl,
@@ -766,7 +774,7 @@ class HomeViewModel: ObservableObject {
                             )
                             PlayerState.shared.addToQueue(item)
                         })
-                        .store(in: &self.cancellables)
+                        .store(in: &self.vibeCancellables)
                 }
 
                 // Haptic feedback
