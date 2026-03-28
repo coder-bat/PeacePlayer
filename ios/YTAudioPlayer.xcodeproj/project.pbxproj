@@ -65,6 +65,7 @@
 		71A8BD06A9F42E4975F48413 /* DataMigrationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBE97B2112349FC1878F32F2 /* DataMigrationService.swift */; };
 		7212DCD348C334105B0515DF /* SongMemoryManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A308A4408650D872CCCD07E3 /* SongMemoryManager.swift */; };
 		767F84264D5A0147FDAF1576 /* Track.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D823E6945F2F8CBC4462532 /* Track.swift */; };
+		ABAB000100010001ABAB0001 /* Audiobook.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABAB000200020002ABAB0002 /* Audiobook.swift */; };
 		EEEE000100010001EEEE0001 /* RadioStation.swift in Sources */ = {isa = PBXBuildFile; fileRef = EEEE000200020002EEEE0002 /* RadioStation.swift */; };
 		FFFF000100010001FFFF0001 /* Podcast.swift in Sources */ = {isa = PBXBuildFile; fileRef = FFFF000200020002FFFF0002 /* Podcast.swift */; };
 		77FD52EB43AA6E5026CB07CC /* CDSongMemory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B4016A8C3A0B1C8CBA1EE85 /* CDSongMemory.swift */; };
@@ -116,6 +117,7 @@
 		GGGG000100010001GGGG0001 /* RadioViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = GGGG000200020002GGGG0002 /* RadioViewModel.swift */; };
 		HHHH000100010001HHHH0001 /* RadioView.swift in Sources */ = {isa = PBXBuildFile; fileRef = HHHH000200020002HHHH0002 /* RadioView.swift */; };
 		IIII000100010001IIII0001 /* PodcastDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = IIII000200020002IIII0002 /* PodcastDetailView.swift */; };
+		JJJJ000100010001JJJJ0001 /* AudiobookDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = JJJJ000200020002JJJJ0002 /* AudiobookDetailView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -163,6 +165,7 @@
 		1C5B36394A531D9C8D93AAFD /* YTAudioPlayer.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = YTAudioPlayer.entitlements; sourceTree = "<group>"; };
 		2649617A9D406FC9ADE4F5BD /* GenrePickerSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GenrePickerSheet.swift; sourceTree = "<group>"; };
 		2D823E6945F2F8CBC4462532 /* Track.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Track.swift; sourceTree = "<group>"; };
+		ABAB000200020002ABAB0002 /* Audiobook.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Audiobook.swift; sourceTree = "<group>"; };
 		EEEE000200020002EEEE0002 /* RadioStation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RadioStation.swift; sourceTree = "<group>"; };
 		FFFF000200020002FFFF0002 /* Podcast.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Podcast.swift; sourceTree = "<group>"; };
 		2DC7C7A6C85A67E6E8A396B7 /* APIService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIService.swift; sourceTree = "<group>"; };
@@ -256,6 +259,7 @@
 		GGGG000200020002GGGG0002 /* RadioViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RadioViewModel.swift; sourceTree = "<group>"; };
 		HHHH000200020002HHHH0002 /* RadioView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RadioView.swift; sourceTree = "<group>"; };
 		IIII000200020002IIII0002 /* PodcastDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PodcastDetailView.swift; sourceTree = "<group>"; };
+		JJJJ000200020002JJJJ0002 /* AudiobookDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudiobookDetailView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -481,6 +485,7 @@
 			children = (
 				12DF773336B5A83BFF1FC347 /* PlayerState.swift */,
 				93B4300DF1688D223A2697AE /* Playlist.swift */,
+				ABAB000200020002ABAB0002 /* Audiobook.swift */,
 				FFFF000200020002FFFF0002 /* Podcast.swift */,
 				EEEE000200020002EEEE0002 /* RadioStation.swift */,
 				2D823E6945F2F8CBC4462532 /* Track.swift */,
@@ -512,6 +517,7 @@
 				GGGG000200020002GGGG0002 /* RadioViewModel.swift */,
 				HHHH000200020002HHHH0002 /* RadioView.swift */,
 				IIII000200020002IIII0002 /* PodcastDetailView.swift */,
+				JJJJ000200020002JJJJ0002 /* AudiobookDetailView.swift */,
 			);
 			path = Radio;
 			sourceTree = "<group>";
@@ -709,6 +715,7 @@
 				D37834AA30D9890282DAD69E /* SongMemorySheet.swift in Sources */,
 				C41811001AF961E13FBD81D9 /* Theme.swift in Sources */,
 				767F84264D5A0147FDAF1576 /* Track.swift in Sources */,
+				ABAB000100010001ABAB0001 /* Audiobook.swift in Sources */,
 				EEEE000100010001EEEE0001 /* RadioStation.swift in Sources */,
 				FFFF000100010001FFFF0001 /* Podcast.swift in Sources */,
 				017ECF92A19304984CAAB334 /* TrackStore.swift in Sources */,
@@ -725,6 +732,7 @@
 				GGGG000100010001GGGG0001 /* RadioViewModel.swift in Sources */,
 				HHHH000100010001HHHH0001 /* RadioView.swift in Sources */,
 				IIII000100010001IIII0001 /* PodcastDetailView.swift in Sources */,
+				JJJJ000100010001JJJJ0001 /* AudiobookDetailView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

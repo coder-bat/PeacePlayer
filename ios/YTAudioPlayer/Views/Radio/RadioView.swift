@@ -5,6 +5,12 @@ import SwiftUI
 struct RadioView: View {
     @ObservedObject var viewModel: RadioViewModel
     @State private var showPodcastDetail: PodcastShow?
+    @State private var selectedAudiobook: Audiobook?
+    @State private var showAudiobookDetail = false
+
+    private func dismissKeyboard() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    }
 
     var body: some View {
         ZStack {
@@ -21,20 +27,49 @@ struct RadioView: View {
                         stationsSection
                     case .podcasts:
                         podcastsSection
+                    case .audiobooks:
+                        audiobookSection
                     case .songRadio:
                         songRadioSection
                     }
 
                     Spacer(minLength: 100)
                 }
+                .gesture(DragGesture().onChanged { _ in dismissKeyboard() })
+            }
+            .overlay(alignment: .top) {
+                if let error = viewModel.errorMessage {
+                    HStack(spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundColor(.white)
+                        Text(error)
+                            .font(.system(size: 12, weight: .medium, design: .monospaced))
+                            .foregroundColor(.white)
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 10)
+                    .background(
+                        Capsule()
+                            .fill(Theme.cyberMagenta.opacity(0.9))
+                    )
+                    .padding(.top, 8)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .animation(.spring(response: 0.3), value: viewModel.errorMessage)
+                }
             }
         }
         .task {
             viewModel.loadTopStations()
             viewModel.loadTopPodcasts()
+            viewModel.loadTopAudiobooks()
         }
         .sheet(item: $showPodcastDetail) { show in
             PodcastDetailView(show: show, viewModel: viewModel)
+        }
+        .sheet(isPresented: $showAudiobookDetail) {
+            if let book = selectedAudiobook {
+                AudiobookDetailView(book: book, viewModel: viewModel, library: .shared)
+            }
         }
     }
 
@@ -46,7 +81,7 @@ struct RadioView: View {
                 Text("RADIO")
                     .font(.system(size: 24, weight: .bold, design: .monospaced))
                     .foregroundColor(.white)
-                Text("stations · podcasts · song radio")
+                Text("stations · podcasts · books · song radio")
                     .font(.system(size: 12, weight: .medium, design: .monospaced))
                     .foregroundColor(Theme.cyberDim)
             }
@@ -60,28 +95,36 @@ struct RadioView: View {
     // MARK: - Section Picker
 
     var sectionPicker: some View {
-        HStack(spacing: 8) {
-            ForEach(RadioSection.allCases, id: \.self) { section in
-                Button(action: {
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        viewModel.selectedSection = section
-                        viewModel.searchText = ""
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(RadioSection.allCases, id: \.self) { section in
+                    Button(action: {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            viewModel.selectedSection = section
+                            viewModel.searchText = ""
+                        }
+                        HapticManager.light()
+                    }) {
+                        Text(section.rawValue.uppercased())
+                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                            .foregroundColor(viewModel.selectedSection == section ? .black : Theme.cyberDim)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(
+                                Capsule()
+                                    .fill(viewModel.selectedSection == section ? Theme.cyberCyan : Theme.cyberSurface)
+                            )
+                            .overlay(
+                                Capsule()
+                                    .stroke(viewModel.selectedSection == section ? Theme.cyberCyan : Theme.cyberDim.opacity(0.3), lineWidth: 1)
+                            )
                     }
-                    HapticManager.light()
-                }) {
-                    Text(section.rawValue.uppercased())
-                        .font(.system(size: 11, weight: .bold, design: .monospaced))
-                        .foregroundColor(viewModel.selectedSection == section ? .black : Theme.cyberDim)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 8)
-                        .background(
-                            Capsule()
-                                .fill(viewModel.selectedSection == section ? Theme.cyberCyan : Theme.cyberSurface)
-                        )
+                    .accessibilityLabel("\(section.rawValue) section")
+                    .accessibilityAddTraits(viewModel.selectedSection == section ? .isSelected : [])
                 }
             }
+            .padding(.horizontal, 20)
         }
-        .padding(.horizontal, 20)
         .padding(.bottom, 8)
     }
 
@@ -89,15 +132,27 @@ struct RadioView: View {
 
     var searchBar: some View {
         HStack(spacing: 10) {
-            Image(systemName: "magnifyingglass")
-                .foregroundColor(Theme.cyberDim)
+            if viewModel.isSearching {
+                ProgressView()
+                    .scaleEffect(0.7)
+                    .tint(Theme.cyberCyan)
+            } else {
+                Image(systemName: "magnifyingglass")
+                    .foregroundColor(Theme.cyberDim)
+            }
             TextField(searchPlaceholder, text: $viewModel.searchText)
                 .font(.system(size: 14, design: .monospaced))
                 .foregroundColor(.white)
+                .onSubmit { }
             if !viewModel.searchText.isEmpty {
-                Button(action: { viewModel.searchText = "" }) {
+                Button(action: {
+                    viewModel.searchText = ""
+                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                }) {
                     Image(systemName: "xmark.circle.fill")
                         .foregroundColor(Theme.cyberDim)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                 }
             }
         }
@@ -108,6 +163,7 @@ struct RadioView: View {
                 .fill(Theme.cyberSurface)
         )
         .padding(.horizontal, 20)
+        .padding(.top, 4)
         .padding(.bottom, 12)
     }
 
@@ -115,6 +171,7 @@ struct RadioView: View {
         switch viewModel.selectedSection {
         case .stations: return "Search radio stations..."
         case .podcasts: return "Search podcasts..."
+        case .audiobooks: return "Search audiobooks..."
         case .songRadio: return "Search tracks..."
         }
     }
@@ -130,7 +187,11 @@ struct RadioView: View {
             if !viewModel.searchText.isEmpty {
                 stationsList(viewModel.stationSearchResults, title: "SEARCH_RESULTS")
             } else if !viewModel.selectedGenre.isEmpty {
-                stationsList(viewModel.genreStations, title: viewModel.selectedGenre.uppercased())
+                if viewModel.genreStations.isEmpty && !viewModel.isLoadingStations {
+                    emptySearchState(icon: "antenna.radiowaves.left.and.right", text: "No stations for this genre")
+                } else {
+                    stationsList(viewModel.genreStations, title: viewModel.selectedGenre.uppercased())
+                }
             } else {
                 sectionHeader("TOP_STATIONS", count: viewModel.topStations.count)
 
@@ -146,6 +207,15 @@ struct RadioView: View {
                             }
                         }
                         .padding(.horizontal, 20)
+                    }
+                    .overlay(alignment: .trailing) {
+                        LinearGradient(
+                            colors: [Theme.cyberBackground.opacity(0), Theme.cyberBackground],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                        .frame(width: 24)
+                        .allowsHitTesting(false)
                     }
 
                     stationsList(Array(viewModel.topStations.dropFirst(15)), title: "MORE_STATIONS")
@@ -181,6 +251,15 @@ struct RadioView: View {
                         }
                         .padding(.horizontal, 20)
                     }
+                    .overlay(alignment: .trailing) {
+                        LinearGradient(
+                            colors: [Theme.cyberBackground.opacity(0), Theme.cyberBackground],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                        .frame(width: 24)
+                        .allowsHitTesting(false)
+                    }
 
                     podcastList(Array(viewModel.topPodcasts.dropFirst(10)), title: "MORE_PODCASTS")
                 }
@@ -193,6 +272,26 @@ struct RadioView: View {
 
     var songRadioSection: some View {
         LazyVStack(spacing: 20) {
+            // Song Radio search results
+            if !viewModel.searchText.isEmpty && !viewModel.songRadioSearchResults.isEmpty {
+                sectionHeader("SEARCH RESULTS", count: viewModel.songRadioSearchResults.count)
+                ForEach(viewModel.songRadioSearchResults) { track in
+                    SongRadioRow(track: track) {
+                        viewModel.startSongRadio(from: track)
+                        HapticManager.medium()
+                    }
+                    .padding(.horizontal, 20)
+                }
+            } else if !viewModel.searchText.isEmpty && !viewModel.isSearching && viewModel.songRadioSearchResults.isEmpty {
+                emptySearchState(icon: "music.note", text: "No tracks found")
+            }
+
+            if viewModel.isSearching && viewModel.selectedSection == .songRadio {
+                ProgressView()
+                    .tint(Theme.cyberCyan)
+                    .padding(20)
+            }
+
             if !viewModel.recentSongRadios.isEmpty {
                 sectionHeader("RECENT_RADIOS", count: viewModel.recentSongRadios.count)
 
@@ -241,11 +340,12 @@ struct RadioView: View {
                     .tint(Theme.cyberCyan)
                     .padding(40)
             } else if let seed = viewModel.songRadioSeed, !viewModel.songRadioTracks.isEmpty {
-                sectionHeader("RADIO: \(seed.title.uppercased().prefix(20))", count: viewModel.songRadioTracks.count)
+                sectionHeader("RADIO: \(seed.title.uppercased())", count: viewModel.songRadioTracks.count)
 
                 ForEach(viewModel.songRadioTracks) { track in
                     SongRadioRow(track: track) {
                         PlayerState.shared.play(track: track)
+                        HapticManager.medium()
                     }
                     .padding(.horizontal, 20)
                 }
@@ -282,11 +382,12 @@ struct RadioView: View {
                             .font(.system(size: 10, weight: .bold, design: .monospaced))
                             .foregroundColor(Theme.cyberCyan)
                             .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
+                            .padding(.vertical, 10)
                             .background(
-                                Capsule().stroke(Theme.cyberCyan.opacity(0.3), lineWidth: 1)
+                                Capsule().stroke(Theme.cyberCyan.opacity(0.3), lineWidth: 1.5)
                             )
                     }
+                    .accessibilityLabel("Genre: \(genre)")
                 }
             }
             .padding(.horizontal, 20)
@@ -298,6 +399,8 @@ struct RadioView: View {
             Text(title)
                 .font(.system(size: 12, weight: .bold, design: .monospaced))
                 .foregroundColor(Theme.cyberDim)
+                .lineLimit(1)
+                .truncationMode(.tail)
             Spacer()
             if count > 0 {
                 Text("\(count)")
@@ -332,6 +435,8 @@ struct RadioView: View {
                     }
                     .padding(.horizontal, 20)
                 }
+            } else if !viewModel.searchText.isEmpty && !viewModel.isSearching {
+                emptySearchState(icon: "radio", text: "No stations found")
             }
         }
     }
@@ -346,6 +451,151 @@ struct RadioView: View {
                     }
                     .padding(.horizontal, 20)
                 }
+            } else if !viewModel.searchText.isEmpty && !viewModel.isSearching {
+                emptySearchState(icon: "mic.fill", text: "No podcasts found")
+            }
+        }
+    }
+
+    private func emptySearchState(icon: String, text: String) -> some View {
+        VStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.system(size: 36))
+                .foregroundColor(Theme.cyberDim)
+            Text(text)
+                .font(.system(size: 14, weight: .medium, design: .monospaced))
+                .foregroundColor(Theme.tertiaryText)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 40)
+    }
+
+    // MARK: - Audiobooks Section
+
+    var audiobookSection: some View {
+        LazyVStack(spacing: 20) {
+            if !viewModel.searchText.isEmpty {
+                if viewModel.isSearching {
+                    ProgressView()
+                        .tint(Theme.cyberCyan)
+                        .padding(20)
+                } else if viewModel.audiobookSearchResults.isEmpty {
+                    emptySearchState(icon: "book.closed", text: "No audiobooks found")
+                } else {
+                    sectionHeader("SEARCH_RESULTS", count: viewModel.audiobookSearchResults.count)
+                    ForEach(viewModel.audiobookSearchResults) { book in
+                        AudiobookRow(book: book) {
+                            selectedAudiobook = book
+                            showAudiobookDetail = true
+                        }
+                        .padding(.horizontal, 20)
+                    }
+                }
+            } else {
+                audiobookGenreChips
+
+                if !viewModel.selectedAudiobookGenre.isEmpty {
+                    audiobookGrid(books: viewModel.audiobookGenreResults)
+                } else {
+                    sectionHeader("TOP_AUDIOBOOKS", count: viewModel.topAudiobooks.count)
+
+                    if viewModel.isLoadingAudiobooks && viewModel.topAudiobooks.isEmpty {
+                        shimmerCards(count: 5)
+                    } else {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            LazyHStack(spacing: 14) {
+                                ForEach(viewModel.topAudiobooks.prefix(10)) { book in
+                                    AudiobookCard(book: book) {
+                                        selectedAudiobook = book
+                                        showAudiobookDetail = true
+                                    }
+                                }
+                            }
+                            .padding(.horizontal, 20)
+                        }
+                        .overlay(alignment: .trailing) {
+                            LinearGradient(
+                                colors: [Theme.cyberBackground.opacity(0), Theme.cyberBackground],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                            .frame(width: 24)
+                            .allowsHitTesting(false)
+                        }
+
+                        audiobookGrid(books: Array(viewModel.topAudiobooks.dropFirst(10)))
+                    }
+                }
+            }
+        }
+        .padding(.top, 8)
+    }
+
+    private var audiobookGenreChips: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(RadioViewModel.audiobookGenres, id: \.self) { genre in
+                    Button {
+                        if viewModel.selectedAudiobookGenre == genre {
+                            viewModel.selectedAudiobookGenre = ""
+                            viewModel.audiobookGenreResults = []
+                        } else {
+                            viewModel.loadAudiobooksByGenre(genre)
+                        }
+                        HapticManager.light()
+                    } label: {
+                        Text(genre.uppercased())
+                            .font(.system(size: 10, weight: .bold, design: .monospaced))
+                            .foregroundColor(viewModel.selectedAudiobookGenre == genre ? .black : Theme.cyberCyan)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 10)
+                            .background(
+                                Capsule()
+                                    .fill(viewModel.selectedAudiobookGenre == genre ? Theme.cyberCyan : Color.clear)
+                            )
+                            .overlay(Capsule().stroke(Theme.cyberCyan.opacity(0.3), lineWidth: 1.5))
+                    }
+                    .accessibilityLabel("\(genre) audiobooks")
+                    .accessibilityAddTraits(viewModel.selectedAudiobookGenre == genre ? .isSelected : [])
+                }
+            }
+            .padding(.horizontal, 20)
+        }
+    }
+
+    private func audiobookGrid(books: [Audiobook]) -> some View {
+        Group {
+            if viewModel.isLoadingAudiobooks {
+                HStack {
+                    Spacer()
+                    ProgressView().tint(Theme.cyberCyan)
+                    Spacer()
+                }
+                .padding(.top, 40)
+            } else if books.isEmpty {
+                VStack(spacing: 12) {
+                    Image(systemName: "book.closed")
+                        .font(.system(size: 40))
+                        .foregroundColor(Theme.cyberDim)
+                    Text("No audiobooks found")
+                        .font(.system(size: 14))
+                        .foregroundColor(Theme.cyberDim)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.top, 40)
+            } else {
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 140), spacing: 16)],
+                    spacing: 16
+                ) {
+                    ForEach(books) { book in
+                        AudiobookCard(book: book) {
+                            selectedAudiobook = book
+                            showAudiobookDetail = true
+                        }
+                    }
+                }
+                .padding(.horizontal, 20)
             }
         }
     }
@@ -389,6 +639,8 @@ struct RadioStationCard: View {
             }
             .frame(width: 120)
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(station.name), \(station.country)")
     }
 }
 
@@ -428,6 +680,8 @@ struct PodcastCard: View {
             }
             .frame(width: 120)
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(show.collectionName) by \(show.artistName)")
     }
 }
 
@@ -443,10 +697,15 @@ struct SongRadioRow: View {
                 CachedAsyncImage(url: track.artworkURL) { image in
                     image.resizable().aspectRatio(contentMode: .fill)
                 } placeholder: {
-                    Theme.cyberSurface
+                    ZStack {
+                        Theme.cyberSurface
+                        Image(systemName: "music.note")
+                            .font(.system(size: 18))
+                            .foregroundColor(Theme.cyberCyan.opacity(0.5))
+                    }
                 }
                 .frame(width: 44, height: 44)
-                .cornerRadius(CornerRadius.xs)
+                .cornerRadius(CornerRadius.sm)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(track.title)
@@ -463,8 +722,10 @@ struct SongRadioRow: View {
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundColor(Theme.cyberDim)
             }
-            .padding(.vertical, 6)
+            .padding(.vertical, 8)
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(track.title) by \(track.displayArtist)")
     }
 }
 
@@ -487,7 +748,7 @@ struct RadioStationRow: View {
                     }
                 }
                 .frame(width: 44, height: 44)
-                .clipShape(RoundedRectangle(cornerRadius: CornerRadius.xs))
+                .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm))
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(station.name)
@@ -514,8 +775,10 @@ struct RadioStationRow: View {
                     .fill(Theme.cyberCyan)
                     .frame(width: 8, height: 8)
             }
-            .padding(.vertical, 6)
+            .padding(.vertical, 8)
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(station.name), \(station.country), \(station.bitrateText)")
     }
 }
 
@@ -561,7 +824,111 @@ struct PodcastRow: View {
                     .font(.system(size: 12))
                     .foregroundColor(Theme.cyberDim)
             }
-            .padding(.vertical, 6)
+            .padding(.vertical, 8)
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(show.collectionName) by \(show.artistName), \(show.trackCount) episodes")
+    }
+}
+
+// MARK: - AudiobookCard
+
+struct AudiobookCard: View {
+    let book: Audiobook
+    let onTap: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            VStack(alignment: .leading, spacing: 8) {
+                CachedAsyncImage(url: book.coverURL) { image in
+                    image.resizable().aspectRatio(contentMode: .fill)
+                } placeholder: {
+                    RoundedRectangle(cornerRadius: CornerRadius.sm)
+                        .fill(Theme.cyberSurface)
+                        .overlay(
+                            Image(systemName: "book.closed.fill")
+                                .font(.title)
+                                .foregroundColor(Theme.cyberDim)
+                        )
+                }
+                .frame(width: 140, height: 180)
+                .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm))
+
+                Text(book.title)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(.white)
+                    .lineLimit(2)
+                    .frame(width: 140, alignment: .leading)
+
+                Text(book.displayAuthors)
+                    .font(.system(size: 11))
+                    .foregroundColor(Theme.cyberDim)
+                    .lineLimit(1)
+                    .frame(width: 140, alignment: .leading)
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(book.title) by \(book.displayAuthors)")
+    }
+}
+
+// MARK: - AudiobookRow
+
+struct AudiobookRow: View {
+    let book: Audiobook
+    let onTap: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            HStack(spacing: 12) {
+                CachedAsyncImage(url: book.coverURL) { image in
+                    image.resizable().aspectRatio(contentMode: .fill)
+                } placeholder: {
+                    RoundedRectangle(cornerRadius: CornerRadius.xs)
+                        .fill(Theme.cyberSurface)
+                        .overlay(
+                            Image(systemName: "book.closed.fill")
+                                .font(.caption)
+                                .foregroundColor(Theme.cyberDim)
+                        )
+                }
+                .frame(width: 60, height: 75)
+                .clipShape(RoundedRectangle(cornerRadius: CornerRadius.xs))
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(book.title)
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(.white)
+                        .lineLimit(2)
+
+                    Text(book.displayAuthors)
+                        .font(.system(size: 12))
+                        .foregroundColor(Theme.cyberMagenta)
+                        .lineLimit(1)
+
+                    HStack(spacing: 8) {
+                        if book.numSections > 0 {
+                            Text(book.chapterCountText)
+                        }
+                        if !book.durationText.isEmpty {
+                            Text(book.durationText)
+                        }
+                    }
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(Theme.cyberDim)
+                }
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 14))
+                    .foregroundColor(Theme.cyberDim)
+            }
+            .padding(.vertical, 8)
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(book.title) by \(book.displayAuthors), \(book.chapterCountText)")
     }
 }
