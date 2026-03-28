@@ -22,7 +22,10 @@ import uuid
 import glob as _glob
 import datetime
 import requests as _requests
+import xml.etree.ElementTree as ET
 from pathlib import Path
+
+import httpx
 
 from ytm_client import YTMusicClient, get_client, reset_client
 from extractor import AudioExtractor, get_extractor
@@ -990,6 +993,275 @@ async def get_new_releases(request: Request):
     except Exception as e:
         logger.error(f"New releases fetch failed: {e}")
         return {"tracks": []}
+
+
+# --- Internet Radio (RadioBrowser API) ---
+
+RADIO_BROWSER_BASE = "https://de1.api.radio-browser.info"
+RADIO_HEADERS = {"User-Agent": "PeacePlayer/1.0"}
+
+
+def _format_station(s: dict) -> dict:
+    return {
+        "stationuuid": s.get("stationuuid", ""),
+        "name": s.get("name", "Unknown Station"),
+        "urlResolved": s.get("url_resolved", s.get("url", "")),
+        "favicon": s.get("favicon", ""),
+        "country": s.get("country", ""),
+        "tags": s.get("tags", ""),
+        "codec": s.get("codec", ""),
+        "bitrate": s.get("bitrate", 0),
+        "clickcount": s.get("clickcount", 0),
+        "votes": s.get("votes", 0),
+    }
+
+
+@app.get("/radio-stations/search")
+@limiter.limit("30/minute")
+async def search_radio_stations(query: str, limit: int = 20, request: Request = None):
+    """Search internet radio stations."""
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                f"{RADIO_BROWSER_BASE}/json/stations/search",
+                params={"name": query, "limit": limit, "hidebroken": "true", "order": "clickcount", "reverse": "true"},
+                headers=RADIO_HEADERS,
+            )
+            resp.raise_for_status()
+            return [_format_station(s) for s in resp.json()]
+    except httpx.HTTPStatusError as e:
+        logger.error(f"RadioBrowser search HTTP error: {e}")
+        raise HTTPException(status_code=e.response.status_code, detail="Radio search upstream error")
+    except Exception as e:
+        logger.error(f"RadioBrowser search failed: {e}")
+        raise HTTPException(status_code=502, detail=f"Radio search failed: {str(e)}")
+
+
+@app.get("/radio-stations/genre/{tag}")
+@limiter.limit("30/minute")
+async def get_radio_by_genre(tag: str, limit: int = 30, request: Request = None):
+    """Get radio stations by genre tag."""
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                f"{RADIO_BROWSER_BASE}/json/stations/bytag/{tag}",
+                params={"hidebroken": "true", "order": "clickcount", "reverse": "true", "limit": limit},
+                headers=RADIO_HEADERS,
+            )
+            resp.raise_for_status()
+            return [_format_station(s) for s in resp.json()]
+    except httpx.HTTPStatusError as e:
+        logger.error(f"RadioBrowser genre HTTP error: {e}")
+        raise HTTPException(status_code=e.response.status_code, detail="Radio genre upstream error")
+    except Exception as e:
+        logger.error(f"RadioBrowser genre failed: {e}")
+        raise HTTPException(status_code=502, detail=f"Radio genre fetch failed: {str(e)}")
+
+
+@app.get("/radio-stations/top")
+@limiter.limit("30/minute")
+async def get_top_radio_stations(limit: int = 30, request: Request = None):
+    """Get top radio stations by click count."""
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                f"{RADIO_BROWSER_BASE}/json/stations/topclick/{limit}",
+                params={"hidebroken": "true"},
+                headers=RADIO_HEADERS,
+            )
+            resp.raise_for_status()
+            return [_format_station(s) for s in resp.json()]
+    except httpx.HTTPStatusError as e:
+        logger.error(f"RadioBrowser top HTTP error: {e}")
+        raise HTTPException(status_code=e.response.status_code, detail="Radio top upstream error")
+    except Exception as e:
+        logger.error(f"RadioBrowser top failed: {e}")
+        raise HTTPException(status_code=502, detail=f"Radio top fetch failed: {str(e)}")
+
+
+@app.get("/radio-stations/trending")
+@limiter.limit("30/minute")
+async def get_trending_radio_stations(limit: int = 30, request: Request = None):
+    """Get recently changed/trending radio stations."""
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                f"{RADIO_BROWSER_BASE}/json/stations/lastchange/{limit}",
+                params={"hidebroken": "true"},
+                headers=RADIO_HEADERS,
+            )
+            resp.raise_for_status()
+            return [_format_station(s) for s in resp.json()]
+    except httpx.HTTPStatusError as e:
+        logger.error(f"RadioBrowser trending HTTP error: {e}")
+        raise HTTPException(status_code=e.response.status_code, detail="Radio trending upstream error")
+    except Exception as e:
+        logger.error(f"RadioBrowser trending failed: {e}")
+        raise HTTPException(status_code=502, detail=f"Radio trending fetch failed: {str(e)}")
+
+
+@app.post("/radio-stations/{stationuuid}/click")
+@limiter.limit("60/minute")
+async def register_radio_click(stationuuid: str, request: Request):
+    """Register a click for a radio station (updates popularity)."""
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                f"{RADIO_BROWSER_BASE}/json/url/{stationuuid}",
+                headers=RADIO_HEADERS,
+            )
+            resp.raise_for_status()
+            return resp.json()
+    except httpx.HTTPStatusError as e:
+        logger.error(f"RadioBrowser click HTTP error: {e}")
+        raise HTTPException(status_code=e.response.status_code, detail="Radio click upstream error")
+    except Exception as e:
+        logger.error(f"RadioBrowser click failed: {e}")
+        raise HTTPException(status_code=502, detail=f"Radio click failed: {str(e)}")
+
+
+# --- Podcasts (iTunes API + RSS) ---
+
+def _format_podcast(p: dict) -> dict:
+    return {
+        "collectionId": p.get("collectionId", 0),
+        "collectionName": p.get("collectionName", "Unknown"),
+        "artistName": p.get("artistName", "Unknown"),
+        "artworkUrl600": p.get("artworkUrl600", p.get("artworkUrl100", "")),
+        "feedUrl": p.get("feedUrl", ""),
+        "genres": p.get("genres", []),
+        "trackCount": p.get("trackCount", 0),
+        "releaseDate": p.get("releaseDate", ""),
+    }
+
+
+def _parse_duration(text: str) -> int:
+    """Parse podcast duration: HH:MM:SS, MM:SS, or raw seconds."""
+    text = text.strip()
+    if ":" in text:
+        parts = text.split(":")
+        try:
+            if len(parts) == 3:
+                return int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
+            elif len(parts) == 2:
+                return int(parts[0]) * 60 + int(parts[1])
+        except ValueError:
+            return 0
+    try:
+        return int(text)
+    except ValueError:
+        return 0
+
+
+@app.get("/podcasts/search")
+@limiter.limit("30/minute")
+async def search_podcasts(query: str, limit: int = 20, request: Request = None):
+    """Search podcasts via iTunes Search API."""
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                "https://itunes.apple.com/search",
+                params={"term": query, "media": "podcast", "limit": limit},
+            )
+            resp.raise_for_status()
+            results = resp.json().get("results", [])
+            return [_format_podcast(p) for p in results]
+    except httpx.HTTPStatusError as e:
+        logger.error(f"iTunes podcast search HTTP error: {e}")
+        raise HTTPException(status_code=e.response.status_code, detail="Podcast search upstream error")
+    except Exception as e:
+        logger.error(f"Podcast search failed: {e}")
+        raise HTTPException(status_code=502, detail=f"Podcast search failed: {str(e)}")
+
+
+@app.get("/podcasts/episodes")
+@limiter.limit("20/minute")
+async def get_podcast_episodes(feedUrl: str, limit: int = 50, request: Request = None):
+    """Fetch and parse podcast RSS feed for episodes."""
+    try:
+        async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+            resp = await client.get(feedUrl, headers={"User-Agent": "PeacePlayer/1.0"})
+            resp.raise_for_status()
+
+        root = ET.fromstring(resp.text)
+        channel = root.find("channel")
+        if channel is None:
+            raise HTTPException(status_code=400, detail="Invalid RSS feed")
+
+        itunes_ns = "{http://www.itunes.com/dtds/podcast-1.0.dtd}"
+
+        show_artwork = ""
+        itunes_image = channel.find(f"{itunes_ns}image")
+        if itunes_image is not None:
+            show_artwork = itunes_image.get("href", "")
+
+        episodes = []
+        items = channel.findall("item")
+        for item in items[:limit]:
+            enclosure = item.find("enclosure")
+            audio_url = enclosure.get("url", "") if enclosure is not None else ""
+            if not audio_url:
+                continue
+
+            duration_el = item.find(f"{itunes_ns}duration")
+            duration_secs = 0
+            if duration_el is not None and duration_el.text:
+                duration_secs = _parse_duration(duration_el.text)
+
+            ep_image = item.find(f"{itunes_ns}image")
+            ep_artwork = ep_image.get("href", "") if ep_image is not None else show_artwork
+
+            title_el = item.find("title")
+            desc_el = item.find("description")
+            pubdate_el = item.find("pubDate")
+            guid_el = item.find("guid")
+
+            episodes.append({
+                "guid": guid_el.text if guid_el is not None and guid_el.text else audio_url,
+                "title": title_el.text if title_el is not None and title_el.text else "Untitled",
+                "description": (desc_el.text or "")[:500] if desc_el is not None else "",
+                "audioUrl": audio_url,
+                "durationSeconds": duration_secs,
+                "pubDate": pubdate_el.text if pubdate_el is not None and pubdate_el.text else "",
+                "artworkUrl": ep_artwork,
+            })
+
+        return episodes
+    except HTTPException:
+        raise
+    except ET.ParseError as e:
+        logger.error(f"RSS parse error for {feedUrl}: {e}")
+        raise HTTPException(status_code=400, detail="Failed to parse RSS feed")
+    except httpx.HTTPStatusError as e:
+        logger.error(f"Podcast episodes HTTP error: {e}")
+        raise HTTPException(status_code=e.response.status_code, detail="Podcast feed upstream error")
+    except Exception as e:
+        logger.error(f"Podcast episodes failed: {e}")
+        raise HTTPException(status_code=502, detail=f"Podcast episodes failed: {str(e)}")
+
+
+@app.get("/podcasts/top")
+@limiter.limit("20/minute")
+async def get_top_podcasts(genre: str = "", limit: int = 20, request: Request = None):
+    """Get top podcasts, optionally filtered by genre."""
+    try:
+        params = {"media": "podcast", "limit": limit}
+        if genre:
+            params["term"] = genre
+        else:
+            params["term"] = "top podcasts"
+
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get("https://itunes.apple.com/search", params=params)
+            resp.raise_for_status()
+            results = resp.json().get("results", [])
+            return [_format_podcast(p) for p in results]
+    except httpx.HTTPStatusError as e:
+        logger.error(f"iTunes top podcasts HTTP error: {e}")
+        raise HTTPException(status_code=e.response.status_code, detail="Top podcasts upstream error")
+    except Exception as e:
+        logger.error(f"Top podcasts failed: {e}")
+        raise HTTPException(status_code=502, detail=f"Top podcasts failed: {str(e)}")
 
 
 # --- Health check ---

@@ -14,7 +14,7 @@ extension Color {
     static let cyberCyan = Color(red: 0, green: 0.9, blue: 1)
     static let cyberMagenta = Color(red: 1, green: 0, blue: 0.6)
     static let cyberYellow = Color(red: 1, green: 0.8, blue: 0)
-    static let cyberDim = Color(red: 0.3, green: 0.3, blue: 0.4)
+    static let cyberDim = Color(red: 0.45, green: 0.45, blue: 0.55)
 }
 
 // MARK: - Colors
@@ -36,7 +36,7 @@ enum Theme {
     // MARK: Brand Colors
     static let primary = Color.accentColor
     static let primaryLight = Color.accentColor.opacity(0.8)
-    static let primaryDark = Color.accentColor.opacity(1.2)
+    static let primaryDark = Color.accentColor.opacity(1.0)
     
     // MARK: Semantic Colors
     static let success = Color.green
@@ -107,9 +107,12 @@ enum Spacing {
 // MARK: - Corner Radius
 enum CornerRadius {
     static let none: CGFloat = 0
+    static let xxs: CGFloat = 2
     static let xs: CGFloat = 4
     static let sm: CGFloat = 8
+    static let smd: CGFloat = 10
     static let md: CGFloat = 12
+    static let mdd: CGFloat = 14
     static let lg: CGFloat = 16
     static let xl: CGFloat = 24
     static let round: CGFloat = 9999
@@ -147,4 +150,15 @@ enum ShadowStyle {
         let x: CGFloat
         let y: CGFloat
     }
+}
+
+// MARK: - Opacity Levels
+enum OpacityLevel {
+    static let faint: Double = 0.1
+    static let subtle: Double = 0.15
+    static let light: Double = 0.3
+    static let medium: Double = 0.5
+    static let strong: Double = 0.7
+    static let heavy: Double = 0.85
+    static let full: Double = 1.0
 }

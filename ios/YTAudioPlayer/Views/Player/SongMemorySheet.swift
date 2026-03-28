@@ -10,7 +10,7 @@ import SwiftUI
 struct SongMemorySheet: View {
     let track: Track
 
-    @ObservedObject private var memoryManager = SongMemoryManager.shared
+    @StateObject private var memoryManager = SongMemoryManager.shared
     @Environment(\.dismiss) private var dismiss
 
     @State private var noteText = ""
@@ -131,6 +131,7 @@ struct SongMemorySheet: View {
                     .font(.system(size: 13, weight: .medium, design: .monospaced))
                     .foregroundColor(.cyberDim)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.8)
 
                 Text("This song means something — save a memory for it.")
                     .font(.system(size: 11, weight: .medium, design: .monospaced))

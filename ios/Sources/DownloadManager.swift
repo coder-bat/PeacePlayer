@@ -101,6 +101,7 @@ class DownloadManager: ObservableObject {
         
         let task = DownloadTask(track: track)
         downloadQueue.append(task)
+        HapticManager.light()
         
         processQueue()
     }

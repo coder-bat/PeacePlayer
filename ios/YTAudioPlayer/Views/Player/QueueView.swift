@@ -10,6 +10,7 @@ import SwiftUI
 struct QueueView: View {
     @StateObject private var playerState = PlayerState.shared
     @Environment(\.dismiss) private var dismiss
+    @State private var showClearConfirmation = false
 
     var body: some View {
         NavigationView {
@@ -52,10 +53,21 @@ struct QueueView: View {
                         }
                     ) {
                         if upcoming.isEmpty {
-                            Text("Queue is empty")
-                                .foregroundColor(.cyberDim)
-                                .font(.system(size: 14, design: .monospaced))
-                                .listRowBackground(Color.cyberSurface)
+                            VStack(spacing: 16) {
+                                Image(systemName: "music.note.list")
+                                    .font(.system(size: 40))
+                                    .foregroundColor(.cyberDim.opacity(0.5))
+                                Text("Queue is empty")
+                                    .foregroundColor(.cyberDim)
+                                    .font(.system(size: 14, design: .monospaced))
+                                Text("Play a track or browse your library to get started")
+                                    .foregroundColor(.cyberDim.opacity(0.6))
+                                    .font(.system(size: 12, design: .monospaced))
+                                    .multilineTextAlignment(.center)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 32)
+                            .listRowBackground(Color.cyberSurface)
                         } else {
                             ForEach(Array(upcoming.enumerated()), id: \.element.id) { index, item in
                                 QueueItemRow(
@@ -68,6 +80,61 @@ struct QueueView: View {
                                     }
                                 )
                                 .listRowBackground(Color.cyberSurface)
+                                .contextMenu {
+                                    Button {
+                                        ShareHelper.shareTrack(
+                                            title: item.track.title,
+                                            artist: item.track.displayArtist,
+                                            videoId: item.track.videoId
+                                        )
+                                    } label: {
+                                        Label("Share", systemImage: "square.and.arrow.up")
+                                    }
+
+                                    Button {
+                                        ShareHelper.copyTrackInfo(
+                                            title: item.track.title,
+                                            artist: item.track.displayArtist
+                                        )
+                                    } label: {
+                                        Label("Copy Info", systemImage: "doc.on.doc")
+                                    }
+
+                                    Button {
+                                        Task {
+                                            if let card = await ShareCardGenerator.generateCard(for: item.track) {
+                                                let activityVC = UIActivityViewController(activityItems: [card], applicationActivities: nil)
+                                                if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                                                   let rootVC = windowScene.windows.first?.rootViewController {
+                                                    if let popover = activityVC.popoverPresentationController {
+                                                        popover.sourceView = rootVC.view
+                                                        popover.sourceRect = CGRect(x: rootVC.view.bounds.midX, y: rootVC.view.bounds.midY, width: 0, height: 0)
+                                                        popover.permittedArrowDirections = []
+                                                    }
+                                                    rootVC.present(activityVC, animated: true)
+                                                }
+                                            }
+                                        }
+                                    } label: {
+                                        Label("Share Card", systemImage: "rectangle.on.rectangle")
+                                    }
+
+                                    Button {
+                                        NotificationCenter.default.post(name: .startSongRadio, object: item.track)
+                                        HapticManager.light()
+                                    } label: {
+                                        Label("Start Radio", systemImage: "antenna.radiowaves.left.and.right")
+                                    }
+
+                                    Divider()
+
+                                    Button(role: .destructive) {
+                                        let actualIndex = playerState.currentIndex + 1 + index
+                                        playerState.removeFromQueue(at: actualIndex)
+                                    } label: {
+                                        Label("Remove", systemImage: "trash")
+                                    }
+                                }
                                 .swipeActions(edge: .trailing) {
                                     Button(role: .destructive) {
                                         let actualIndex = playerState.currentIndex + 1 + index
@@ -117,13 +184,24 @@ struct QueueView: View {
                 ToolbarItem(placement: .navigationBarLeading) {
                     Button(action: {
                         HapticManager.light()
-                        playerState.clearQueue()
+                        showClearConfirmation = true
                     }) {
                         Text("Clear")
                             .foregroundColor(.red)
                     }
                     .disabled(playerState.queue.isEmpty)
                 }
+            }
+            .alert("Clear Queue?", isPresented: $showClearConfirmation) {
+                Button("Cancel", role: .cancel) {}
+                Button("Clear All", role: .destructive) {
+                    HapticManager.heavy()
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                        playerState.clearQueue()
+                    }
+                }
+            } message: {
+                Text("This will remove all upcoming tracks from the queue.")
             }
         }
     }
@@ -154,11 +232,13 @@ struct QueueItemRow: View {
                     .font(.system(size: 16, weight: isPlaying ? .semibold : .regular))
                     .foregroundColor(isPlaying ? .cyberCyan : .white)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.8)
 
                 Text(item.track.displayArtist)
                     .font(.system(size: 14))
                     .foregroundColor(.cyberDim)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.8)
             }
 
             Spacer()

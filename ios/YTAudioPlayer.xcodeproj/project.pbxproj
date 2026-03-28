@@ -114,6 +114,8 @@
 		FCC18AB0C67C1A57062B9ADD /* PlaylistDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38ADEC1060AD8D53A3241FFA /* PlaylistDetailView.swift */; };
 		FDB9DC04823CF79D053C24CD /* RecentlyPlayedView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6AF72E449870436F01005365 /* RecentlyPlayedView.swift */; };
 		GGGG000100010001GGGG0001 /* RadioViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = GGGG000200020002GGGG0002 /* RadioViewModel.swift */; };
+		HHHH000100010001HHHH0001 /* RadioView.swift in Sources */ = {isa = PBXBuildFile; fileRef = HHHH000200020002HHHH0002 /* RadioView.swift */; };
+		IIII000100010001IIII0001 /* PodcastDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = IIII000200020002IIII0002 /* PodcastDetailView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -252,6 +254,8 @@
 		FE24218BB5E3D48C193C8663 /* PeacePlayerWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeacePlayerWidget.swift; sourceTree = "<group>"; };
 		DDDD000200000002DDDD0002 /* WidgetTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetTheme.swift; sourceTree = "<group>"; };
 		GGGG000200020002GGGG0002 /* RadioViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RadioViewModel.swift; sourceTree = "<group>"; };
+		HHHH000200020002HHHH0002 /* RadioView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RadioView.swift; sourceTree = "<group>"; };
+		IIII000200020002IIII0002 /* PodcastDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PodcastDetailView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -506,6 +510,8 @@
 			isa = PBXGroup;
 			children = (
 				GGGG000200020002GGGG0002 /* RadioViewModel.swift */,
+				HHHH000200020002HHHH0002 /* RadioView.swift */,
+				IIII000200020002IIII0002 /* PodcastDetailView.swift */,
 			);
 			path = Radio;
 			sourceTree = "<group>";
@@ -717,6 +723,8 @@
 				AAAA000100010001AAAA0001 /* UndoService.swift in Sources */,
 				AAAA000300030003AAAA0003 /* UndoToastView.swift in Sources */,
 				GGGG000100010001GGGG0001 /* RadioViewModel.swift in Sources */,
+				HHHH000100010001HHHH0001 /* RadioView.swift in Sources */,
+				IIII000100010001IIII0001 /* PodcastDetailView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

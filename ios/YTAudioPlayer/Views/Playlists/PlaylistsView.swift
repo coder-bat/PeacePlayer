@@ -34,7 +34,7 @@ struct PlaylistsView: View {
                         // Header
                         HStack {
                             Text("PLAYLISTS")
-                                .font(.system(size: 28, weight: .bold, design: .monospaced))
+                                .font(.system(size: 24, weight: .bold, design: .monospaced))
                                 .foregroundColor(.white)
                                 .shadow(color: Theme.cyberCyan.opacity(0.5), radius: 10, x: 0, y: 0)
 
@@ -195,6 +195,7 @@ struct SmartPlaylistCardCyberpunk: View {
                         .font(.system(size: 15, weight: .bold, design: .monospaced))
                         .foregroundColor(.white)
                         .lineLimit(1)
+                        .minimumScaleFactor(0.8)
 
                     Text("\(playlist.trackCount) TRACKS")
                         .font(.system(size: 11, design: .monospaced))
@@ -343,6 +344,7 @@ struct UserPlaylistGridCellCyberpunk: View {
                         .font(.system(size: 13, weight: .bold, design: .monospaced))
                         .foregroundColor(.white)
                         .lineLimit(1)
+                        .minimumScaleFactor(0.8)
 
                     Text("\(playlist.trackCount) TRACKS")
                         .font(.system(size: 11, design: .monospaced))
@@ -376,6 +378,7 @@ struct UserPlaylistListRowCyberpunk: View {
                         .font(.system(size: 14, weight: .bold, design: .monospaced))
                         .foregroundColor(.white)
                         .lineLimit(1)
+                        .minimumScaleFactor(0.8)
 
                     Text("\(playlist.trackCount) TRACKS")
                         .font(.system(size: 12, design: .monospaced))

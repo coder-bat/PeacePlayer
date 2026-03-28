@@ -235,10 +235,10 @@ struct LibraryView: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
         .background(
-            RoundedRectangle(cornerRadius: 10)
+            RoundedRectangle(cornerRadius: CornerRadius.smd)
                 .fill(Theme.cyberSurface)
                 .overlay(
-                    RoundedRectangle(cornerRadius: 10)
+                    RoundedRectangle(cornerRadius: CornerRadius.smd)
                         .stroke(Theme.cyberCyan.opacity(0.15), lineWidth: 1)
                 )
         )
@@ -366,7 +366,7 @@ struct GridTrackCell: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             ZStack {
-                RoundedRectangle(cornerRadius: 12)
+                RoundedRectangle(cornerRadius: CornerRadius.md)
                     .fill(Theme.cyberSurface)
 
                 // Artwork image
@@ -384,7 +384,7 @@ struct GridTrackCell: View {
                 }
 
                 // Cyberpunk border
-                RoundedRectangle(cornerRadius: 12)
+                RoundedRectangle(cornerRadius: CornerRadius.md)
                     .stroke(isPlaying ? Theme.cyberCyan.opacity(0.5) : Theme.cyberCyan.opacity(0.1), lineWidth: 1)
 
                 if memoryPreview != nil {
@@ -427,7 +427,7 @@ struct GridTrackCell: View {
                 }
             }
             .aspectRatio(1, contentMode: .fit)
-            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(track.title)
@@ -500,6 +500,13 @@ struct GridTrackCell: View {
                 Label("Share Card", systemImage: "rectangle.on.rectangle")
             }
 
+            Button {
+                NotificationCenter.default.post(name: .startSongRadio, object: track.track)
+                HapticManager.light()
+            } label: {
+                Label("Start Radio", systemImage: "antenna.radiowaves.left.and.right")
+            }
+
             Divider()
 
             Button(role: .destructive, action: onDelete) {
@@ -560,7 +567,7 @@ struct ListTrackRow: View {
                             .frame(width: 20, height: 20)
                             .padding(4)
                             .background(Theme.cyberBackground.opacity(0.8))
-                            .cornerRadius(4)
+                            .cornerRadius(CornerRadius.xs)
                     }
                 }
                 .frame(width: 50, height: 50)
@@ -601,9 +608,9 @@ struct ListTrackRow: View {
         .padding(.vertical, 10)
         .padding(.horizontal, 12)
         .background(isPlaying ? Theme.cyberCyan.opacity(0.05) : Theme.cyberSurface.opacity(0.5))
-        .cornerRadius(12)
+        .cornerRadius(CornerRadius.md)
         .overlay(
-            RoundedRectangle(cornerRadius: 12)
+            RoundedRectangle(cornerRadius: CornerRadius.md)
                 .stroke(isPlaying ? Theme.cyberCyan.opacity(0.3) : Color.clear, lineWidth: 1)
         )
         .contentShape(Rectangle())
@@ -657,6 +664,13 @@ struct ListTrackRow: View {
                 }
             } label: {
                 Label("Share Card", systemImage: "rectangle.on.rectangle")
+            }
+
+            Button {
+                NotificationCenter.default.post(name: .startSongRadio, object: track.track)
+                HapticManager.light()
+            } label: {
+                Label("Start Radio", systemImage: "antenna.radiowaves.left.and.right")
             }
 
             Divider()
@@ -746,10 +760,10 @@ struct StorageInfoSheetCyberpunk: View {
                                 .padding()
                                 .background(Theme.cyberMagenta.opacity(0.1))
                                 .overlay(
-                                    RoundedRectangle(cornerRadius: 8)
+                                    RoundedRectangle(cornerRadius: CornerRadius.sm)
                                         .stroke(Theme.cyberMagenta.opacity(0.3), lineWidth: 1)
                                 )
-                                .cornerRadius(8)
+                                .cornerRadius(CornerRadius.sm)
                         }
 
                         Button(action: { dismiss() }) {
@@ -760,10 +774,10 @@ struct StorageInfoSheetCyberpunk: View {
                                 .padding()
                                 .background(Theme.cyberSurface)
                                 .overlay(
-                                    RoundedRectangle(cornerRadius: 8)
+                                    RoundedRectangle(cornerRadius: CornerRadius.sm)
                                         .stroke(Theme.cyberCyan.opacity(0.3), lineWidth: 1)
                                 )
-                                .cornerRadius(8)
+                                .cornerRadius(CornerRadius.sm)
                         }
                     }
                     .padding()

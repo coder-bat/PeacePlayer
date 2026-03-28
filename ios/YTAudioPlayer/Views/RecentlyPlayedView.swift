@@ -32,6 +32,7 @@ struct RecentlyPlayedView: View {
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("Done") {
+                        HapticManager.light()
                         dismiss()
                     }
                 }
@@ -70,11 +71,13 @@ struct RecentlyPlayedRow: View {
                         .font(.system(size: 16, weight: isPlaying ? .bold : .semibold))
                         .foregroundColor(isPlaying ? .accentColor : .primary)
                         .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                     
                     Text(track.displayArtist)
                         .font(.system(size: 14))
                         .foregroundColor(.secondary)
                         .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                     
                     if track.playbackProgress > 0 && track.playbackProgress < 1 {
                         Text("\(Int(track.playbackProgress * 100))% played")

@@ -17,6 +17,7 @@ struct SongMemoryBadge: View {
 
             Text((text?.isEmpty == false ? text : "MEMORY") ?? "MEMORY")
                 .lineLimit(1)
+                .minimumScaleFactor(0.8)
         }
         .font(.system(size: 10, weight: .bold, design: .monospaced))
         .foregroundColor(.cyberYellow)

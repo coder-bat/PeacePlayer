@@ -46,7 +46,6 @@ struct MoodBrowseSection: View {
 struct MoodCard: View {
     let mood: MoodCategory
     var onTap: (() -> Void)?
-    @State private var isPressed = false
     
     var body: some View {
         Button(action: {
@@ -74,16 +73,7 @@ struct MoodCard: View {
             .padding(.vertical, 16)
             .background(Color(.systemGray6))
             .cornerRadius(12)
-            .overlay(
-                RoundedRectangle(cornerRadius: 12)
-                    .stroke(mood.color.opacity(isPressed ? 0.5 : 0), lineWidth: 2)
-            )
         }
-        .buttonStyle(.plain)
-        .scaleEffect(isPressed ? 0.95 : 1)
-        .animation(.easeInOut(duration: 0.1), value: isPressed)
-        .onLongPressGesture(minimumDuration: .infinity, pressing: { pressing in
-            isPressed = pressing
-        }, perform: {})
+        .buttonStyle(.pressable)
     }
 }

@@ -25,8 +25,10 @@ struct PlaylistPreviewView: View {
             Group {
                 if isLoading {
                     PlaylistLoadingView()
+                        .transition(.opacity)
                 } else if let error = error {
                     PlaylistErrorView(message: error, onRetry: loadDetails)
+                        .transition(.opacity)
                 } else if let details = details {
                     PlaylistContentView(
                         details: details,
@@ -437,12 +439,14 @@ struct TrackListRow: View {
                 Text(track.title)
                     .font(.system(size: 15, weight: isPlaying ? .bold : .semibold))
                     .lineLimit(1)
+                    .minimumScaleFactor(0.8)
                     .foregroundColor(isPlaying ? .accentColor : .primary)
                 
                 Text(track.displayArtist)
                     .font(.system(size: 13))
                     .foregroundColor(.secondary)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.8)
             }
             
             Spacer()

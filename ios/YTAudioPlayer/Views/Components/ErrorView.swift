@@ -129,7 +129,7 @@ struct ErrorView: View {
                 if let details = details {
                     Text(details)
                         .font(.caption)
-                        .foregroundColor(.gray)
+                        .foregroundColor(.cyberDim)
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 32)
                         .padding(.top, 8)

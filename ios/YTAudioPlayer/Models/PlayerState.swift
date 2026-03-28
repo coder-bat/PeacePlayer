@@ -29,6 +29,12 @@ enum PlaybackState: Equatable {
     }
 }
 
+enum PlaybackContentType {
+    case track
+    case liveRadio
+    case podcastEpisode
+}
+
 /// Represents the repeat mode
 enum RepeatMode: String, CaseIterable {
     case none = "repeat"
@@ -132,6 +138,9 @@ class PlayerState: ObservableObject {
     
     /// Show queue
     @Published var showQueue: Bool = false
+
+    /// Content type for current playback
+    @Published var contentType: PlaybackContentType = .track
     
     // MARK: - Private Properties
     
@@ -189,6 +198,7 @@ class PlayerState: ObservableObject {
 
     /// Returns the duration to use for display and Now Playing info
     var effectiveDuration: Double {
+        if contentType == .liveRadio { return 0 }
         // Use expected duration from track metadata if available
         if expectedDuration > 0 {
             return expectedDuration
@@ -339,6 +349,7 @@ class PlayerState: ObservableObject {
         }
         
         stop()
+        contentType = .track
 
         currentItem = item
         // Store expected duration from track metadata
@@ -708,6 +719,7 @@ class PlayerState: ObservableObject {
         currentTime = 0.0
         duration = 0.0
         expectedDuration = 0.0
+        contentType = .track
 
         print("✅ Player stopped and observers cleaned up")
     }
@@ -735,6 +747,91 @@ class PlayerState: ObservableObject {
         let time = CMTime(seconds: target, preferredTimescale: 1000)
 
         player.seek(to: time)
+    }
+
+    // MARK: - Radio & Podcast Playback
+
+    func playRadioStation(_ station: RadioStation) {
+        guard let url = URL(string: station.urlResolved) else { return }
+
+        player?.pause()
+        contentType = .liveRadio
+
+        let radioTrack = Track(
+            videoId: station.stationuuid,
+            title: station.name,
+            artists: [station.country.isEmpty ? "Internet Radio" : station.country],
+            album: station.tagList.first ?? "Radio",
+            durationSeconds: 0,
+            thumbnails: station.faviconURL.map { [Thumbnail(url: $0, width: 600, height: 600)] } ?? [],
+            isExplicit: false,
+            videoType: "RADIO_STATION"
+        )
+
+        let item = QueueItem(track: radioTrack, streamUrl: station.urlResolved, source: .stream)
+        currentItem = item
+        expectedDuration = 0
+
+        let playerItem = AVPlayerItem(url: url)
+        player = AVPlayer(playerItem: playerItem)
+        player?.volume = Float(volume)
+        player?.play()
+        playbackState = .playing
+        setupPlayerObservers()
+    }
+
+    func playPodcastEpisode(_ episode: PodcastEpisode) {
+        guard let url = episode.audioURL else { return }
+
+        player?.pause()
+        contentType = .podcastEpisode
+
+        let podcastTrack = Track(
+            videoId: episode.guid,
+            title: episode.title,
+            artists: ["Podcast"],
+            album: "",
+            durationSeconds: episode.durationSeconds,
+            thumbnails: episode.artworkURL.map { [Thumbnail(url: $0, width: 600, height: 600)] } ?? [],
+            isExplicit: false,
+            videoType: "PODCAST_EPISODE"
+        )
+
+        let item = QueueItem(track: podcastTrack, streamUrl: episode.audioUrl, source: .stream)
+        currentItem = item
+        expectedDuration = Double(episode.durationSeconds)
+
+        let playerItem = AVPlayerItem(url: url)
+        player = AVPlayer(playerItem: playerItem)
+        player?.volume = Float(volume)
+        player?.play()
+        playbackState = .playing
+        setupPlayerObservers()
+
+        // Resume from saved position
+        let key = "podcast_position_\(episode.guid)"
+        let savedPosition = UserDefaults.standard.double(forKey: key)
+        if savedPosition > 0 {
+            let time = CMTime(seconds: savedPosition, preferredTimescale: 600)
+            player?.seek(to: time)
+        }
+    }
+
+    func savePodcastPosition() {
+        guard contentType == .podcastEpisode,
+              let guid = currentItem?.track.videoId else { return }
+        let key = "podcast_position_\(guid)"
+        UserDefaults.standard.set(currentTime, forKey: key)
+    }
+
+    func skipForward(_ seconds: Double = 15) {
+        let newTime = min(currentTime + seconds, effectiveDuration)
+        seek(to: newTime / max(effectiveDuration, 1))
+    }
+
+    func skipBackward(_ seconds: Double = 15) {
+        let newTime = max(currentTime - seconds, 0)
+        seek(to: newTime / max(effectiveDuration, 1))
     }
     
     // MARK: - Queue Management
@@ -1192,10 +1289,27 @@ class PlayerState: ObservableObject {
                 return
             }
         }
+
+        // Auto-save podcast position every ~10 seconds
+        if contentType == .podcastEpisode {
+            let intTime = Int(currentTime)
+            if intTime > 0 && intTime % 10 == 0 {
+                savePodcastPosition()
+            }
+        }
     }
     
     @objc private func playerDidFinishPlaying() {
         print("🏁 AVPlayer reported song finished playing")
+        // Live radio: reconnect instead of advancing
+        if contentType == .liveRadio {
+            if let urlString = currentItem?.streamUrl, let url = URL(string: urlString) {
+                let newItem = AVPlayerItem(url: url)
+                player?.replaceCurrentItem(with: newItem)
+                player?.play()
+            }
+            return
+        }
         // Dispatch to serial queue to prevent race with updateProgress
         completionQueue.async { [weak self] in
             self?.handleTrackCompletion()

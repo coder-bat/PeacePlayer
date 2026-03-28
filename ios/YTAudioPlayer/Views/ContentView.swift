@@ -10,6 +10,7 @@ struct ContentView: View {
     @StateObject private var playerState = PlayerState.shared
     @StateObject private var networkMonitor = NetworkMonitor.shared
     @StateObject private var searchViewModel = SearchViewModel()
+    @StateObject private var radioViewModel = RadioViewModel()
     @State private var selectedTab = 0
     @State private var showFullPlayer = false
     @State private var showRestorePrompt = false
@@ -40,6 +41,10 @@ struct ContentView: View {
                 DownloadQueueView()
                     .safeAreaInset(edge: .bottom, spacing: 0) { miniPlayerView }
                     .tag(4)
+
+                RadioView(viewModel: radioViewModel)
+                    .safeAreaInset(edge: .bottom, spacing: 0) { miniPlayerView }
+                    .tag(5)
             }
             .modifier(HideNativeTabBar())
             .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -99,6 +104,14 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .switchTab)) { notification in
             if let tab = notification.object as? Int {
                 selectedTab = tab
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .startSongRadio)) { notification in
+            if let track = notification.object as? Track {
+                radioViewModel.startSongRadio(from: track)
+                withAnimation(.spring(response: 0.28, dampingFraction: 0.72)) {
+                    selectedTab = 5
+                }
             }
         }
         .onChange(of: playerState.showQueue) { shouldShow in
@@ -191,6 +204,7 @@ struct CyberpunkTabBar: View {
         TabDef(icon: "music.note.list",              label: "Playlists", tag: 2),
         TabDef(icon: "music.note.house.fill",        label: "Library",   tag: 3),
         TabDef(icon: "arrow.down.circle.fill",       label: "Downloads", tag: 4),
+        TabDef(icon: "radio.fill",                   label: "Radio",     tag: 5),
     ]
 
     var body: some View {
@@ -309,4 +323,5 @@ struct ContentView_Previews: PreviewProvider {
 // MARK: - Notifications
 extension Notification.Name {
     static let switchTab = Notification.Name("switchTab")
+    static let startSongRadio = Notification.Name("startSongRadio")
 }

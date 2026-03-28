@@ -11,6 +11,7 @@ struct DownloadQueueView: View {
     @StateObject private var downloadManager = DownloadManager.shared
     @StateObject private var libraryViewModel = LibraryViewModel()
     @State private var showHistory = false
+    @State private var showClearConfirmation = false
 
     var body: some View {
         NavigationView {
@@ -38,7 +39,7 @@ struct DownloadQueueView: View {
 
                                 if !downloadManager.completedDownloads.isEmpty {
                                     Button("Clear Queue") {
-                                        downloadManager.clearCompleted()
+                                        showClearConfirmation = true
                                     }
                                     .font(.system(size: 12, weight: .bold, design: .monospaced))
                                     .foregroundColor(Theme.cyberCyan)
@@ -68,6 +69,17 @@ struct DownloadQueueView: View {
             .preferredColorScheme(.dark)
             .sheet(isPresented: $showHistory) {
                 HistoryView()
+            }
+            .alert("Clear Completed Downloads?", isPresented: $showClearConfirmation) {
+                Button("Clear", role: .destructive) {
+                    HapticManager.heavy()
+                    withAnimation(.spring()) {
+                        downloadManager.clearCompleted()
+                    }
+                }
+                Button("Cancel", role: .cancel) { }
+            } message: {
+                Text("This will remove \(downloadManager.completedDownloads.count) completed items from the queue.")
             }
         }
     }
@@ -237,6 +249,7 @@ struct EmptyStateCard: View {
 struct ActiveDownloadCard: View {
     let task: DownloadTask
     @StateObject private var downloadManager = DownloadManager.shared
+    @State private var showCancelAlert = false
 
     var body: some View {
         HStack(spacing: 12) {
@@ -259,11 +272,13 @@ struct ActiveDownloadCard: View {
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundColor(.white)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.8)
 
                 Text(task.track.displayArtist)
                     .font(.system(size: 13))
                     .foregroundColor(Theme.cyberDim)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.8)
 
                 HStack(spacing: 8) {
                     // Progress bar
@@ -296,7 +311,7 @@ struct ActiveDownloadCard: View {
 
             // Cancel button
             Button(action: {
-                downloadManager.cancelDownload(id: task.id)
+                showCancelAlert = true
             }) {
                 Image(systemName: "xmark.circle.fill")
                     .font(.system(size: 28))
@@ -310,6 +325,15 @@ struct ActiveDownloadCard: View {
                 .stroke(Theme.cyberCyan.opacity(0.2), lineWidth: 1)
         )
         .cornerRadius(12)
+        .alert("Cancel Download?", isPresented: $showCancelAlert) {
+            Button("Cancel Download", role: .destructive) {
+                HapticManager.medium()
+                downloadManager.cancelDownload(id: task.id)
+            }
+            Button("Keep Downloading", role: .cancel) { }
+        } message: {
+            Text("This will stop the current download.")
+        }
     }
 
     private var progressColor: Color {
@@ -364,11 +388,13 @@ struct CompletedDownloadCard: View {
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundColor(.white)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.8)
 
                 Text(task.track.displayArtist)
                     .font(.system(size: 13))
                     .foregroundColor(Theme.cyberDim)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.8)
 
                 if let time = task.completionTime {
                     Text(timeAgo(time))
@@ -382,6 +408,7 @@ struct CompletedDownloadCard: View {
             // Retry button for failed downloads
             if case .failed = task.status {
                 Button(action: {
+                    HapticManager.light()
                     downloadManager.retryDownload(id: task.id)
                 }) {
                     Image(systemName: "arrow.counterclockwise.circle.fill")
@@ -477,11 +504,13 @@ struct SavedDownloadCard: View {
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundColor(.white)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.8)
 
                 Text(item.artist)
                     .font(.system(size: 13))
                     .foregroundColor(Theme.cyberDim)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.8)
 
                 Text(item.fileSizeFormatted)
                     .font(.system(size: 11, design: .monospaced))

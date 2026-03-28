@@ -78,7 +78,7 @@ struct SearchView: View {
                     .padding(.vertical, 12)
                     .background(Color.cyberSurface)
                     .overlay(
-                        RoundedRectangle(cornerRadius: Theme.CornerRadius.md)
+                        RoundedRectangle(cornerRadius: CornerRadius.md)
                             .stroke(
                                 isSearchFocused || !viewModel.searchText.isEmpty
                                     ? Color.cyberCyan.opacity(0.5)
@@ -86,7 +86,7 @@ struct SearchView: View {
                                 lineWidth: 1
                             )
                     )
-                    .cornerRadius(Theme.CornerRadius.md)
+                    .cornerRadius(CornerRadius.md)
                     .padding(.horizontal)
                     .animation(.easeInOut(duration: 0.2), value: isSearchFocused)
                 }
@@ -347,18 +347,18 @@ struct SearchView: View {
         List {
             ForEach(0..<8, id: \.self) { _ in
                 HStack(spacing: 12) {
-                    RoundedRectangle(cornerRadius: Theme.CornerRadius.sm)
+                    RoundedRectangle(cornerRadius: CornerRadius.sm)
                         .fill(Color.cyberDim.opacity(0.2))
                         .frame(width: 60, height: 60)
                         .shimmer()
 
                     VStack(alignment: .leading, spacing: 8) {
-                        RoundedRectangle(cornerRadius: Theme.CornerRadius.xs)
+                        RoundedRectangle(cornerRadius: CornerRadius.xs)
                             .fill(Color.cyberDim.opacity(0.2))
                             .frame(width: 180, height: 16)
                             .shimmer()
 
-                        RoundedRectangle(cornerRadius: Theme.CornerRadius.xs)
+                        RoundedRectangle(cornerRadius: CornerRadius.xs)
                             .fill(Color.cyberDim.opacity(0.2))
                             .frame(width: 120, height: 14)
                             .shimmer()
@@ -485,10 +485,10 @@ struct SearchView: View {
                                     .padding(.vertical, 12)
                                     .background(Color.cyberSurface)
                                     .overlay(
-                                        RoundedRectangle(cornerRadius: Theme.CornerRadius.smd)
+                                        RoundedRectangle(cornerRadius: CornerRadius.smd)
                                             .stroke(Color.cyberCyan.opacity(0.15), lineWidth: 1)
                                     )
-                                    .cornerRadius(Theme.CornerRadius.smd)
+                                    .cornerRadius(CornerRadius.smd)
                                 }
                                 .buttonStyle(.plain)
                                 .padding(.horizontal)
@@ -533,7 +533,7 @@ struct FilterChip: View {
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
                         .background(isSelected ? Color.cyberCyan.opacity(0.3) : Color.cyberDim.opacity(0.2))
-                        .cornerRadius(Theme.CornerRadius.smd)
+                        .cornerRadius(CornerRadius.smd)
                 }
             }
             .foregroundColor(isSelected ? .cyberBackground : .white)
@@ -572,7 +572,7 @@ struct PlaylistSearchRow: View {
                     .padding(.horizontal, 4)
                     .padding(.vertical, 2)
                     .background(Color.black.opacity(0.7))
-                    .cornerRadius(Theme.CornerRadius.xs)
+                    .cornerRadius(CornerRadius.xs)
                     .padding(4)
             }
             
@@ -650,7 +650,7 @@ struct ArtworkThumbnail: View {
 
     var body: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: Theme.CornerRadius.sm)
+            RoundedRectangle(cornerRadius: CornerRadius.sm)
                 .fill(Color.cyberSurface)
                 .overlay(
                     Image(systemName: "music.note")
@@ -663,7 +663,7 @@ struct ArtworkThumbnail: View {
                 }
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: Theme.CornerRadius.sm))
+        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm))
     }
 }
 
@@ -687,10 +687,10 @@ struct GenreButton: View {
             .foregroundColor(color)
             .padding()
             .background(
-                RoundedRectangle(cornerRadius: Theme.CornerRadius.md)
+                RoundedRectangle(cornerRadius: CornerRadius.md)
                     .fill(color.opacity(0.08))
                     .overlay(
-                        RoundedRectangle(cornerRadius: Theme.CornerRadius.md)
+                        RoundedRectangle(cornerRadius: CornerRadius.md)
                             .stroke(color.opacity(0.4), lineWidth: 1)
                     )
             )
@@ -745,7 +745,7 @@ struct SearchResultRow: View {
                         .frame(width: 16, height: 16)
                         .padding(4)
                         .background(.ultraThinMaterial)
-                        .cornerRadius(Theme.CornerRadius.xs)
+                        .cornerRadius(CornerRadius.xs)
                         .offset(x: -4, y: -4)
                 }
             }
@@ -883,6 +883,13 @@ struct SearchResultRow: View {
                 }
             } label: {
                 Label("Share Card", systemImage: "rectangle.on.rectangle")
+            }
+
+            Button {
+                NotificationCenter.default.post(name: .startSongRadio, object: track)
+                HapticManager.light()
+            } label: {
+                Label("Start Radio", systemImage: "antenna.radiowaves.left.and.right")
             }
 
             Divider()

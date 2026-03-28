@@ -227,10 +227,10 @@ struct HistoryView: View {
         }
         .padding(16)
         .background(
-            RoundedRectangle(cornerRadius: 12)
+            RoundedRectangle(cornerRadius: CornerRadius.md)
                 .fill(Color.cyberSurface)
                 .overlay(
-                    RoundedRectangle(cornerRadius: 12)
+                    RoundedRectangle(cornerRadius: CornerRadius.md)
                         .stroke(Color.cyberCyan.opacity(0.15), lineWidth: 1)
                 )
         )
@@ -403,6 +403,13 @@ struct HistoryRow: View {
                 Label("Share Card", systemImage: "rectangle.on.rectangle")
             }
 
+            Button {
+                NotificationCenter.default.post(name: .startSongRadio, object: item.track)
+                HapticManager.light()
+            } label: {
+                Label("Start Radio", systemImage: "antenna.radiowaves.left.and.right")
+            }
+
             Divider()
 
             Button(role: .destructive, action: onDelete) {
@@ -456,11 +463,11 @@ struct StatCard: View {
         }
         .padding(12)
         .background(
-            RoundedRectangle(cornerRadius: 8)
+            RoundedRectangle(cornerRadius: CornerRadius.sm)
                 .fill(Color.cyberBackground.opacity(0.6))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 8)
+            RoundedRectangle(cornerRadius: CornerRadius.sm)
                 .stroke(Color.cyberCyan.opacity(0.1), lineWidth: 1)
         )
     }
@@ -486,10 +493,10 @@ struct HistoryActionButton: View {
             .frame(maxWidth: .infinity)
             .padding(.vertical, 14)
             .background(
-                RoundedRectangle(cornerRadius: 12)
+                RoundedRectangle(cornerRadius: CornerRadius.md)
                     .fill(color.opacity(0.18))
                     .overlay(
-                        RoundedRectangle(cornerRadius: 12)
+                        RoundedRectangle(cornerRadius: CornerRadius.md)
                             .stroke(color.opacity(0.35), lineWidth: 1)
                     )
             )

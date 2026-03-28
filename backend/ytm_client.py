@@ -133,7 +133,7 @@ class YTMusicClient:
                 count_str = item.get('itemCount', '0')
                 try:
                     video_count = int(''.join(filter(str.isdigit, count_str)))
-                except:
+                except (ValueError, TypeError):
                     video_count = 0
                 
                 # Parse thumbnails into iOS-compatible format

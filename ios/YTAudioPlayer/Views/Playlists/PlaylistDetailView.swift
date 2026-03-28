@@ -131,37 +131,17 @@ struct PlaylistDetailView: View {
                                 .padding(.top, 24)
                                 .padding(.bottom, 12)
 
-                                // Track rows - each as individual card with spacing
-                                LazyVStack(spacing: 8) {
-                                    ForEach(Array(tracks.enumerated()), id: \.element.id) { index, track in
-                                        CyberpunkTrackRow(
-                                            track: track,
-                                            index: index + 1,
-                                            isPlaying: playerState.currentItem?.track.videoId == track.videoId,
-                                            isEditing: isEditing,
-                                            downloadTask: downloadManager.taskForTrack(track),
-                                            isDownloaded: downloadManager.taskForTrack(track)?.status == .completed,
-                                            hasMemory: songMemoryManager.hasMemory(for: track),
-                                            onPlay: { playTrack(track) },
-                                            onDownload: {
-                                                if let task = downloadManager.taskForTrack(track), task.status.isActive {
-                                                    downloadManager.cancelDownload(for: track)
-                                                } else if downloadManager.taskForTrack(track)?.status != .completed {
-                                                    downloadManager.download(track)
-                                                }
-                                            },
-                                            onAddToQueue: { addTrackToQueue(track) },
-                                            onPlayNext: { playTrackNext(track) },
-                                            onAddToPlaylist: {
-                                                trackToAdd = track
-                                                showAddToPlaylistSheet = true
-                                            },
-                                            onEditMemory: { openSongMemory(for: track) },
-                                            onDelete: { deleteTrack(track) }
-                                        )
+                                // Track rows - reorderable list in edit mode, lazy stack otherwise
+                                if isEditing && !(currentPlaylist?.isSmart ?? true) {
+                                    reorderableTrackList
+                                } else {
+                                    LazyVStack(spacing: 8) {
+                                        ForEach(Array(tracks.enumerated()), id: \.element.id) { index, track in
+                                            trackRowContent(track: track, index: index)
+                                        }
                                     }
+                                    .padding(.horizontal, 16)
                                 }
-                                .padding(.horizontal, 16)
                             }
                         }
                         .background(
@@ -307,6 +287,69 @@ struct PlaylistDetailView: View {
         }
     }
 
+    // MARK: - Reorderable Track List
+
+    @ViewBuilder
+    private var reorderableTrackList: some View {
+        let trackList = List {
+            ForEach(tracks) { track in
+                trackRowContent(
+                    track: track,
+                    index: tracks.firstIndex(where: { $0.id == track.id }) ?? 0
+                )
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+                .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+            }
+            .onMove { indexSet, destination in
+                if let playlist = currentPlaylist {
+                    playlistManager.moveTrack(from: indexSet, to: destination, in: playlist.id)
+                    HapticManager.light()
+                }
+            }
+        }
+        .listStyle(.plain)
+        .environment(\.editMode, .constant(.active))
+        .frame(height: max(CGFloat(tracks.count) * 76, 1))
+
+        if #available(iOS 16.0, *) {
+            trackList
+                .scrollContentBackground(.hidden)
+                .scrollDisabled(true)
+        } else {
+            trackList
+        }
+    }
+
+    @ViewBuilder
+    private func trackRowContent(track: Track, index: Int) -> some View {
+        CyberpunkTrackRow(
+            track: track,
+            index: index + 1,
+            isPlaying: playerState.currentItem?.track.videoId == track.videoId,
+            isEditing: isEditing,
+            downloadTask: downloadManager.taskForTrack(track),
+            isDownloaded: downloadManager.taskForTrack(track)?.status == .completed,
+            hasMemory: songMemoryManager.hasMemory(for: track),
+            onPlay: { playTrack(track) },
+            onDownload: {
+                if let task = downloadManager.taskForTrack(track), task.status.isActive {
+                    downloadManager.cancelDownload(for: track)
+                } else if downloadManager.taskForTrack(track)?.status != .completed {
+                    downloadManager.download(track)
+                }
+            },
+            onAddToQueue: { addTrackToQueue(track) },
+            onPlayNext: { playTrackNext(track) },
+            onAddToPlaylist: {
+                trackToAdd = track
+                showAddToPlaylistSheet = true
+            },
+            onEditMemory: { openSongMemory(for: track) },
+            onDelete: { deleteTrack(track) }
+        )
+    }
+
     private func playPlaylist(shuffle: Bool) {
         playlistManager.playPlaylist(playlist.id, shuffle: shuffle)
     }
@@ -356,6 +399,7 @@ struct PlaylistDetailView: View {
     }
 
     private func deleteTrack(_ track: Track) {
+        HapticManager.medium()
         guard let playlist = currentPlaylist else { return }
         let removedTrack = track
         let playlistId = playlist.id
@@ -790,6 +834,13 @@ struct CyberpunkTrackRow: View {
                 }
             } label: {
                 Label("Share Card", systemImage: "rectangle.on.rectangle")
+            }
+
+            Button {
+                NotificationCenter.default.post(name: .startSongRadio, object: track)
+                HapticManager.light()
+            } label: {
+                Label("Start Radio", systemImage: "antenna.radiowaves.left.and.right")
             }
 
             Divider()
