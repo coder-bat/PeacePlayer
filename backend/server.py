@@ -4,24 +4,117 @@ HTTP interface for iOS client to access extraction capabilities.
 Works with or without authentication.
 """
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, Response
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, Response, Query
+from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 from pydantic import BaseModel, Field, ConfigDict
 from pydantic.alias_generators import to_camel
 from typing import List, Optional
 import os
 import asyncio
 import logging
+import json
+import time
+import uuid
+import glob as _glob
+import datetime
+import requests as _requests
 from pathlib import Path
 
 from ytm_client import YTMusicClient, get_client, reset_client
 from extractor import AudioExtractor, get_extractor
 from stream_cache import get_cache
 
-# Setup logging
-logging.basicConfig(level=logging.INFO)
+# --- Configuration from environment ---
+STREAM_CONNECT_TIMEOUT = float(os.environ.get("STREAM_CONNECT_TIMEOUT", "5"))
+STREAM_READ_TIMEOUT = float(os.environ.get("STREAM_READ_TIMEOUT", "30"))
+THUMBNAIL_CONNECT_TIMEOUT = float(os.environ.get("THUMBNAIL_CONNECT_TIMEOUT", "3"))
+THUMBNAIL_READ_TIMEOUT = float(os.environ.get("THUMBNAIL_READ_TIMEOUT", "10"))
+HTTP_POOL_SIZE = int(os.environ.get("HTTP_POOL_SIZE", "10"))
+HTTP_POOL_MAX = int(os.environ.get("HTTP_POOL_MAX", "20"))
+YOUTUBE_COUNTRY = os.environ.get("YOUTUBE_COUNTRY", "US")
+SEARCH_CACHE_TTL = int(os.environ.get("SEARCH_CACHE_TTL", "300"))
+TRENDING_CACHE_TTL = int(os.environ.get("TRENDING_CACHE_TTL", "900"))
+MAX_WAVEFORM_CACHE_MB = int(os.environ.get("MAX_WAVEFORM_CACHE_MB", "100"))
+CACHE_TTL_HOURS = float(os.environ.get("CACHE_TTL_HOURS", "3.5"))
+
+# --- Structured JSON logging ---
+class JSONFormatter(logging.Formatter):
+    def format(self, record):
+        log_data = {
+            "timestamp": datetime.datetime.utcnow().isoformat(),
+            "level": record.levelname,
+            "message": record.getMessage(),
+            "logger": record.name,
+        }
+        if hasattr(record, 'request_id'):
+            log_data["request_id"] = record.request_id
+        if record.exc_info and record.exc_info[0]:
+            log_data["exception"] = self.formatException(record.exc_info)
+        return json.dumps(log_data)
+
+handler = logging.StreamHandler()
+handler.setFormatter(JSONFormatter())
 logger = logging.getLogger(__name__)
+logger.handlers = [handler]
+logger.setLevel(logging.INFO)
+logger.propagate = False
+
+# --- TTL Cache ---
+class TTLCache:
+    def __init__(self, ttl_seconds=300, max_size=100):
+        self._cache = {}
+        self._ttl = ttl_seconds
+        self._max_size = max_size
+
+    def get(self, key):
+        if key in self._cache:
+            value, timestamp = self._cache[key]
+            if time.time() - timestamp < self._ttl:
+                return value
+            del self._cache[key]
+        return None
+
+    def set(self, key, value):
+        if len(self._cache) >= self._max_size:
+            oldest_key = min(self._cache, key=lambda k: self._cache[k][1])
+            del self._cache[oldest_key]
+        self._cache[key] = (value, time.time())
+
+search_cache = TTLCache(ttl_seconds=SEARCH_CACHE_TTL, max_size=100)
+trending_cache = TTLCache(ttl_seconds=TRENDING_CACHE_TTL, max_size=20)
+
+# --- Response envelope helpers ---
+def success_response(data):
+    return {"data": data, "error": None}
+
+def error_response(message, code=None):
+    return {"data": None, "error": {"message": message, "code": code}}
+
+# --- Thread safety for ytmusic client ---
+ytmusic_lock = asyncio.Lock()
+
+# Server start time for health check
+_server_start_time = datetime.datetime.now()
+
+# Shared HTTP session for connection pooling
+_http_session: Optional[_requests.Session] = None
+
+def get_http_session() -> _requests.Session:
+    """Reusable requests.Session with connection pooling."""
+    global _http_session
+    if _http_session is None:
+        _http_session = _requests.Session()
+        _http_session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+        })
+        adapter = _requests.adapters.HTTPAdapter(pool_connections=HTTP_POOL_SIZE, pool_maxsize=HTTP_POOL_MAX)
+        _http_session.mount('https://', adapter)
+        _http_session.mount('http://', adapter)
+    return _http_session
 
 # FastAPI app initialization
 app = FastAPI(
@@ -34,15 +127,34 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "HEAD", "OPTIONS"],
     allow_headers=["*"],
 )
 
 
+# --- Rate limiting with slowapi ---
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+
+# --- Request ID + timing middleware ---
+@app.middleware("http")
+async def add_request_id(request: Request, call_next):
+    request_id = str(uuid.uuid4())[:8]
+    request.state.request_id = request_id
+    start = time.time()
+    response = await call_next(request)
+    duration_ms = int((time.time() - start) * 1000)
+    response.headers["X-Request-ID"] = request_id
+    logger.info(f"[{request_id}] {request.method} {request.url.path} → {response.status_code} ({duration_ms}ms)")
+    return response
+
+
 # Pydantic models for request/response validation
 class SearchQuery(BaseModel):
-    query: str = Field(..., description="Search string")
+    query: str = Field(..., min_length=1, max_length=500, description="Search string")
     limit: int = Field(default=20, ge=1, le=50, description="Max results")
 
 
@@ -117,9 +229,10 @@ class AuthStatusResponse(BaseModel):
     message: str
 
 
-# Health check
+# Root endpoint
 @app.get("/")
-async def root():
+@limiter.limit("15/minute")
+async def root(request: Request):
     client = get_client()
     return {
         "status": "running",
@@ -130,7 +243,8 @@ async def root():
 
 
 @app.get("/auth-status", response_model=AuthStatusResponse)
-async def auth_status():
+@limiter.limit("15/minute")
+async def auth_status(request: Request):
     """Get current authentication status."""
     client = get_client()
     if client.authenticated:
@@ -148,7 +262,8 @@ async def auth_status():
 
 
 @app.post("/auth/refresh")
-async def refresh_auth():
+@limiter.limit("15/minute")
+async def refresh_auth(request: Request):
     """Reload authentication (call after running setup_oauth.py)."""
     reset_client()
     client = get_client()
@@ -159,14 +274,16 @@ async def refresh_auth():
 
 
 @app.get("/cache/stats")
-async def cache_stats():
+@limiter.limit("15/minute")
+async def cache_stats(request: Request):
     """Get stream URL cache statistics."""
     cache = get_cache()
     return cache.get_stats()
 
 
 @app.post("/cache/clear")
-async def cache_clear():
+@limiter.limit("15/minute")
+async def cache_clear(request: Request):
     """Clear the stream URL cache."""
     cache = get_cache()
     cache.clear()
@@ -175,48 +292,54 @@ async def cache_clear():
 
 # Search endpoint
 @app.post("/search", response_model=List[TrackResponse])
-async def search(query: SearchQuery):
-    """
-    Search YouTube Music for tracks.
-    Works in both authenticated and guest mode.
-    """
+@limiter.limit("10/minute")
+async def search(query: SearchQuery, request: Request):
+    """Search YouTube Music for tracks."""
+    cache_key = f"{query.query}:{query.limit}"
+    cached = search_cache.get(cache_key)
+    if cached is not None:
+        return cached
     try:
         client = get_client()
-        results = client.search_tracks(query.query, query.limit)
+        async with ytmusic_lock:
+            results = client.search_tracks(query.query, query.limit)
         
         if not results:
             return []
         
-        return [TrackResponse(**track).model_dump() for track in results]
+        response = [TrackResponse(**track).model_dump() for track in results]
+        search_cache.set(cache_key, response)
+        return response
         
     except Exception as e:
+        logger.error(f"search_tracks failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
 
 
 # Playlist search endpoint
 @app.post("/search/playlists", response_model=List[PlaylistResponse])
-async def search_playlists(query: SearchQuery):
-    """
-    Search YouTube Music for playlists.
-    Works in both authenticated and guest mode.
-    """
+@limiter.limit("10/minute")
+async def search_playlists(query: SearchQuery, request: Request):
+    """Search YouTube Music for playlists."""
     try:
         client = get_client()
-        results = client.search_playlists(query.query, query.limit)
+        async with ytmusic_lock:
+            results = client.search_playlists(query.query, query.limit)
         return results
     except Exception as e:
+        logger.error(f"search_playlists failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Playlist search failed: {str(e)}")
 
 
 # Get playlist details endpoint
 @app.get("/playlist/{playlist_id}", response_model=PlaylistDetailsResponse)
-async def get_playlist(playlist_id: str, limit: int = 100):
-    """
-    Get full playlist details including tracks.
-    """
+@limiter.limit("15/minute")
+async def get_playlist(playlist_id: str, request: Request, limit: int = Query(default=100, ge=1, le=200)):
+    """Get full playlist details including tracks."""
     try:
         client = get_client()
-        playlist = client.get_playlist(playlist_id, limit=limit)
+        async with ytmusic_lock:
+            playlist = client.get_playlist(playlist_id, limit=limit)
         
         if not playlist:
             raise HTTPException(status_code=404, detail="Playlist not found")
@@ -225,26 +348,24 @@ async def get_playlist(playlist_id: str, limit: int = 100):
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"get_playlist failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to get playlist: {str(e)}")
 
 
 # Stream endpoint
 @app.get("/stream/{video_id}", response_model=StreamResponse)
-async def stream_audio(video_id: str):
-    """
-    Get streaming URL for a video.
-    Works in both authenticated and guest mode.
-    Uses caching for faster responses.
-    """
+@limiter.limit("20/minute")
+async def stream_audio(video_id: str, request: Request):
+    """Get streaming URL for a video. Uses caching."""
     try:
-        # Check cache first
         cache = get_cache()
         stream_data = cache.get(video_id)
         
         if not stream_data:
             logger.info(f"Cache miss for {video_id}, fetching from YouTube...")
             client = get_client()
-            stream_data = client.get_stream_url(video_id)
+            async with ytmusic_lock:
+                stream_data = client.get_stream_url(video_id)
             
             if not stream_data or not stream_data.get('audio_formats'):
                 raise HTTPException(status_code=404, detail="No audio stream found")
@@ -265,13 +386,13 @@ async def stream_audio(video_id: str):
     except HTTPException:
         raise
     except Exception as e:
-        import traceback
-        traceback.print_exc()
+        logger.exception("Stream extraction failed")
         raise HTTPException(status_code=500, detail=f"Stream extraction failed: {str(e)}")
 
 
 # Proxy stream endpoint - streams through backend to avoid IP issues
 @app.api_route("/proxy-stream/{video_id:path}", methods=["GET", "HEAD"])
+@limiter.limit("20/minute")
 async def proxy_stream_audio(video_id: str, request: Request, quality: str = "high"):
     """
     Proxy stream audio through backend.
@@ -281,7 +402,6 @@ async def proxy_stream_audio(video_id: str, request: Request, quality: str = "hi
     Query params:
         quality: "low" for fast start (70kbps), "high" for best quality (160kbps)
     """
-    import requests
 
     # Determine preferred format from extension
     prefer_m4a = video_id.endswith('.m4a')
@@ -301,7 +421,8 @@ async def proxy_stream_audio(video_id: str, request: Request, quality: str = "hi
         if not stream_data:
             logger.info(f"Cache miss for {video_id}, fetching from YouTube...")
             client = get_client()
-            stream_data = client.get_stream_url(video_id)
+            async with ytmusic_lock:
+                stream_data = client.get_stream_url(video_id)
 
             if not stream_data or not stream_data.get('audio_formats'):
                 raise HTTPException(status_code=404, detail="No audio stream found")
@@ -350,18 +471,9 @@ async def proxy_stream_audio(video_id: str, request: Request, quality: str = "hi
         logger.info(f"Proxy streaming: {stream_url[:60]}... (mime: {mime_type}, method: {request.method})")
         
         # Handle HEAD request - AVPlayer probes with HEAD first
+        # Use cached data to avoid round-trip to YouTube
         if request.method == "HEAD":
-            logger.info("Handling HEAD request")
-            yt_headers = {
-                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
-                'Referer': 'https://music.youtube.com/',
-                'Accept': '*/*',
-                'Accept-Encoding': 'identity'
-            }
-            
-            # Do a HEAD request to YouTube to get headers
-            r = requests.head(stream_url, headers=yt_headers, timeout=30)
-            
+            logger.info("Handling HEAD request (using cached metadata)")
             response_headers = {
                 'Content-Type': mime_type,
                 'Accept-Ranges': 'bytes',
@@ -369,16 +481,16 @@ async def proxy_stream_audio(video_id: str, request: Request, quality: str = "hi
                 'Access-Control-Allow-Headers': 'Range'
             }
             
-            if 'Content-Length' in r.headers:
-                response_headers['Content-Length'] = r.headers['Content-Length']
+            content_length = best.get('content_length')
+            if content_length and content_length > 0:
+                response_headers['Content-Length'] = str(content_length)
             
             logger.info(f"HEAD response headers: {response_headers}")
-            return Response(headers=response_headers, status_code=r.status_code)
+            return Response(headers=response_headers, status_code=200)
         
         # Handle GET request
         # Headers for YouTube request
         yt_headers = {
-            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
             'Referer': 'https://music.youtube.com/',
             'Accept': '*/*',
             'Accept-Encoding': 'identity',
@@ -390,9 +502,14 @@ async def proxy_stream_audio(video_id: str, request: Request, quality: str = "hi
             yt_headers['Range'] = request.headers['range']
             logger.info(f"Forwarding Range: {request.headers['range']}")
         
-        # Make request to YouTube
-        r = requests.get(stream_url, headers=yt_headers, stream=True, timeout=60)
-        r.raise_for_status()
+        # Make request to YouTube using connection pool
+        session = get_http_session()
+        r = session.get(stream_url, headers=yt_headers, stream=True, timeout=(STREAM_CONNECT_TIMEOUT, STREAM_READ_TIMEOUT))
+        try:
+            r.raise_for_status()
+        except Exception:
+            r.close()
+            raise
         
         logger.info(f"YouTube response: status={r.status_code}, content-type={r.headers.get('Content-Type')}, length={r.headers.get('Content-Length', 'unknown')}")
         
@@ -415,8 +532,16 @@ async def proxy_stream_audio(video_id: str, request: Request, quality: str = "hi
         
         logger.info(f"Proxy response headers: {response_headers}")
         
+        def stream_with_close():
+            try:
+                for chunk in r.iter_content(chunk_size=65536):
+                    if chunk:
+                        yield chunk
+            finally:
+                r.close()
+        
         return StreamingResponse(
-            r.iter_content(chunk_size=65536),
+            stream_with_close(),
             status_code=r.status_code,
             headers=response_headers
         )
@@ -424,15 +549,14 @@ async def proxy_stream_audio(video_id: str, request: Request, quality: str = "hi
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Proxy stream failed: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.exception("Proxy stream failed")
         raise HTTPException(status_code=500, detail=f"Stream failed: {str(e)}")
 
 
 # Download endpoint
 @app.post("/download", response_model=DownloadResponse)
-async def download_track(request: DownloadRequest):
+@limiter.limit("15/minute")
+async def download_track(download_req: DownloadRequest, request: Request):
     """
     Download and convert track to local M4A file.
     Works in both authenticated and guest mode.
@@ -441,17 +565,17 @@ async def download_track(request: DownloadRequest):
         extractor = get_extractor()
         
         metadata = {
-            'title': request.title,
-            'artists': request.artists,
-            'album': request.album,
-            'thumbnail': request.thumbnail
+            'title': download_req.title,
+            'artists': download_req.artists,
+            'album': download_req.album,
+            'thumbnail': download_req.thumbnail
         }
         
         loop = asyncio.get_event_loop()
         result_path = await loop.run_in_executor(
             None, 
             extractor.download_and_convert,
-            request.video_id,
+            download_req.video_id,
             metadata
         )
         
@@ -460,7 +584,7 @@ async def download_track(request: DownloadRequest):
 
         # Write sidecar .id file so waveform endpoint can find this track by video_id
         id_file = result_path.with_suffix('.id')
-        id_file.write_text(request.video_id)
+        id_file.write_text(download_req.video_id)
 
         return DownloadResponse(
             status="completed",
@@ -470,12 +594,14 @@ async def download_track(request: DownloadRequest):
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"download_track failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Download failed: {str(e)}")
 
 
 # Library listing
 @app.get("/library")
-async def list_library():
+@limiter.limit("15/minute")
+async def list_library(request: Request):
     """
     List all downloaded tracks in local library.
     Returns wrapped in {tracks: [...]} for iOS compatibility.
@@ -496,12 +622,14 @@ async def list_library():
             })
         return {"tracks": camel_tracks}
     except Exception as e:
+        logger.error(f"list_library failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Library listing failed: {str(e)}")
 
 
 # Library delete endpoint
 @app.delete("/library/{filename}")
-async def delete_library_file(filename: str):
+@limiter.limit("15/minute")
+async def delete_library_file(filename: str, request: Request):
     """
     Delete a file from the library.
     """
@@ -518,12 +646,14 @@ async def delete_library_file(filename: str):
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"delete_library_file failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Delete failed: {str(e)}")
 
 
 # Waveform endpoint
 @app.get("/waveform/{video_id}")
-async def get_waveform(video_id: str):
+@limiter.limit("15/minute")
+async def get_waveform(video_id: str, request: Request):
     """
     Return pre-computed waveform peaks (200 normalized floats) for a video ID.
     Checks a disk cache first, then generates from a downloaded M4A file.
@@ -556,24 +686,43 @@ async def get_waveform(video_id: str):
                 detail="No downloaded file found for this video_id"
             )
 
-        # Generate waveform peaks
-        peaks = extractor.generate_waveform(target_path, peaks=200)
+        # Generate waveform in thread pool to avoid blocking the event loop
+        loop = asyncio.get_event_loop()
+        peaks = await loop.run_in_executor(
+            None, lambda: extractor.generate_waveform(target_path, peaks=200)
+        )
         if not peaks:
             raise HTTPException(status_code=500, detail="Waveform generation failed")
 
         result = {"videoId": video_id, "peaks": peaks}
-        cache_file.write_text(_json.dumps(result))
+        # Atomic write: write to temp file then rename to avoid race conditions
+        import tempfile
+        tmp_fd, tmp_path = tempfile.mkstemp(dir=str(cache_dir), suffix=".json.tmp")
+        try:
+            import os
+            os.write(tmp_fd, _json.dumps(result).encode())
+            os.close(tmp_fd)
+            os.rename(tmp_path, str(cache_file))
+        except Exception:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
+        cleanup_waveform_cache(str(cache_dir))
         return result
 
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"get_waveform failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Waveform error: {str(e)}")
 
 
 # Local file streaming
 @app.get("/local-play/{filename}")
-async def local_play(filename: str):
+@limiter.limit("15/minute")
+async def local_play(filename: str, request: Request):
     """
     Stream a local M4A file.
     Supports HTTP range requests for seeking.
@@ -581,6 +730,12 @@ async def local_play(filename: str):
     try:
         extractor = get_extractor()
         file_path = extractor.output_dir / filename
+        
+        # Path traversal protection
+        try:
+            file_path.resolve().relative_to(extractor.output_dir.resolve())
+        except ValueError:
+            raise HTTPException(status_code=403, detail="Access denied")
         
         if not file_path.exists():
             raise HTTPException(status_code=404, detail="File not found")
@@ -597,38 +752,53 @@ async def local_play(filename: str):
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"local_play failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"File serving failed: {str(e)}")
 
 
 # Thumbnail proxy
 @app.get("/thumbnail")
-async def proxy_thumbnail(url: str):
-    """
-    Proxy thumbnail image to avoid CORS issues on iOS.
-    """
-    import requests
-    
+@limiter.limit("30/minute")
+async def proxy_thumbnail(url: str, request: Request):
+    """Proxy thumbnail image. Only allows YouTube thumbnail domains."""
     try:
-        response = requests.get(url, timeout=10)
-        response.raise_for_status()
+        from urllib.parse import urlparse
+        parsed = urlparse(url)
+        allowed_hosts = {'i.ytimg.com', 'i1.ytimg.com', 'i2.ytimg.com', 'i3.ytimg.com',
+                         'i4.ytimg.com', 'i9.ytimg.com', 'img.youtube.com',
+                         'lh3.googleusercontent.com', 'yt3.ggpht.com', 'yt3.googleusercontent.com'}
+        if parsed.hostname not in allowed_hosts:
+            raise HTTPException(status_code=403, detail="Domain not allowed")
+        
+        session = get_http_session()
+        response = session.get(url, timeout=(THUMBNAIL_CONNECT_TIMEOUT, THUMBNAIL_READ_TIMEOUT))
+        try:
+            response.raise_for_status()
+            content = response.content
+            content_type = response.headers.get('content-type', 'image/jpeg')
+        finally:
+            response.close()
         
         return StreamingResponse(
-            content=iter([response.content]),
-            media_type=response.headers.get('content-type', 'image/jpeg')
+            content=iter([content]),
+            media_type=content_type
         )
+    except HTTPException:
+        raise
     except Exception as e:
+        logger.error(f"proxy_thumbnail failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Thumbnail fetch failed: {str(e)}")
 
 
 # Lyrics endpoint
 @app.get("/lyrics/{video_id}")
-async def get_lyrics(video_id: str):
-    """
-    Get lyrics for a track if available.
-    """
+@limiter.limit("15/minute")
+async def get_lyrics(video_id: str, request: Request):
+    """Get lyrics for a track if available."""
     try:
         client = get_client()
-        lyrics = client.get_lyrics(video_id)
+        async with ytmusic_lock:
+            lyrics = client.get_lyrics(video_id)
         
         if not lyrics:
             raise HTTPException(status_code=404, detail="Lyrics not available")
@@ -638,27 +808,29 @@ async def get_lyrics(video_id: str):
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"get_lyrics failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Lyrics fetch failed: {str(e)}")
 
 
 # Radio/Autoplay
 @app.get("/radio/{video_id}")
-async def get_radio(video_id: str):
-    """
-    Get radio playlist based on track.
-    Works in both authenticated and guest mode.
-    """
+@limiter.limit("15/minute")
+async def get_radio(video_id: str, request: Request):
+    """Get radio playlist based on track."""
     try:
         client = get_client()
-        tracks = client.get_watch_playlist(video_id)
+        async with ytmusic_lock:
+            tracks = client.get_watch_playlist(video_id)
         return [TrackResponse(**track).model_dump() for track in tracks]
     except Exception as e:
+        logger.error(f"get_radio failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Radio generation failed: {str(e)}")
 
 
 # Authenticated-only endpoints
 @app.get("/liked-songs")
-async def get_liked_songs():
+@limiter.limit("15/minute")
+async def get_liked_songs(request: Request):
     """
     Get user's liked songs (authenticated only).
     """
@@ -670,14 +842,17 @@ async def get_liked_songs():
         )
     
     try:
-        tracks = client.get_liked_songs()
+        async with ytmusic_lock:
+            tracks = client.get_liked_songs()
         return {"tracks": tracks}
     except Exception as e:
+        logger.error(f"get_liked_songs failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to get liked songs: {str(e)}")
 
 
 @app.get("/playlists")
-async def get_playlists():
+@limiter.limit("15/minute")
+async def get_playlists(request: Request):
     """
     Get user's playlists (authenticated only).
     """
@@ -689,28 +864,29 @@ async def get_playlists():
         )
     
     try:
-        playlists = client.get_library_playlists()
+        async with ytmusic_lock:
+            playlists = client.get_library_playlists()
         return {"playlists": playlists}
     except Exception as e:
+        logger.error(f"get_playlists failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to get playlists: {str(e)}")
 
 
 # Charts / Trending
 @app.get("/charts")
-async def get_charts():
-    """
-    Get trending charts from YouTube Music.
-    Returns trending songs by category (all genres).
-    Works in both authenticated and guest mode.
-    Falls back to search-based results if API returns empty.
-    """
+@limiter.limit("5/minute")
+async def get_charts(request: Request):
+    """Get trending charts from YouTube Music."""
+    cached = trending_cache.get("charts")
+    if cached is not None:
+        return cached
     try:
         client = get_client()
         tracks = []
 
-        # Try to get charts from YTMusic API (may fail in guest mode)
         try:
-            charts = client.yt.get_charts(country='US')  # Default to US charts
+            async with ytmusic_lock:
+                charts = client.yt.get_charts(country=YOUTUBE_COUNTRY)
 
             # Parse trending songs if available
             if charts and 'songs' in charts:
@@ -741,30 +917,31 @@ async def get_charts():
             import random
             query = random.choice(fallback_queries)
             # Use search_tracks which returns properly formatted data
-            tracks = client.search_tracks(query, limit=20)
+            async with ytmusic_lock:
+                tracks = client.search_tracks(query, limit=20)
 
-        return {"tracks": [TrackResponse(**track).model_dump() for track in tracks[:20]]}
+        result = {"tracks": [TrackResponse(**track).model_dump() for track in tracks[:20]]}
+        trending_cache.set("charts", result)
+        return result
     except Exception as e:
         logger.error(f"Charts fetch failed: {e}")
-        # Return empty list on error rather than failing
         return {"tracks": []}
 
 
 @app.get("/new-releases")
-async def get_new_releases():
-    """
-    Get new releases from YouTube Music.
-    Returns latest album/song releases.
-    Works in both authenticated and guest mode.
-    Falls back to search-based results if API returns empty.
-    """
+@limiter.limit("5/minute")
+async def get_new_releases(request: Request):
+    """Get new releases from YouTube Music."""
+    cached = trending_cache.get("new-releases")
+    if cached is not None:
+        return cached
     try:
         client = get_client()
         tracks = []
 
-        # Try to get new releases from YTMusic API
         try:
-            releases = client.yt.get_new_releases(country='US')
+            async with ytmusic_lock:
+                releases = client.yt.get_new_releases(country=YOUTUBE_COUNTRY)
 
             if releases:
                 # Parse new releases - they're albums, extract tracks
@@ -772,7 +949,8 @@ async def get_new_releases():
                     try:
                         album_id = album.get('browseId')
                         if album_id:
-                            album_data = client.yt.get_album(album_id)
+                            async with ytmusic_lock:
+                                album_data = client.yt.get_album(album_id)
                             for track in album_data.get('tracks', [])[:2]:  # Top 2 tracks per album
                                 track_data = {
                                     'videoId': track.get('videoId'),
@@ -803,12 +981,86 @@ async def get_new_releases():
             import random
             query = random.choice(fallback_queries)
             # Use search_tracks which returns properly formatted data
-            tracks = client.search_tracks(query, limit=20)
+            async with ytmusic_lock:
+                tracks = client.search_tracks(query, limit=20)
 
-        return {"tracks": [TrackResponse(**track).model_dump() for track in tracks[:20]]}
+        result = {"tracks": [TrackResponse(**track).model_dump() for track in tracks[:20]]}
+        trending_cache.set("new-releases", result)
+        return result
     except Exception as e:
         logger.error(f"New releases fetch failed: {e}")
         return {"tracks": []}
+
+
+# --- Health check ---
+@app.get("/health")
+@limiter.limit("15/minute")
+async def health_check(request: Request):
+    """Health check endpoint with YouTube connectivity test."""
+    uptime = (datetime.datetime.now() - _server_start_time).total_seconds()
+    youtube_ok = False
+    try:
+        client = get_client()
+        async with ytmusic_lock:
+            client.yt.get_home()
+        youtube_ok = True
+    except Exception:
+        pass
+    return {
+        "status": "ok",
+        "youtube": youtube_ok,
+        "uptime_seconds": int(uptime),
+        "cache_sizes": {
+            "search": len(search_cache._cache),
+            "trending": len(trending_cache._cache),
+        }
+    }
+
+
+# --- Waveform cache cleanup ---
+def cleanup_waveform_cache(cache_dir=None):
+    """Evict oldest waveform cache files if total size exceeds limit."""
+    try:
+        if cache_dir is None:
+            extractor = get_extractor()
+            cache_dir = str(extractor.output_dir / ".waveform_cache")
+        if not os.path.isdir(cache_dir):
+            return
+        files = _glob.glob(os.path.join(cache_dir, "*.json"))
+        if not files:
+            return
+        total_size = sum(os.path.getsize(f) for f in files)
+        max_bytes = MAX_WAVEFORM_CACHE_MB * 1024 * 1024
+        if total_size > max_bytes:
+            files.sort(key=os.path.getmtime)
+            target = int(max_bytes * 0.8)
+            while total_size > target and files:
+                f = files.pop(0)
+                fsize = os.path.getsize(f)
+                os.remove(f)
+                total_size -= fsize
+                logger.info(f"Evicted waveform cache: {os.path.basename(f)} ({fsize} bytes)")
+    except Exception as e:
+        logger.warning(f"Waveform cache cleanup failed: {e}")
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Run startup tasks."""
+    cleanup_waveform_cache()
+    logger.info("Server started")
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Graceful shutdown: clean up resources"""
+    logger.info("Shutting down application...")
+    global _http_session
+    if _http_session:
+        _http_session.close()
+        _http_session = None
+        logger.info("HTTP session closed")
+    logger.info("Shutdown complete")
 
 
 # Run server
