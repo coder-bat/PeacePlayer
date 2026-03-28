@@ -11,7 +11,7 @@ import Combine
 
 struct HistoryView: View {
     @StateObject private var viewModel = HistoryViewModel()
-    @ObservedObject private var songMemoryManager = SongMemoryManager.shared
+    @StateObject private var songMemoryManager = SongMemoryManager.shared
     @State private var selectedTrack: Track?
     @State private var memoryTrack: Track?
     @State private var showClearConfirmation = false
@@ -51,6 +51,7 @@ struct HistoryView: View {
                 titleVisibility: .visible
             ) {
                 Button("Clear All History", role: .destructive) {
+                    HapticManager.medium()
                     viewModel.clearHistory()
                 }
                 Button("Cancel", role: .cancel) {}
@@ -134,11 +135,14 @@ struct HistoryView: View {
 
                     if index < viewModel.historyItems.count - 1 {
                         Divider()
-                            .background(Color.white.opacity(0.08))
+                            .background(Color.cyberSurface)
                             .padding(.leading, 68)
                     }
                 }
             }
+        }
+        .refreshable {
+            viewModel.loadHistory()
         }
     }
 
@@ -166,6 +170,7 @@ struct HistoryView: View {
                     icon: "play.fill",
                     color: .cyberCyan
                 ) {
+                    HapticManager.medium()
                     viewModel.playHistory(shuffle: false)
                 }
                 .disabled(viewModel.historyItems.isEmpty)
@@ -175,6 +180,7 @@ struct HistoryView: View {
                     icon: "shuffle",
                     color: .cyberYellow
                 ) {
+                    HapticManager.medium()
                     viewModel.playHistory(shuffle: true)
                 }
                 .disabled(viewModel.historyItems.isEmpty)
@@ -257,6 +263,7 @@ struct HistoryRow: View {
                         .fontWeight(.medium)
                         .foregroundColor(.white)
                         .lineLimit(1)
+                        .minimumScaleFactor(0.8)
 
                     HStack(spacing: 6) {
                         Text(item.artist)
@@ -272,6 +279,7 @@ struct HistoryRow: View {
                             .foregroundColor(.cyberCyan.opacity(0.7))
                     }
                     .lineLimit(1)
+                    .minimumScaleFactor(0.8)
 
                     if let memoryPreview {
                         SongMemoryBadge(text: memoryPreview)
@@ -312,9 +320,11 @@ struct HistoryRow: View {
         .buttonStyle(.plain)
         .confirmationDialog("", isPresented: $showingOptions, titleVisibility: .hidden) {
             Button(memoryPreview == nil ? "Add Memory" : "Edit Memory") {
+                HapticManager.light()
                 onEditMemory()
             }
             Button("Remove from History", role: .destructive) {
+                HapticManager.medium()
                 onDelete()
             }
             Button("Cancel", role: .cancel) {}

@@ -14,6 +14,7 @@ struct HomeView: View {
     @State private var showAllRecent = false
     @State private var showAddToPlaylistSheet = false
     @State private var selectedTrack: Track?
+    @State private var hasLoaded = false
 
     var body: some View {
         NavigationView {
@@ -48,10 +49,26 @@ struct HomeView: View {
                             .padding(.bottom, 100)
                     }
                 }
+                .refreshable {
+                    viewModel.loadData()
+                    for _ in 0..<100 {
+                        if !viewModel.isLoading { break }
+                        try? await Task.sleep(nanoseconds: 100_000_000)
+                    }
+                }
+
+                if viewModel.isLoading {
+                    ProgressView()
+                        .tint(.cyberCyan)
+                        .scaleEffect(1.2)
+                        .transition(.opacity)
+                }
             }
             .navigationBarHidden(true)
         }
-        .onAppear {
+        .task {
+            guard !hasLoaded else { return }
+            hasLoaded = true
             viewModel.loadData()
         }
         .sheet(isPresented: $showAllRecent) {
@@ -259,7 +276,7 @@ struct CyberBackground: View {
             }
         }
         .onAppear {
-            withAnimation(.easeInOut(duration: 8).repeatForever(autoreverses: true)) {
+            withAnimation(.easeInOut(duration: 3).repeatForever(autoreverses: true)) {
                 animate.toggle()
             }
         }
@@ -317,11 +334,13 @@ struct NowPlayingHero: View {
                             .font(.system(size: 18, weight: .bold))
                             .foregroundColor(.white)
                             .lineLimit(1)
+                            .minimumScaleFactor(0.8)
 
                         Text(track.displayArtist)
                             .font(.system(size: 14))
                             .foregroundColor(.cyberDim)
                             .lineLimit(1)
+                            .minimumScaleFactor(0.8)
 
                         // Visualizer bars
                         CyberPlayingBars()
@@ -387,11 +406,13 @@ struct ResumeHero: View {
                             .font(.system(size: 18, weight: .bold))
                             .foregroundColor(.white)
                             .lineLimit(1)
+                            .minimumScaleFactor(0.8)
 
                         Text(track.displayArtist)
                             .font(.system(size: 14))
                             .foregroundColor(.cyberDim)
                             .lineLimit(1)
+                            .minimumScaleFactor(0.8)
                     }
 
                     Spacer()
@@ -533,11 +554,13 @@ struct MinimalTrackCard: View {
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundColor(.white)
                         .lineLimit(1)
+                        .minimumScaleFactor(0.8)
 
                     Text(track.displayArtist)
                         .font(.system(size: 12))
                         .foregroundColor(.cyberDim)
                         .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                 }
                 .frame(width: 140, alignment: .leading)
             }
@@ -615,6 +638,7 @@ class HomeViewModel: ObservableObject {
     @Published var recentlyPlayed: [Track] = []
     @Published var downloadCount = 0
     @Published var totalListeningTime: TimeInterval = 0
+    @Published var isLoading = true
 
     private let dataManager = DataManager.shared
     private var cancellables = Set<AnyCancellable>()
@@ -635,7 +659,9 @@ class HomeViewModel: ObservableObject {
         totalListeningTime = dataManager.totalListeningSeconds
 
         APIService.shared.fetchLibrary()
-            .sink(receiveCompletion: { _ in },
+            .sink(receiveCompletion: { [weak self] _ in
+                self?.isLoading = false
+            },
                   receiveValue: { [weak self] tracks in
                 self?.downloadCount = tracks.count
             })
@@ -717,16 +743,16 @@ class HomeViewModel: ObservableObject {
     }
 
     func playVibe(_ vibe: VibeChip) {
-        // Search and play first result
         APIService.shared.search(query: vibe.query, limit: 10)
-            .sink(receiveCompletion: { _ in },
-                  receiveValue: { [weak self] tracks in
+            .sink(receiveCompletion: { completion in
+                if case .failure(let error) = completion {
+                    ErrorHandler.shared.handleAPIError(error)
+                }
+            }, receiveValue: { [weak self] tracks in
                 guard let self = self, !tracks.isEmpty else { return }
 
-                // Play first track
                 self.playTrack(tracks[0])
 
-                // Add rest to queue
                 for track in tracks.dropFirst() {
                     APIService.shared.getStreamUrl(videoId: track.videoId)
                         .sink(receiveCompletion: { _ in },
@@ -771,11 +797,13 @@ struct HomeRecentTrackRow: View {
                         .font(.system(size: 16, weight: .medium))
                         .foregroundColor(.white)
                         .lineLimit(1)
+                        .minimumScaleFactor(0.8)
 
                     Text(track.displayArtist)
                         .font(.system(size: 14))
                         .foregroundColor(.cyberDim)
                         .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                 }
 
                 Spacer()
@@ -909,11 +937,13 @@ struct AllRecentlyPlayedView: View {
                                             .font(.system(size: 16, weight: .medium))
                                             .foregroundColor(.white)
                                             .lineLimit(1)
+                                            .minimumScaleFactor(0.8)
 
                                         Text(track.displayArtist)
                                             .font(.system(size: 14))
                                             .foregroundColor(.cyberDim)
                                             .lineLimit(1)
+                                            .minimumScaleFactor(0.8)
                                     }
 
                                     Spacer()

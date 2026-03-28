@@ -32,7 +32,7 @@ enum LibrarySortOption: String, CaseIterable, Identifiable {
 struct LibraryView: View {
     @StateObject private var viewModel = LibraryViewModel()
     @StateObject private var playerState = PlayerState.shared
-    @ObservedObject private var songMemoryManager = SongMemoryManager.shared
+    @StateObject private var songMemoryManager = SongMemoryManager.shared
     @State private var viewMode: LibraryViewMode = .grid
     @State private var showStorageInfo = false
     @State private var selectedTracks: Set<String> = []
@@ -141,6 +141,7 @@ struct LibraryView: View {
                     print("🗑️ Alert Delete button tapped. Selected tracks: \(selectedTracks.count)")
                     let ids = Array(selectedTracks)
                     print("🗑️ Track IDs to delete: \(ids)")
+                    HapticManager.heavy()
                     viewModel.deleteTracks(ids)
                     selectedTracks.removeAll()
                     isEditing = false
@@ -267,6 +268,10 @@ struct LibraryView: View {
             }
             .padding(16)
         }
+        .refreshable {
+            viewModel.loadLibrary()
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+        }
     }
 
     private var listView: some View {
@@ -293,6 +298,10 @@ struct LibraryView: View {
             .onDelete(perform: isEditing ? nil : viewModel.deleteTrackAt)
         }
         .listStyle(.plain)
+        .refreshable {
+            viewModel.loadLibrary()
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+        }
     }
 
     private func toggleSelection(_ track: DownloadedTrackItem) {
@@ -389,11 +398,13 @@ struct GridTrackCell: View {
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundColor(isPlaying ? Theme.cyberCyan : .white)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.8)
 
                 Text(track.artist)
                     .font(.system(size: 12))
                     .foregroundColor(Theme.cyberDim)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.8)
 
                 Text(track.fileSizeFormatted.uppercased())
                     .font(.system(size: 11, design: .monospaced))
@@ -463,12 +474,14 @@ struct ListTrackRow: View {
                 Text(track.title)
                     .font(.system(size: 15, weight: isPlaying ? .semibold : .regular))
                     .lineLimit(1)
+                    .minimumScaleFactor(0.8)
                     .foregroundColor(isPlaying ? Theme.cyberCyan : .white)
 
                 Text(track.artist)
                     .font(.system(size: 13))
                     .foregroundColor(Theme.cyberDim)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.8)
 
                 Text(track.fileSizeFormatted.uppercased())
                     .font(.system(size: 11, design: .monospaced))

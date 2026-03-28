@@ -13,7 +13,7 @@ struct PlaylistDetailView: View {
     @StateObject private var playerState = PlayerState.shared
     @StateObject private var trackStore = TrackStore.shared
     @StateObject private var downloadManager = DownloadManager.shared
-    @ObservedObject private var songMemoryManager = SongMemoryManager.shared
+    @StateObject private var songMemoryManager = SongMemoryManager.shared
     @State private var isEditing = false
     @State private var showDeleteConfirmation = false
     @State private var showRenameSheet = false
@@ -38,28 +38,22 @@ struct PlaylistDetailView: View {
         guard let playlist = currentPlaylist else { return [] }
 
         var resolvedTracks: [Track] = []
-        var missing: [String] = []
 
         for videoId in playlist.trackIds {
             if let track = trackStore.getTrack(videoId: videoId) {
                 resolvedTracks.append(track)
             } else {
-                missing.append(videoId)
                 resolvedTracks.append(Track(
                     videoId: videoId,
-                    title: "Loading...",
-                    artists: ["Unknown Artist"],
-                    album: "Unknown Album",
+                    title: "Unavailable Track",
+                    artists: ["Metadata missing"],
+                    album: "",
                     durationSeconds: 0,
                     thumbnails: [],
                     isExplicit: false,
                     videoType: "MUSIC"
                 ))
             }
-        }
-
-        DispatchQueue.main.async {
-            self.missingTrackIds = missing
         }
 
         return resolvedTracks
@@ -182,6 +176,10 @@ struct PlaylistDetailView: View {
                 .coordinateSpace(name: "scroll")
                 .onPreferenceChange(ScrollOffsetPreferenceKey.self) { value in
                     scrollOffset = -value
+                }
+                .refreshable {
+                    playlistManager.refreshSmartPlaylists()
+                    try? await Task.sleep(nanoseconds: 500_000_000)
                 }
 
                 // Sticky Navigation Bar
@@ -448,6 +446,8 @@ struct HeroPlaylistHeaderCyberpunk: View {
                     .font(.system(size: 22, weight: .bold, design: .monospaced))
                     .multilineTextAlignment(.center)
                     .foregroundColor(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
 
                 if let description = playlist.description, !description.isEmpty {
                     Text(description)
@@ -626,12 +626,15 @@ struct CyberpunkTrackRow: View {
                 if isPlaying {
                     CyberPlayingBars()
                         .frame(width: 20, height: 20)
+                        .transition(.scale.combined(with: .opacity))
                 } else {
                     Text(String(format: "%02d", index))
                         .font(.system(size: 13, weight: .medium, design: .monospaced))
                         .foregroundColor(Theme.cyberDim)
+                        .transition(.scale.combined(with: .opacity))
                 }
             }
+            .animation(.spring(response: 0.3), value: isPlaying)
             .frame(width: 28, alignment: .center)
 
             // Artwork
@@ -658,6 +661,7 @@ struct CyberpunkTrackRow: View {
                 Text(track.title)
                     .font(.system(size: 15, weight: isPlaying ? .semibold : .regular))
                     .lineLimit(1)
+                    .minimumScaleFactor(0.8)
                     .foregroundColor(isPlaying ? Theme.cyberCyan : .white)
 
                 HStack(spacing: 4) {
@@ -676,6 +680,7 @@ struct CyberpunkTrackRow: View {
                     }
                 }
                 .lineLimit(1)
+                .minimumScaleFactor(0.8)
 
                 if hasMemory {
                     SongMemoryBadge(text: nil)

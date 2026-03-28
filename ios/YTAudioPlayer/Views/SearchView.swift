@@ -20,6 +20,7 @@ struct SearchView: View {
     @StateObject private var viewModel = SearchViewModel()
     @StateObject private var downloadManager = DownloadManager.shared
     @State private var searchText = ""
+    @State private var searchDebounceTask: Task<Void, Never>?
     @State private var selectedTrackForPlaylist: Track?
     @State private var selectedYouTubePlaylist: YouTubePlaylist?
     @State private var activeFilter: SearchFilter = .all
@@ -55,6 +56,7 @@ struct SearchView: View {
                             .focused($isSearchFocused)
                             .submitLabel(.search)
                             .autocorrectionDisabled()
+                            .textInputAutocapitalization(.never)
                             .onSubmit {
                                 guard !searchText.isEmpty else { return }
                                 HapticManager.medium()
@@ -99,10 +101,13 @@ struct SearchView: View {
 
                     if viewModel.isLoading {
                         skeletonLoadingView
+                            .transition(.opacity)
                     } else if viewModel.results.isEmpty && viewModel.playlistResults.isEmpty {
                         emptyStateView
+                            .transition(.opacity)
                     } else {
                         resultsListView
+                            .transition(.opacity)
                     }
                 }
             }
@@ -110,8 +115,10 @@ struct SearchView: View {
             .navigationTitle("")
             .navigationBarHidden(true)
             .preferredColorScheme(.dark)
-            .onAppear {
+            .task {
                 viewModel.refreshDownloadedIds()
+            }
+            .onAppear {
                 UITableView.appearance().backgroundColor = .clear
             }
             .onDisappear {
@@ -121,9 +128,20 @@ struct SearchView: View {
                 viewModel.refreshDownloadedIds()
             }
             .onChange(of: searchText) { newValue in
-                if newValue.isEmpty && viewModel.hasSearched {
-                    viewModel.clearSearch()
-                    activeFilter = .all
+                searchDebounceTask?.cancel()
+                if newValue.isEmpty {
+                    if viewModel.hasSearched {
+                        viewModel.clearSearch()
+                        activeFilter = .all
+                    }
+                } else {
+                    searchDebounceTask = Task {
+                        try? await Task.sleep(nanoseconds: 500_000_000)
+                        guard !Task.isCancelled else { return }
+                        await MainActor.run {
+                            viewModel.search(query: newValue)
+                        }
+                    }
                 }
             }
             .errorAlert()
@@ -247,6 +265,17 @@ struct SearchView: View {
             }
         }
         .listStyle(.insetGrouped)
+        .modifier(ScrollDismissesKeyboardModifier())
+        .refreshable {
+            let query = searchText
+            if !query.isEmpty {
+                viewModel.search(query: query)
+                for _ in 0..<100 {
+                    if !viewModel.isLoading { break }
+                    try? await Task.sleep(nanoseconds: 100_000_000)
+                }
+            }
+        }
     }
 
     private var shouldShowSongs: Bool {
@@ -435,6 +464,8 @@ struct SearchView: View {
                                         Text(query)
                                             .font(.system(size: 14, design: .monospaced))
                                             .foregroundColor(.white)
+                                            .lineLimit(1)
+                                            .minimumScaleFactor(0.8)
 
                                         Spacer()
 
@@ -532,18 +563,21 @@ struct PlaylistSearchRow: View {
                 Text(playlist.title)
                     .font(.system(size: 16, weight: .semibold))
                     .lineLimit(1)
+                    .minimumScaleFactor(0.8)
                     .foregroundColor(.white)
 
                 Text("by \(playlist.author)")
                     .font(.system(size: 14))
                     .foregroundColor(.cyberDim)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.8)
 
                 if !playlist.description.isEmpty {
                     Text(playlist.description)
                         .font(.system(size: 12))
                         .foregroundColor(.cyberDim)
                         .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                 }
             }
 
@@ -702,12 +736,14 @@ struct SearchResultRow: View {
                 Text(track.title)
                     .font(.system(size: 16, weight: isPlaying ? .bold : .semibold))
                     .lineLimit(1)
+                    .minimumScaleFactor(0.8)
                     .foregroundColor(isPlaying ? .cyberCyan : .white)
 
                 Text(track.displayArtist)
                     .font(.system(size: 14))
                     .foregroundColor(.cyberDim)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.8)
 
                 HStack(spacing: 4) {
                     if !track.album.isEmpty && track.album != "Unknown Album" {
@@ -715,6 +751,7 @@ struct SearchResultRow: View {
                             .font(.system(size: 12))
                             .foregroundColor(.cyberDim)
                             .lineLimit(1)
+                            .minimumScaleFactor(0.8)
                     }
 
                     Text("• \(track.durationText)")
@@ -992,5 +1029,23 @@ class SearchViewModel: ObservableObject {
 struct SearchView_Previews: PreviewProvider {
     static var previews: some View {
         SearchView()
+    }
+}
+
+// MARK: - iOS 16+ scroll-dismisses-keyboard compatibility
+private struct ScrollDismissesKeyboardModifier: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(iOS 16.4, *) {
+            content.applyScrollDismissKeyboard()
+        } else {
+            content
+        }
+    }
+}
+
+@available(iOS 16.4, *)
+private extension View {
+    func applyScrollDismissKeyboard() -> some View {
+        self.scrollDismissesKeyboard(.interactively)
     }
 }
