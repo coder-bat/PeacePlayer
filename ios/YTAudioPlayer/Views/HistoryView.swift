@@ -12,6 +12,7 @@ import Combine
 struct HistoryView: View {
     @StateObject private var viewModel = HistoryViewModel()
     @StateObject private var songMemoryManager = SongMemoryManager.shared
+    @ObservedObject var undoService = UndoService.shared
     @State private var selectedTrack: Track?
     @State private var memoryTrack: Track?
     @State private var showClearConfirmation = false
@@ -52,7 +53,10 @@ struct HistoryView: View {
             ) {
                 Button("Clear All History", role: .destructive) {
                     HapticManager.medium()
+                    let count = viewModel.historyItems.count
                     viewModel.clearHistory()
+                    // TODO: True undo requires re-creating CoreData entries; showing confirmation toast for now
+                    undoService.registerUndo(message: "Cleared \(count) history item(s)") {}
                 }
                 Button("Cancel", role: .cancel) {}
             } message: {
@@ -133,7 +137,10 @@ struct HistoryView: View {
                         memoryTrack = item.track
                     },
                     onDelete: {
+                        let itemTitle = item.track.title
                         viewModel.deleteHistoryItem(item)
+                        // TODO: True undo requires re-creating CoreData entry; showing confirmation toast for now
+                        undoService.registerUndo(message: "Removed \"\(itemTitle)\"") {}
                     },
                     onPlayNext: {
                         HapticManager.light()
@@ -356,6 +363,44 @@ struct HistoryRow: View {
             Button(action: onEditMemory) {
                 Label(memoryPreview == nil ? "Add Memory" : "Edit Memory",
                       systemImage: memoryPreview == nil ? "square.and.pencil" : "sparkles.rectangle.stack.fill")
+            }
+
+            Button {
+                ShareHelper.shareTrack(
+                    title: item.title,
+                    artist: item.artist,
+                    videoId: item.track.videoId
+                )
+            } label: {
+                Label("Share", systemImage: "square.and.arrow.up")
+            }
+
+            Button {
+                ShareHelper.copyTrackInfo(
+                    title: item.title,
+                    artist: item.artist
+                )
+            } label: {
+                Label("Copy Info", systemImage: "doc.on.doc")
+            }
+
+            Button {
+                Task {
+                    if let card = await ShareCardGenerator.generateCard(for: item.track) {
+                        let activityVC = UIActivityViewController(activityItems: [card], applicationActivities: nil)
+                        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                           let rootVC = windowScene.windows.first?.rootViewController {
+                            if let popover = activityVC.popoverPresentationController {
+                                popover.sourceView = rootVC.view
+                                popover.sourceRect = CGRect(x: rootVC.view.bounds.midX, y: rootVC.view.bounds.midY, width: 0, height: 0)
+                                popover.permittedArrowDirections = []
+                            }
+                            rootVC.present(activityVC, animated: true)
+                        }
+                    }
+                }
+            } label: {
+                Label("Share Card", systemImage: "rectangle.on.rectangle")
             }
 
             Divider()

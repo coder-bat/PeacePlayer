@@ -33,6 +33,7 @@ struct LibraryView: View {
     @StateObject private var viewModel = LibraryViewModel()
     @StateObject private var playerState = PlayerState.shared
     @StateObject private var songMemoryManager = SongMemoryManager.shared
+    @ObservedObject var undoService = UndoService.shared
     @State private var viewMode: LibraryViewMode = .grid
     @State private var showStorageInfo = false
     @State private var selectedTracks: Set<String> = []
@@ -142,9 +143,12 @@ struct LibraryView: View {
                     let ids = Array(selectedTracks)
                     print("🗑️ Track IDs to delete: \(ids)")
                     HapticManager.heavy()
+                    let count = ids.count
                     viewModel.deleteTracks(ids)
                     selectedTracks.removeAll()
                     isEditing = false
+                    // TODO: True undo requires re-downloading files; showing confirmation toast for now
+                    undoService.registerUndo(message: "Deleted \(count) track(s)") {}
                 }
             } message: {
                 Text("This will permanently remove the selected tracks from your library.")
@@ -273,7 +277,10 @@ struct LibraryView: View {
                         },
                         onDelete: {
                             HapticManager.medium()
+                            let trackName = track.title
                             viewModel.deleteTracks([track.videoId])
+                            // TODO: True undo requires re-downloading files; showing confirmation toast for now
+                            undoService.registerUndo(message: "Deleted \"\(trackName)\"") {}
                         }
                     )
                 }
@@ -315,7 +322,10 @@ struct LibraryView: View {
                         },
                         onDelete: {
                             HapticManager.medium()
+                            let trackName = track.title
                             viewModel.deleteTracks([track.videoId])
+                            // TODO: True undo requires re-downloading files; showing confirmation toast for now
+                            undoService.registerUndo(message: "Deleted \"\(trackName)\"") {}
                         }
                     )
             }
@@ -452,6 +462,44 @@ struct GridTrackCell: View {
                 Label("Add to Queue", systemImage: "plus")
             }
 
+            Button {
+                ShareHelper.shareTrack(
+                    title: track.title,
+                    artist: track.artist,
+                    videoId: track.videoId
+                )
+            } label: {
+                Label("Share", systemImage: "square.and.arrow.up")
+            }
+
+            Button {
+                ShareHelper.copyTrackInfo(
+                    title: track.title,
+                    artist: track.artist
+                )
+            } label: {
+                Label("Copy Info", systemImage: "doc.on.doc")
+            }
+
+            Button {
+                Task {
+                    if let card = await ShareCardGenerator.generateCard(for: track.track) {
+                        let activityVC = UIActivityViewController(activityItems: [card], applicationActivities: nil)
+                        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                           let rootVC = windowScene.windows.first?.rootViewController {
+                            if let popover = activityVC.popoverPresentationController {
+                                popover.sourceView = rootVC.view
+                                popover.sourceRect = CGRect(x: rootVC.view.bounds.midX, y: rootVC.view.bounds.midY, width: 0, height: 0)
+                                popover.permittedArrowDirections = []
+                            }
+                            rootVC.present(activityVC, animated: true)
+                        }
+                    }
+                }
+            } label: {
+                Label("Share Card", systemImage: "rectangle.on.rectangle")
+            }
+
             Divider()
 
             Button(role: .destructive, action: onDelete) {
@@ -571,6 +619,44 @@ struct ListTrackRow: View {
 
             Button(action: onAddToQueue) {
                 Label("Add to Queue", systemImage: "plus")
+            }
+
+            Button {
+                ShareHelper.shareTrack(
+                    title: track.title,
+                    artist: track.artist,
+                    videoId: track.videoId
+                )
+            } label: {
+                Label("Share", systemImage: "square.and.arrow.up")
+            }
+
+            Button {
+                ShareHelper.copyTrackInfo(
+                    title: track.title,
+                    artist: track.artist
+                )
+            } label: {
+                Label("Copy Info", systemImage: "doc.on.doc")
+            }
+
+            Button {
+                Task {
+                    if let card = await ShareCardGenerator.generateCard(for: track.track) {
+                        let activityVC = UIActivityViewController(activityItems: [card], applicationActivities: nil)
+                        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                           let rootVC = windowScene.windows.first?.rootViewController {
+                            if let popover = activityVC.popoverPresentationController {
+                                popover.sourceView = rootVC.view
+                                popover.sourceRect = CGRect(x: rootVC.view.bounds.midX, y: rootVC.view.bounds.midY, width: 0, height: 0)
+                                popover.permittedArrowDirections = []
+                            }
+                            rootVC.present(activityVC, animated: true)
+                        }
+                    }
+                }
+            } label: {
+                Label("Share Card", systemImage: "rectangle.on.rectangle")
             }
 
             Divider()

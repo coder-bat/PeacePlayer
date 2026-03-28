@@ -147,6 +147,17 @@ class PlaylistManager: ObservableObject {
         savePlaylists()
     }
     
+    /// Insert a track at a specific position (used for undo of track removal)
+    func insertTrack(_ track: Track, to playlistId: UUID, at position: Int) {
+        guard let index = playlists.firstIndex(where: { $0.id == playlistId }) else { return }
+        guard !playlists[index].trackIds.contains(track.videoId) else { return }
+        
+        let clampedPosition = min(position, playlists[index].trackIds.count)
+        playlists[index].trackIds.insert(track.videoId, at: clampedPosition)
+        playlists[index].modifiedAt = Date()
+        savePlaylists()
+    }
+    
     func removeTracks(at offsets: IndexSet, from playlistId: UUID) {
         guard let index = playlists.firstIndex(where: { $0.id == playlistId }) else { return }
         

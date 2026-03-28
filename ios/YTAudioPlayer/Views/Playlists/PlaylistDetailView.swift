@@ -14,6 +14,7 @@ struct PlaylistDetailView: View {
     @StateObject private var trackStore = TrackStore.shared
     @StateObject private var downloadManager = DownloadManager.shared
     @StateObject private var songMemoryManager = SongMemoryManager.shared
+    @ObservedObject var undoService = UndoService.shared
     @State private var isEditing = false
     @State private var showDeleteConfirmation = false
     @State private var showRenameSheet = false
@@ -356,7 +357,15 @@ struct PlaylistDetailView: View {
 
     private func deleteTrack(_ track: Track) {
         guard let playlist = currentPlaylist else { return }
+        let removedTrack = track
+        let playlistId = playlist.id
+        let playlistName = playlist.name
+        // Snapshot position before removal
+        let removedIndex = playlist.trackIds.firstIndex(of: track.videoId) ?? playlist.trackIds.count
         playlistManager.removeTrack(track.videoId, from: playlist.id)
+        undoService.registerUndo(message: "Removed from \(playlistName)") { [playlistManager] in
+            playlistManager.insertTrack(removedTrack, to: playlistId, at: removedIndex)
+        }
     }
 
     private func openSongMemory(for track: Track) {
@@ -743,6 +752,44 @@ struct CyberpunkTrackRow: View {
 
             Button(action: onEditMemory) {
                 Label(hasMemory ? "Edit Memory" : "Add Memory", systemImage: hasMemory ? "sparkles.rectangle.stack.fill" : "square.and.pencil")
+            }
+
+            Button {
+                ShareHelper.shareTrack(
+                    title: track.title,
+                    artist: track.displayArtist,
+                    videoId: track.videoId
+                )
+            } label: {
+                Label("Share", systemImage: "square.and.arrow.up")
+            }
+
+            Button {
+                ShareHelper.copyTrackInfo(
+                    title: track.title,
+                    artist: track.displayArtist
+                )
+            } label: {
+                Label("Copy Info", systemImage: "doc.on.doc")
+            }
+
+            Button {
+                Task {
+                    if let card = await ShareCardGenerator.generateCard(for: track) {
+                        let activityVC = UIActivityViewController(activityItems: [card], applicationActivities: nil)
+                        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                           let rootVC = windowScene.windows.first?.rootViewController {
+                            if let popover = activityVC.popoverPresentationController {
+                                popover.sourceView = rootVC.view
+                                popover.sourceRect = CGRect(x: rootVC.view.bounds.midX, y: rootVC.view.bounds.midY, width: 0, height: 0)
+                                popover.permittedArrowDirections = []
+                            }
+                            rootVC.present(activityVC, animated: true)
+                        }
+                    }
+                }
+            } label: {
+                Label("Share Card", systemImage: "rectangle.on.rectangle")
             }
 
             Divider()

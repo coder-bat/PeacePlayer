@@ -8,6 +8,7 @@ import UIKit
 
 struct ContentView: View {
     @StateObject private var playerState = PlayerState.shared
+    @StateObject private var networkMonitor = NetworkMonitor.shared
     @State private var selectedTab = 0
     @State private var showFullPlayer = false
     @State private var showRestorePrompt = false
@@ -44,6 +45,27 @@ struct ContentView: View {
                 CyberpunkTabBar(selectedTab: $selectedTab)
             }
 
+            // Offline banner
+            if !networkMonitor.isConnected {
+                VStack {
+                    HStack(spacing: 8) {
+                        Image(systemName: "wifi.slash")
+                            .font(.system(size: 12, weight: .bold))
+                        Text("Offline — downloaded music still available")
+                            .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    }
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .frame(maxWidth: .infinity)
+                    .background(Color.cyberSurface)
+                    Spacer()
+                }
+                .transition(.move(edge: .top).combined(with: .opacity))
+                .animation(.spring(response: 0.4), value: networkMonitor.isConnected)
+                .zIndex(2)
+            }
+
             // Queue restore overlay
             if showRestorePrompt {
                 Color.black.opacity(0.5)
@@ -63,6 +85,15 @@ struct ContentView: View {
                     ))
                     .zIndex(1)
             }
+
+            // Undo toast — above tab bar + MiniPlayer, below sheets
+            VStack {
+                Spacer()
+                UndoToastView()
+                    .padding(.bottom, 120) // clears CyberpunkTabBar (~56pt) + MiniPlayer (64pt)
+            }
+            .zIndex(3)
+            .allowsHitTesting(UndoService.shared.currentUndo != nil)
         }
         .onReceive(NotificationCenter.default.publisher(for: .switchTab)) { notification in
             if let tab = notification.object as? Int {

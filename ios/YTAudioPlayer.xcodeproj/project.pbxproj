@@ -7,6 +7,10 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		AAAA000100010001AAAA0001 /* UndoService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AAAA000200020002AAAA0002 /* UndoService.swift */; };
+		AAAA000300030003AAAA0003 /* UndoToastView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AAAA000400040004AAAA0004 /* UndoToastView.swift */; };
+		3BAF49F42AC1B8D9453BC565 /* GestureCoachOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CEE2161DC363294A5C20BAD /* GestureCoachOverlay.swift */; };
+		784D55472A7AA2E908B44675 /* NetworkMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 928CA01AEFAF7FDA09762683 /* NetworkMonitor.swift */; };
 		017ECF92A19304984CAAB334 /* TrackStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8BDBAB24D7F33E11F8D0EA48 /* TrackStore.swift */; };
 		05571F6649D3C29409B4485D /* PeacePlayerShortcuts.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1C43AF05755A03C07C3199D /* PeacePlayerShortcuts.swift */; };
 		0730E5C7A56C5148472385A9 /* PersistenceController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C0720B82757B56EF9C11BD3 /* PersistenceController.swift */; };
@@ -131,6 +135,8 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		5CEE2161DC363294A5C20BAD /* GestureCoachOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GestureCoachOverlay.swift; sourceTree = "<group>"; };
+		928CA01AEFAF7FDA09762683 /* NetworkMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkMonitor.swift; sourceTree = "<group>"; };
 		0080BED852F91FC0AFA9DE17 /* YTAudioPlayerApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = YTAudioPlayerApp.swift; sourceTree = "<group>"; };
 		00CA580AB7F5354A0D5782EA /* SongMemoryBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SongMemoryBadge.swift; sourceTree = "<group>"; };
 		0449744B02B62A5111EBC52F /* CrossfadeManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrossfadeManager.swift; sourceTree = "<group>"; };
@@ -159,6 +165,8 @@
 		A1B2C3D4E5F60003A1B2C3D4 /* CDTimeCapsule.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CDTimeCapsule.swift; sourceTree = "<group>"; };
 		A1B2C3D4E5F60005A1B2C3D4 /* CDExplorationSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CDExplorationSession.swift; sourceTree = "<group>"; };
 		3038FFEB319F49CD9E1A1175 /* AudioVisualizerEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioVisualizerEngine.swift; sourceTree = "<group>"; };
+		AAAA000200020002AAAA0002 /* UndoService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UndoService.swift; sourceTree = "<group>"; };
+		AAAA000400040004AAAA0004 /* UndoToastView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UndoToastView.swift; sourceTree = "<group>"; };
 		F4BAE1768725482082331515 /* WaveformService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WaveformService.swift; sourceTree = "<group>"; };
 		2750AE85A37F46BD87CA3BFC /* NeuralFreqVisualizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeuralFreqVisualizer.swift; sourceTree = "<group>"; };
 		04C47F21544D4A59BFCF9ACF /* WaveformSeekBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WaveformSeekBar.swift; sourceTree = "<group>"; };
@@ -333,6 +341,7 @@
 				3038FFEB319F49CD9E1A1175 /* AudioVisualizerEngine.swift */,
 				F4BAE1768725482082331515 /* WaveformService.swift */,
 				76677939C02D48D7D20B2C63 /* ErrorHandler.swift */,
+				928CA01AEFAF7FDA09762683 /* NetworkMonitor.swift */,
 				B09F71767D3BB29E47770E59 /* GestureEngine.swift */,
 				9640549EB11F8010768D21B8 /* ImageCache.swift */,
 				60AE6A24F4FB814BB8E759A3 /* LibraryViewModel.swift */,
@@ -410,9 +419,18 @@
 				0080BED852F91FC0AFA9DE17 /* YTAudioPlayerApp.swift */,
 				052F62264ACE5847C9690E2C /* DesignSystem */,
 				CE0536C22C903F7D3E743673 /* Models */,
+				AAAA000500050005AAAA0005 /* Services */,
 				11AFA6949CB68AF96A7DFB56 /* Views */,
 			);
 			path = YTAudioPlayer;
+			sourceTree = "<group>";
+		};
+		AAAA000500050005AAAA0005 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				AAAA000200020002AAAA0002 /* UndoService.swift */,
+			);
+			path = Services;
 			sourceTree = "<group>";
 		};
 		AC08B4BDDD8B335844F6B329 /* Components */ = {
@@ -420,9 +438,11 @@
 			children = (
 				B81D655E3DE40EE89C5400B4 /* EmptyStateView.swift */,
 				CD44B40105E0AC2CC5C0781B /* ErrorView.swift */,
+				5CEE2161DC363294A5C20BAD /* GestureCoachOverlay.swift */,
 				2649617A9D406FC9ADE4F5BD /* GenrePickerSheet.swift */,
 				B2A9468FFD7CCB3F04EED038 /* LikeButton.swift */,
 				00CA580AB7F5354A0D5782EA /* SongMemoryBadge.swift */,
+				AAAA000400040004AAAA0004 /* UndoToastView.swift */,
 				6FD6C9133D1AAC6ED27C1C6E /* VibeButton.swift */,
 			);
 			path = Components;
@@ -566,6 +586,8 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				3BAF49F42AC1B8D9453BC565 /* GestureCoachOverlay.swift in Sources */,
+				784D55472A7AA2E908B44675 /* NetworkMonitor.swift in Sources */,
 				4C726AD1EF1C2CDF7FDEAE4A /* APIService.swift in Sources */,
 				B1C2D3E4F5A60002B1C2D3E4 /* TimeCapsuleManager.swift in Sources */,
 				B1C2D3E4F5A60004B1C2D3E4 /* AntiAlgorithmEngine.swift in Sources */,
@@ -653,6 +675,8 @@
 				219061230F75037D452AA0B5 /* YTAudioPlayer.xcdatamodeld in Sources */,
 				E86A578CA391F693A6B3752B /* YTAudioPlayerApp.swift in Sources */,
 				7E6173BEB257A83B995CB0F4 /* YourMixesSection.swift in Sources */,
+				AAAA000100010001AAAA0001 /* UndoService.swift in Sources */,
+				AAAA000300030003AAAA0003 /* UndoToastView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
