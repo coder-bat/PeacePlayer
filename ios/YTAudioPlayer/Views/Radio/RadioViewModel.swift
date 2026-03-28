@@ -41,6 +41,9 @@ class RadioViewModel: ObservableObject {
     @Published var currentEpisodes: [PodcastEpisode] = []
     @Published var isLoadingEpisodes = false
     
+    @Published var errorMessage: String?
+    @Published var isSearching = false
+    
     private var cancellables = Set<AnyCancellable>()
     private var searchCancellable: AnyCancellable?
     
@@ -53,7 +56,7 @@ class RadioViewModel: ObservableObject {
     }
     
     private func setupSearchDebounce() {
-        $searchText
+        searchCancellable = $searchText
             .debounce(for: .milliseconds(500), scheduler: DispatchQueue.main)
             .removeDuplicates()
             .sink { [weak self] query in
@@ -67,7 +70,6 @@ class RadioViewModel: ObservableObject {
                     break
                 }
             }
-            .store(in: &cancellables)
     }
     
     // MARK: - Radio Stations
@@ -78,8 +80,8 @@ class RadioViewModel: ObservableObject {
         APIService.shared.getTopRadioStations(limit: 30)
             .sink(receiveCompletion: { [weak self] completion in
                 self?.isLoadingStations = false
-                if case .failure(let error) = completion {
-                    print("⚠️ [RadioVM] Top stations failed: \(error.localizedDescription)")
+                if case .failure = completion {
+                    self?.setError("Failed to load stations")
                 }
             }, receiveValue: { [weak self] stations in
                 self?.topStations = stations
@@ -93,8 +95,8 @@ class RadioViewModel: ObservableObject {
         APIService.shared.getRadioStationsByGenre(tag: genre, limit: 30)
             .sink(receiveCompletion: { [weak self] completion in
                 self?.isLoadingStations = false
-                if case .failure(let error) = completion {
-                    print("⚠️ [RadioVM] Genre stations failed: \(error.localizedDescription)")
+                if case .failure = completion {
+                    self?.setError("Failed to load genre stations")
                 }
             }, receiveValue: { [weak self] stations in
                 self?.genreStations = stations
@@ -104,11 +106,13 @@ class RadioViewModel: ObservableObject {
     
     func searchStations(query: String) {
         isLoadingStations = true
+        isSearching = true
         APIService.shared.searchRadioStations(query: query, limit: 20)
             .sink(receiveCompletion: { [weak self] completion in
                 self?.isLoadingStations = false
-                if case .failure(let error) = completion {
-                    print("⚠️ [RadioVM] Station search failed: \(error.localizedDescription)")
+                self?.isSearching = false
+                if case .failure = completion {
+                    self?.setError("Search failed")
                 }
             }, receiveValue: { [weak self] stations in
                 self?.stationSearchResults = stations
@@ -132,8 +136,8 @@ class RadioViewModel: ObservableObject {
         APIService.shared.getTopPodcasts(limit: 20)
             .sink(receiveCompletion: { [weak self] completion in
                 self?.isLoadingPodcasts = false
-                if case .failure(let error) = completion {
-                    print("⚠️ [RadioVM] Top podcasts failed: \(error.localizedDescription)")
+                if case .failure = completion {
+                    self?.setError("Failed to load podcasts")
                 }
             }, receiveValue: { [weak self] shows in
                 self?.topPodcasts = shows
@@ -143,11 +147,13 @@ class RadioViewModel: ObservableObject {
     
     func searchPodcasts(query: String) {
         isLoadingPodcasts = true
+        isSearching = true
         APIService.shared.searchPodcasts(query: query, limit: 20)
             .sink(receiveCompletion: { [weak self] completion in
                 self?.isLoadingPodcasts = false
-                if case .failure(let error) = completion {
-                    print("⚠️ [RadioVM] Podcast search failed: \(error.localizedDescription)")
+                self?.isSearching = false
+                if case .failure = completion {
+                    self?.setError("Search failed")
                 }
             }, receiveValue: { [weak self] shows in
                 self?.podcastSearchResults = shows
@@ -161,8 +167,8 @@ class RadioViewModel: ObservableObject {
         APIService.shared.getPodcastEpisodes(feedUrl: show.feedUrl, limit: 50)
             .sink(receiveCompletion: { [weak self] completion in
                 self?.isLoadingEpisodes = false
-                if case .failure(let error) = completion {
-                    print("⚠️ [RadioVM] Episodes failed: \(error.localizedDescription)")
+                if case .failure = completion {
+                    self?.setError("Failed to load episodes")
                 }
             }, receiveValue: { [weak self] episodes in
                 self?.currentEpisodes = episodes
@@ -185,8 +191,8 @@ class RadioViewModel: ObservableObject {
         APIService.shared.getRadio(for: track.videoId)
             .sink(receiveCompletion: { [weak self] completion in
                 self?.isLoadingSongRadio = false
-                if case .failure(let error) = completion {
-                    print("⚠️ [RadioVM] Song radio failed: \(error.localizedDescription)")
+                if case .failure = completion {
+                    self?.setError("Failed to start radio")
                 }
             }, receiveValue: { [weak self] tracks in
                 guard let self = self else { return }
@@ -199,6 +205,22 @@ class RadioViewModel: ObservableObject {
                 self.saveToRecentSongRadios(track)
             })
             .store(in: &cancellables)
+    }
+    
+    // MARK: - Search Control
+    
+    func cancelSearch() {
+        searchCancellable?.cancel()
+        searchCancellable = nil
+        isSearching = false
+        setupSearchDebounce()
+    }
+    
+    private func setError(_ message: String) {
+        errorMessage = message
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
+            if self?.errorMessage == message { self?.errorMessage = nil }
+        }
     }
     
     // MARK: - Persistence
