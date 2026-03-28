@@ -11,6 +11,7 @@ import Combine
 struct TrendingSection: View {
     @State private var tracks: [Track] = []
     @State private var isLoading = false
+    @State private var loadFailed = false
     @State private var showGenrePicker = false
     
     @AppStorage("trendingGenre") private var selectedGenre: String = ""
@@ -77,6 +78,26 @@ struct TrendingSection: View {
                 ProgressView()
                     .frame(maxWidth: .infinity, alignment: .center)
                     .padding()
+                    .transition(.opacity)
+            } else if tracks.isEmpty && loadFailed {
+                VStack(spacing: 12) {
+                    Image(systemName: "wifi.exclamationmark")
+                        .font(.system(size: 28))
+                        .foregroundColor(.cyberDim)
+                    Text("Couldn't load trending")
+                        .font(.system(size: 14, weight: .medium, design: .monospaced))
+                        .foregroundColor(.cyberDim)
+                    Button {
+                        loadTrending()
+                    } label: {
+                        Label("Retry", systemImage: "arrow.clockwise")
+                            .font(.system(size: 13, weight: .bold, design: .monospaced))
+                            .foregroundColor(Theme.cyberCyan)
+                    }
+                    .buttonStyle(.pressable)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 24)
             } else if tracks.isEmpty {
                 // Fallback content
                 VStack(alignment: .leading, spacing: 0) {
@@ -123,7 +144,7 @@ struct TrendingSection: View {
                 }
             }
         }
-        .onAppear {
+        .task {
             loadTrending()
         }
         .onChange(of: selectedGenre) { _ in
@@ -133,22 +154,29 @@ struct TrendingSection: View {
     
     private func loadTrending() {
         isLoading = true
+        loadFailed = false
 
-        // Use charts endpoint for real trending data
         APIService.shared.fetchTrending()
-            .sink(receiveCompletion: { _ in
+            .sink(receiveCompletion: { completion in
                 isLoading = false
+                if case .failure = completion {
+                    loadFailed = true
+                }
             }, receiveValue: { fetchedTracks in
                 tracks = fetchedTracks
             })
-            .store(in: &cancellables)
+            .store(in: &cancellableHolder.cancellables)
     }
     
     private func refreshTrending() {
         loadTrending()
     }
     
-    @State private var cancellables = Set<AnyCancellable>()
+    @StateObject private var cancellableHolder = CancellableHolder()
+}
+
+private class CancellableHolder: ObservableObject {
+    var cancellables = Set<AnyCancellable>()
 }
 
 struct TrendingRow: View {
@@ -175,11 +203,13 @@ struct TrendingRow: View {
                     Text(track.title)
                         .font(.system(size: 16, weight: .medium))
                         .lineLimit(1)
+                        .minimumScaleFactor(0.8)
 
                     Text(track.displayArtist)
                         .font(.system(size: 14))
                         .foregroundColor(.secondary)
                         .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                 }
 
                 Spacer()
@@ -222,16 +252,16 @@ struct TrendingRowPlaceholder: View {
                 .frame(width: 24, alignment: .center)
             
             RoundedRectangle(cornerRadius: 6)
-                .fill(Color.gray.opacity(0.2))
+                .fill(Color.cyberDim.opacity(0.2))
                 .frame(width: 50, height: 50)
             
             VStack(alignment: .leading, spacing: 4) {
                 RoundedRectangle(cornerRadius: 4)
-                    .fill(Color.gray.opacity(0.2))
+                    .fill(Color.cyberDim.opacity(0.2))
                     .frame(width: 150, height: 16)
                 
                 RoundedRectangle(cornerRadius: 4)
-                    .fill(Color.gray.opacity(0.2))
+                    .fill(Color.cyberDim.opacity(0.2))
                     .frame(width: 100, height: 14)
             }
             

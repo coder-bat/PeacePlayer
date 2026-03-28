@@ -39,7 +39,7 @@ struct YourMixesSection: View {
                 .padding(.horizontal)
             }
         }
-        .onAppear {
+        .task {
             generateMixes()
         }
     }
@@ -79,7 +79,6 @@ struct YourMixesSection: View {
 struct MixCard: View {
     let mix: Mix
     var onTap: (() -> Void)?
-    @State private var isPressed = false
     
     var body: some View {
         Button(action: {
@@ -128,20 +127,10 @@ struct MixCard: View {
                     }
                 }
                 .padding()
-                
-                // Pressed overlay
-                if isPressed {
-                    Color.black.opacity(0.2)
-                }
             }
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.pressable)
         .frame(width: 170, height: 210)
         .cornerRadius(12)
-        .scaleEffect(isPressed ? 0.95 : 1)
-        .animation(.easeInOut(duration: 0.1), value: isPressed)
-        .onLongPressGesture(minimumDuration: .infinity, pressing: { pressing in
-            isPressed = pressing
-        }, perform: {})
     }
 }

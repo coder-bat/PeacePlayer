@@ -311,7 +311,10 @@ class PlaylistManager: ObservableObject {
         for track in tracks.prefix(20) {
             group.enter()
             APIService.shared.getStreamUrl(videoId: track.videoId)
-                .sink(receiveCompletion: { _ in
+                .sink(receiveCompletion: { completion in
+                    if case .failure(let error) = completion {
+                        print("⚠️ Stream URL fetch failed: \(error.localizedDescription)")
+                    }
                     group.leave()
                 }, receiveValue: { streamInfo in
                     processingQueue.async(flags: .barrier) {
@@ -359,7 +362,11 @@ class PlaylistManager: ObservableObject {
         
         for track in tracks.prefix(20) {
             APIService.shared.getStreamUrl(videoId: track.videoId)
-                .sink(receiveCompletion: { _ in }, receiveValue: { streamInfo in
+                .sink(receiveCompletion: { completion in
+                    if case .failure(let error) = completion {
+                        print("[PlaylistManager] Stream URL failed for \(track.videoId): \(error)")
+                    }
+                }, receiveValue: { streamInfo in
                     let item = QueueItem(
                         track: track,
                         streamUrl: streamInfo.streamUrl,
@@ -434,7 +441,10 @@ class PlaylistManager: ObservableObject {
         for track in tracks.prefix(20) {
             group.enter()
             APIService.shared.getStreamUrl(videoId: track.videoId)
-                .sink(receiveCompletion: { _ in
+                .sink(receiveCompletion: { completion in
+                    if case .failure(let error) = completion {
+                        print("⚠️ Stream URL fetch failed: \(error.localizedDescription)")
+                    }
                     group.leave()
                 }, receiveValue: { streamInfo in
                     processingQueue.async(flags: .barrier) {
@@ -478,7 +488,11 @@ class PlaylistManager: ObservableObject {
         
         for track in tracks.prefix(20) {
             APIService.shared.getStreamUrl(videoId: track.videoId)
-                .sink(receiveCompletion: { _ in }, receiveValue: { streamInfo in
+                .sink(receiveCompletion: { completion in
+                    if case .failure(let error) = completion {
+                        print("[PlaylistManager] Stream URL failed for \(track.videoId): \(error)")
+                    }
+                }, receiveValue: { streamInfo in
                     let item = QueueItem(
                         track: track,
                         streamUrl: streamInfo.streamUrl,

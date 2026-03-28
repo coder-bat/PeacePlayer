@@ -299,7 +299,7 @@ struct PlaylistDetailView: View {
         .sheet(item: $memoryTrack) { track in
             SongMemorySheet(track: track)
         }
-        .onAppear {
+        .task {
             if currentPlaylist?.isSmart == true {
                 playlistManager.refreshSmartPlaylists()
             }

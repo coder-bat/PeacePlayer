@@ -127,7 +127,7 @@ struct NewReleasesSection: View {
                 }
             }
         }
-        .onAppear {
+        .task {
             loadNewReleases()
         }
         .onChange(of: selectedGenre) { _ in
@@ -145,15 +145,17 @@ struct NewReleasesSection: View {
             }, receiveValue: { fetchedTracks in
                 tracks = fetchedTracks
             })
-            .store(in: &cancellables)
+            .store(in: &cancellableHolder.cancellables)
     }
     
-    @State private var cancellables = Set<AnyCancellable>()
+    private class CancellableHolder: ObservableObject {
+        var cancellables = Set<AnyCancellable>()
+    }
+    @StateObject private var cancellableHolder = CancellableHolder()
 }
 
 struct NewReleaseCard: View {
     let track: Track
-    @State private var isPressed = false
     
     var body: some View {
         Button(action: {
@@ -171,17 +173,9 @@ struct NewReleaseCard: View {
                         .foregroundColor(.white)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
-                        .background(Color.red)
+                        .background(Color.cyberMagenta)
                         .cornerRadius(4)
                         .padding(8)
-                    
-                    // Pressed overlay
-                    if isPressed {
-                        Color.black.opacity(0.3)
-                        Image(systemName: "play.fill")
-                            .font(.system(size: 32))
-                            .foregroundColor(.white)
-                    }
                 }
                 .cornerRadius(8)
                 
@@ -190,26 +184,28 @@ struct NewReleaseCard: View {
                     Text(track.title)
                         .font(.system(size: 14, weight: .medium))
                         .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                     
                     Text(track.displayArtist)
                         .font(.system(size: 12))
                         .foregroundColor(.secondary)
                         .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                 }
                 .frame(width: 150, alignment: .leading)
             }
         }
-        .buttonStyle(.plain)
-        .scaleEffect(isPressed ? 0.95 : 1)
-        .animation(.easeInOut(duration: 0.1), value: isPressed)
-        .onLongPressGesture(minimumDuration: .infinity, pressing: { pressing in
-            isPressed = pressing
-        }, perform: {})
+        .buttonStyle(.pressable)
     }
     
     private func playTrack() {
+        HapticManager.medium()
         APIService.shared.getStreamUrl(videoId: track.videoId)
-            .sink(receiveCompletion: { _ in }, receiveValue: { streamInfo in
+            .sink(receiveCompletion: { completion in
+                if case .failure(let error) = completion {
+                    ErrorHandler.shared.handleAPIError(error)
+                }
+            }, receiveValue: { streamInfo in
                 let item = QueueItem(
                     track: track,
                     streamUrl: streamInfo.streamUrl,
@@ -217,10 +213,13 @@ struct NewReleaseCard: View {
                 )
                 PlayerState.shared.play(item: item)
             })
-            .store(in: &cancellables)
+            .store(in: &cancellableHolder.cancellables)
     }
     
-    @State private var cancellables = Set<AnyCancellable>()
+    private class CancellableHolder: ObservableObject {
+        var cancellables = Set<AnyCancellable>()
+    }
+    @StateObject private var cancellableHolder = CancellableHolder()
 }
 
 struct NewReleasesListView: View {

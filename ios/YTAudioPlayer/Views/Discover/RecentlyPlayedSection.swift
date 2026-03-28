@@ -57,7 +57,7 @@ struct RecentlyPlayedSection: View {
                 }
             }
         }
-        .onAppear {
+        .task {
             tracks = DataManager.shared.recentlyPlayed.map { $0.toTrack }
         }
     }
@@ -65,7 +65,6 @@ struct RecentlyPlayedSection: View {
 
 struct DiscoverRecentlyPlayedCard: View {
     let track: Track
-    @State private var isPressed = false
     @State private var cancellables = Set<AnyCancellable>()
 
     var body: some View {
@@ -77,14 +76,6 @@ struct DiscoverRecentlyPlayedCard: View {
                 ZStack {
                     ArtworkThumbnail(url: track.artworkURL)
                         .frame(width: 140, height: 140)
-
-                    // Play overlay
-                    if isPressed {
-                        Color.black.opacity(0.3)
-                        Image(systemName: "play.fill")
-                            .font(.system(size: 32))
-                            .foregroundColor(.white)
-                    }
                 }
                 .cornerRadius(8)
 
@@ -93,21 +84,18 @@ struct DiscoverRecentlyPlayedCard: View {
                     Text(track.title)
                         .font(.system(size: 14, weight: .medium))
                         .lineLimit(1)
+                        .minimumScaleFactor(0.8)
 
                     Text(track.displayArtist)
                         .font(.system(size: 12))
                         .foregroundColor(.secondary)
                         .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                 }
                 .frame(width: 140, alignment: .leading)
             }
         }
-        .buttonStyle(.plain)
-        .scaleEffect(isPressed ? 0.95 : 1)
-        .animation(.easeInOut(duration: 0.1), value: isPressed)
-        .onLongPressGesture(minimumDuration: .infinity, pressing: { pressing in
-            isPressed = pressing
-        }, perform: {})
+        .buttonStyle(.pressable)
     }
 
     private func playTrack() {
@@ -178,7 +166,11 @@ struct DiscoverRecentlyPlayedCard: View {
 
     private func playSingleTrack(_ track: Track) {
         APIService.shared.getStreamUrl(videoId: track.videoId)
-            .sink(receiveCompletion: { _ in }, receiveValue: { streamInfo in
+            .sink(receiveCompletion: { completion in
+                if case .failure(let error) = completion {
+                    ErrorHandler.shared.handleAPIError(error)
+                }
+            }, receiveValue: { streamInfo in
                 let item = QueueItem(
                     track: track,
                     streamUrl: streamInfo.streamUrl,
@@ -201,7 +193,7 @@ struct RecentlyPlayedListView: View {
         }
         .listStyle(.plain)
         .navigationTitle("Recently Played")
-        .onAppear {
+        .task {
             tracks = DataManager.shared.recentlyPlayed.map { $0.toTrack }
         }
     }
@@ -235,11 +227,13 @@ struct SimpleTrackRow: View {
                     Text(track.title)
                         .font(.system(size: 16, weight: .medium))
                         .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                     
                     Text(track.displayArtist)
                         .font(.system(size: 14))
                         .foregroundColor(.secondary)
                         .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                 }
                 
                 Spacer()
@@ -264,7 +258,11 @@ struct SimpleTrackRow: View {
     
     private func playTrack() {
         APIService.shared.getStreamUrl(videoId: track.videoId)
-            .sink(receiveCompletion: { _ in }, receiveValue: { streamInfo in
+            .sink(receiveCompletion: { completion in
+                if case .failure(let error) = completion {
+                    ErrorHandler.shared.handleAPIError(error)
+                }
+            }, receiveValue: { streamInfo in
                 let item = QueueItem(
                     track: track,
                     streamUrl: streamInfo.streamUrl,

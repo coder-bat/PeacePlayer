@@ -5,7 +5,6 @@
 //  Central gesture recognition and handling
 //
 
-import SwiftUI
 import UIKit
 
 /// Central engine for handling all custom gestures
