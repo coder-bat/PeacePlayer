@@ -59,7 +59,7 @@ struct SkeletonRectangle: View {
     
     var body: some View {
         RoundedRectangle(cornerRadius: cornerRadius)
-            .fill(Color.gray.opacity(0.2))
+            .fill(Theme.tertiaryText.opacity(0.2))
             .frame(height: height)
             .shimmer()
     }
@@ -74,7 +74,7 @@ struct SkeletonCircle: View {
     
     var body: some View {
         Circle()
-            .fill(Color.gray.opacity(0.2))
+            .fill(Theme.tertiaryText.opacity(0.2))
             .frame(width: size, height: size)
             .shimmer()
     }
@@ -85,7 +85,7 @@ struct SkeletonTrackRow: View {
         HStack(spacing: 12) {
             // Artwork skeleton
             RoundedRectangle(cornerRadius: 8)
-                .fill(Color.gray.opacity(0.2))
+                .fill(Theme.tertiaryText.opacity(0.2))
                 .frame(width: 60, height: 60)
                 .shimmer()
             

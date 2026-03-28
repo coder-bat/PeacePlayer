@@ -351,11 +351,23 @@ struct FullPlayer: View {
     
     // MARK: - Top Bar
     private var topBar: some View {
-        HStack {
-            // Drag handle — visual only, actual drag handled by simultaneousGesture on ZStack
+        ZStack {
+            // Centered capsule handle (visual drag indicator)
             Capsule()
                 .fill(Color.white.opacity(0.3))
                 .frame(width: 36, height: 5)
+
+            // Left-aligned dismiss button
+            HStack {
+                Button(action: dismiss) {
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.7))
+                        .padding(12)
+                }
+                .accessibilityLabel("Dismiss player")
+                Spacer()
+            }
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 12)
@@ -758,7 +770,7 @@ struct FullPlayer: View {
                         .foregroundColor(.white)
                     Text("Capsule")
                         .font(.caption)
-                        .foregroundColor(.gray)
+                        .foregroundColor(Theme.tertiaryText)
                 }
                 .frame(maxWidth: .infinity)
                 .frame(height: 60)
@@ -818,7 +830,7 @@ struct VolumeSlider: View {
         HStack(spacing: 12) {
             Image(systemName: "speaker.fill")
                 .font(.system(size: 14))
-                .foregroundColor(.gray)
+                .foregroundColor(Theme.tertiaryText)
                 .accessibilityHidden(true)
 
             GeometryReader { geometry in
@@ -861,7 +873,7 @@ struct VolumeSlider: View {
 
             Image(systemName: "speaker.wave.3.fill")
                 .font(.system(size: 14))
-                .foregroundColor(.gray)
+                .foregroundColor(Theme.tertiaryText)
                 .accessibilityHidden(true)
         }
         .padding(.horizontal, 8)
@@ -914,7 +926,7 @@ struct PlayerControlButton: View {
         Button(action: action) {
             Image(systemName: icon)
                 .font(.system(size: size, weight: isActive ? .semibold : .regular))
-                .foregroundColor(isActive ? .accentColor : (isEnabled ? .white : .gray))
+                .foregroundColor(isActive ? .accentColor : (isEnabled ? .white : Theme.tertiaryText))
                 .frame(width: 44, height: 44)
         }
         .accessibilityLabel(label)
@@ -938,7 +950,7 @@ struct MoreActionButton: View {
                 
                 Text(title)
                     .font(.caption)
-                    .foregroundColor(.gray)
+                    .foregroundColor(Theme.tertiaryText)
             }
             .frame(maxWidth: .infinity)
             .frame(height: 60)
@@ -1012,7 +1024,7 @@ struct AirPlayButton: View {
                 
                 Text("AirPlay")
                     .font(.caption)
-                    .foregroundColor(.gray)
+                    .foregroundColor(Theme.tertiaryText)
             }
             
             // Invisible but tappable route picker overlay
@@ -1308,7 +1320,7 @@ struct ShareSheet: View {
                 } else {
                     // Placeholder
                     RoundedRectangle(cornerRadius: 12)
-                        .fill(Color.gray.opacity(0.2))
+                        .fill(Theme.tertiaryText.opacity(0.2))
                         .frame(height: 300)
                         .overlay(
                             Text("Tap Generate to create share card")

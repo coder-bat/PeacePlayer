@@ -205,10 +205,10 @@ struct ArtworkView: View {
         ZStack {
             // Placeholder
             RoundedRectangle(cornerRadius: 8)
-                .fill(Color.gray.opacity(0.2))
+                .fill(Theme.tertiaryText.opacity(0.2))
                 .overlay(
                     Image(systemName: "music.note")
-                        .foregroundColor(.gray)
+                        .foregroundColor(Theme.tertiaryText)
                 )
             
             // Loaded image with fade using cache

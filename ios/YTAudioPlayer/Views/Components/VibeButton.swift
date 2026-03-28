@@ -11,9 +11,10 @@ import Combine
 struct VibeButton: View {
     @StateObject private var playerState = PlayerState.shared
     @State private var isExpanded = false
+    @State private var isLoading = false
     @State private var currentVibe: VibeSuggestion?
     @State private var showVibePicker = false
-    @State private var cancellables = Set<AnyCancellable>()
+    @StateObject private var cancellableHolder = CancellableHolder()
     
     var body: some View {
         ZStack {
@@ -62,12 +63,18 @@ struct VibeButton: View {
                         .shadow(color: (currentVibe?.color ?? .accentColor).opacity(0.4), radius: 10, x: 0, y: 4)
                     
                     VStack(spacing: 2) {
-                        Image(systemName: isExpanded ? "xmark" : (currentVibe?.icon ?? "sparkles"))
-                            .font(.system(size: isExpanded ? 20 : 24, weight: .semibold))
-                        
-                        if !isExpanded {
-                            Text("VIBE")
-                                .font(.system(size: 8, weight: .bold))
+                        if isLoading {
+                            ProgressView()
+                                .tint(.white)
+                                .scaleEffect(0.8)
+                        } else {
+                            Image(systemName: isExpanded ? "xmark" : (currentVibe?.icon ?? "sparkles"))
+                                .font(.system(size: isExpanded ? 20 : 24, weight: .semibold))
+                            
+                            if !isExpanded {
+                                Text("VIBE")
+                                    .font(.system(size: 8, weight: .bold))
+                            }
                         }
                     }
                     .foregroundColor(.white)
@@ -89,20 +96,39 @@ struct VibeButton: View {
     }
     
     private func playVibe(_ vibe: VibeSuggestion) {
-        // Search and play tracks matching the vibe
+        guard !isLoading else { return }
+        isLoading = true
+        
+        // Cancel any in-flight requests
+        cancellableHolder.cancellables.removeAll()
+        
         let query = vibe.searchQuery
         APIService.shared.search(query: query, limit: 10)
-            .sink(receiveCompletion: { _ in }, receiveValue: { tracks in
-                guard let first = tracks.first else { return }
+            .sink(receiveCompletion: { completion in
+                if case .failure(let error) = completion {
+                    isLoading = false
+                    ErrorHandler.shared.handleAPIError(error)
+                }
+            }, receiveValue: { tracks in
+                guard let first = tracks.first else {
+                    isLoading = false
+                    return
+                }
                 
                 APIService.shared.getStreamUrl(videoId: first.videoId)
-                    .sink(receiveCompletion: { _ in }, receiveValue: { streamInfo in
+                    .sink(receiveCompletion: { completion in
+                        isLoading = false
+                        if case .failure(let error) = completion {
+                            ErrorHandler.shared.handleAPIError(error)
+                        }
+                    }, receiveValue: { streamInfo in
                         let item = QueueItem(
                             track: first,
                             streamUrl: streamInfo.streamUrl,
                             source: .stream
                         )
                         playerState.play(item: item)
+                        HapticManager.success()
                         
                         // Add rest to queue
                         for track in tracks.dropFirst() {
@@ -115,12 +141,12 @@ struct VibeButton: View {
                                     )
                                     playerState.addToQueue(queueItem)
                                 })
-                                .store(in: &cancellables)
+                                .store(in: &cancellableHolder.cancellables)
                         }
                     })
-                    .store(in: &cancellables)
+                    .store(in: &cancellableHolder.cancellables)
             })
-            .store(in: &cancellables)
+            .store(in: &cancellableHolder.cancellables)
     }
     
     private func getContextualVibe() -> VibeSuggestion {
@@ -191,7 +217,7 @@ struct VibeButton: View {
                 icon: "cloud.rain.fill",
                 title: "Rainy Day",
                 subtitle: "Cozy & calm",
-                color: .gray,
+                color: Theme.tertiaryText,
                 searchQuery: "rainy day lo-fi acoustic"
             )
         ]
@@ -270,7 +296,7 @@ struct VibePickerSheet: View {
         VibeSuggestion(icon: "moon.stars.fill", title: "Evening", subtitle: "Wind down", color: .indigo, searchQuery: "chill"),
         VibeSuggestion(icon: "moon.fill", title: "Sleep", subtitle: "Rest easy", color: .purple, searchQuery: "sleep"),
         VibeSuggestion(icon: "heart.fill", title: "Feel Good", subtitle: "Happy vibes", color: .pink, searchQuery: "happy"),
-        VibeSuggestion(icon: "cloud.rain.fill", title: "Rainy Day", subtitle: "Cozy & calm", color: .gray, searchQuery: "lofi"),
+        VibeSuggestion(icon: "cloud.rain.fill", title: "Rainy Day", subtitle: "Cozy & calm", color: Theme.tertiaryText, searchQuery: "lofi"),
         VibeSuggestion(icon: "party.popper.fill", title: "Party", subtitle: "Let's celebrate", color: .yellow, searchQuery: "party")
     ]
     
@@ -355,4 +381,9 @@ struct VibeButton_Previews: PreviewProvider {
             }
         }
     }
+}
+
+
+private class CancellableHolder: ObservableObject {
+    var cancellables = Set<AnyCancellable>()
 }

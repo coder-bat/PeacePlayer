@@ -98,7 +98,7 @@ enum AppError: Error, Equatable {
         case .network, .offline, .server, .unknown:
             return .orange
         case .notFound, .parsing:
-            return .gray
+            return Theme.tertiaryText
         case .downloadFailed, .playbackFailed:
             return .red
         case .authRequired:

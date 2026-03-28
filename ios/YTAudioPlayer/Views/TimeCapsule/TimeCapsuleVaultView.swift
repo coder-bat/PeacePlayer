@@ -31,14 +31,14 @@ struct TimeCapsuleVaultView: View {
                             }
 
                             if !capsuleManager.pendingCapsules.isEmpty {
-                                sectionHeader("Sealed ⏳", color: .gray)
+                                sectionHeader("Sealed ⏳", color: Theme.tertiaryText)
                                 ForEach(capsuleManager.pendingCapsules) { capsule in
                                     CapsuleCard(capsule: capsule, style: .sealed)
                                 }
                             }
 
                             if !capsuleManager.openedCapsules.isEmpty {
-                                sectionHeader("Opened", color: .gray.opacity(0.6))
+                                sectionHeader("Opened", color: Theme.tertiaryText.opacity(0.6))
                                 ForEach(capsuleManager.openedCapsules) { capsule in
                                     CapsuleCard(capsule: capsule, style: .opened)
                                         .onTapGesture { revealCapsule = capsule }

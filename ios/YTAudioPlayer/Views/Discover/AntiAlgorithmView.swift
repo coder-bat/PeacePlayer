@@ -202,7 +202,7 @@ struct AntiAlgorithmView: View {
                 HStack(spacing: 24) {
                     StatPill(label: "Queued", value: "\(session.tracksQueued)", color: .orange)
                     StatPill(label: "Played", value: "\(session.tracksCompleted)", color: .green)
-                    StatPill(label: "Skipped", value: "\(session.tracksSkipped)", color: .gray)
+                    StatPill(label: "Skipped", value: "\(session.tracksSkipped)", color: Theme.tertiaryText)
                     StatPill(label: "Liked", value: "\(session.tracksLiked)", color: .cyan)
                 }
             }

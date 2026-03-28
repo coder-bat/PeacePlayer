@@ -45,7 +45,7 @@ struct TimeCapsuleSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
-                        .foregroundColor(.gray)
+                        .foregroundColor(Theme.tertiaryText)
                 }
             }
         }
@@ -59,7 +59,7 @@ struct TimeCapsuleSheet: View {
             CachedAsyncImage(url: track.artworkURL) { image in
                 image.resizable().aspectRatio(contentMode: .fill)
             } placeholder: {
-                Color.gray.opacity(0.3)
+                Theme.tertiaryText.opacity(0.3)
             }
             .frame(width: 60, height: 60)
             .cornerRadius(10)
@@ -72,7 +72,7 @@ struct TimeCapsuleSheet: View {
                     .minimumScaleFactor(0.8)
                 Text(track.displayArtist)
                     .font(.subheadline)
-                    .foregroundColor(.gray)
+                    .foregroundColor(Theme.tertiaryText)
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
             }
@@ -99,7 +99,7 @@ struct TimeCapsuleSheet: View {
                     Group {
                         if noteText.isEmpty {
                             Text("Write something your future self will read...")
-                                .foregroundColor(.gray.opacity(0.5))
+                                .foregroundColor(Theme.tertiaryText.opacity(0.5))
                                 .padding(16)
                         }
                     },
@@ -148,7 +148,7 @@ struct TimeCapsuleSheet: View {
             let days = Calendar.current.dateComponents([.day], from: Date(), to: unlockDate).day ?? 0
             Text("This capsule will be sealed for \(days) days")
                 .font(.caption2)
-                .foregroundColor(.gray)
+                .foregroundColor(Theme.tertiaryText)
         }
     }
 
@@ -166,7 +166,7 @@ struct TimeCapsuleSheet: View {
             .padding(.vertical, 16)
             .background(
                 noteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                    ? Color.gray : Color.cyan
+                    ? Theme.tertiaryText : Color.cyan
             )
             .cornerRadius(14)
         }
@@ -191,11 +191,11 @@ struct TimeCapsuleSheet: View {
             let days = Calendar.current.dateComponents([.day], from: Date(), to: unlockDate).day ?? 0
             Text("See you in \(days) days")
                 .font(.subheadline)
-                .foregroundColor(.gray)
+                .foregroundColor(Theme.tertiaryText)
 
             Text("Long-press the Capsule button to view your vault")
                 .font(.caption)
-                .foregroundColor(.gray.opacity(0.6))
+                .foregroundColor(Theme.tertiaryText.opacity(0.6))
 
             Spacer()
 

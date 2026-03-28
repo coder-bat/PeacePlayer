@@ -61,7 +61,7 @@ struct LyricsView: View {
                 .tint(.white)
             
             Text("Loading lyrics...")
-                .foregroundColor(.gray)
+                .foregroundColor(Theme.tertiaryText)
         }
     }
     
@@ -69,7 +69,7 @@ struct LyricsView: View {
         VStack(spacing: 16) {
             Image(systemName: "text.quote")
                 .font(.system(size: 60))
-                .foregroundColor(.gray)
+                .foregroundColor(Theme.tertiaryText)
             
             Text("No Lyrics Available")
                 .font(.title3)
@@ -120,7 +120,7 @@ struct LyricsView: View {
                         
                         Text(playerState.currentItem?.track.displayArtist ?? "")
                             .font(.headline)
-                            .foregroundColor(.gray)
+                            .foregroundColor(Theme.tertiaryText)
                     }
                     .padding(.top, 20)
                     .padding(.bottom, 40)
@@ -129,7 +129,7 @@ struct LyricsView: View {
                     ForEach(Array(lyrics.enumerated()), id: \.offset) { index, line in
                         Text(line.text)
                             .font(.system(size: isCurrentLine(index) ? 24 : 20, weight: isCurrentLine(index) ? .bold : .regular))
-                            .foregroundColor(isCurrentLine(index) ? .white : .gray)
+                            .foregroundColor(isCurrentLine(index) ? .white : Theme.tertiaryText)
                             .multilineTextAlignment(.center)
                             .padding(.horizontal, 24)
                             .id(index)
