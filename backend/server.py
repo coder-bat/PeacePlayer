@@ -4,7 +4,7 @@ HTTP interface for iOS client to access extraction capabilities.
 Works with or without authentication.
 """
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, Response, Query
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, Response, Query, Path as APIPath
 from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field, ConfigDict
 from pydantic.alias_generators import to_camel
 from typing import List, Optional
 import os
+import re
 import asyncio
 import logging
 import json
@@ -1262,6 +1263,316 @@ async def get_top_podcasts(genre: str = "", limit: int = 20, request: Request = 
     except Exception as e:
         logger.error(f"Top podcasts failed: {e}")
         raise HTTPException(status_code=502, detail=f"Top podcasts failed: {str(e)}")
+
+
+# --- Audiobooks (LibriVox + Archive.org) ---
+
+def _format_audiobook(book: dict) -> dict:
+    """Normalize a LibriVox catalog JSON book to camelCase response."""
+    authors = book.get("authors", [])
+    author_names = [
+        f"{a.get('first_name', '')} {a.get('last_name', '')}".strip()
+        for a in authors
+    ]
+
+    book_id = book.get("id", "")
+    cover_url = ""
+    # Try to derive an Archive.org cover from url_zip_file
+    zip_url = book.get("url_zip_file", "")
+    if zip_url:
+        # Pattern: https://archive.org/compress/IDENTIFIER/...
+        parts = zip_url.replace("https://", "").split("/")
+        if len(parts) >= 3:
+            identifier = parts[2]
+            cover_url = f"https://archive.org/services/img/{identifier}"
+
+    description = book.get("description", "")
+    if description:
+        description = re.sub(r"<[^>]+>", "", description)
+
+    return {
+        "id": book_id,
+        "title": book.get("title", "Unknown"),
+        "description": description,
+        "authors": author_names,
+        "language": book.get("language", "English"),
+        "totalTime": book.get("totaltime", "0:00:00"),
+        "totalTimeSecs": int(book.get("totaltimesecs", 0) or 0),
+        "numSections": int(book.get("num_sections", 0) or 0),
+        "rssUrl": book.get("url_rss", ""),
+        "coverUrl": cover_url,
+        "urlLibrivox": book.get("url_librivox", ""),
+    }
+
+
+@app.get("/audiobooks/top")
+@limiter.limit("20/minute")
+async def get_top_audiobooks(
+    limit: int = 20,
+    offset: int = 0,
+    language: str = "English",
+    request: Request = None,
+):
+    """Browse top audiobooks from the LibriVox catalog."""
+    try:
+        params = {"format": "json", "limit": limit, "offset": offset}
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(
+                "https://librivox.org/api/feed/audiobooks",
+                params=params,
+                headers={"User-Agent": "PeacePlayer/1.0"},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+        books = data.get("books", [])
+        if language:
+            books = [
+                b for b in books
+                if b.get("language", "").lower() == language.lower()
+            ]
+        return [_format_audiobook(b) for b in books]
+    except httpx.HTTPStatusError as e:
+        logger.error(f"LibriVox top audiobooks HTTP error: {e}")
+        raise HTTPException(
+            status_code=e.response.status_code,
+            detail="LibriVox upstream error",
+        )
+    except Exception as e:
+        logger.error(f"Top audiobooks failed: {e}")
+        raise HTTPException(
+            status_code=502, detail=f"Top audiobooks failed: {str(e)}"
+        )
+
+
+@app.get("/audiobooks/search")
+@limiter.limit("20/minute")
+async def search_audiobooks(
+    query: str = Query(..., min_length=1, max_length=200),
+    limit: int = Query(20, ge=1, le=50),
+    request: Request = None,
+):
+    """Search audiobooks via Archive.org's LibriVox collection."""
+    try:
+        params = {
+            "q": f"collection:librivoxaudio AND title:{query}",
+            "fl[]": ["identifier", "title", "creator", "description", "date"],
+            "output": "json",
+            "rows": limit,
+        }
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(
+                "https://archive.org/advancedsearch.php",
+                params=params,
+                headers={"User-Agent": "PeacePlayer/1.0"},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+        docs = data.get("response", {}).get("docs", [])
+        results = []
+        for doc in docs:
+            identifier = doc.get("identifier", "")
+
+            raw_desc = doc.get("description", "")
+            if isinstance(raw_desc, list):
+                raw_desc = raw_desc[0] if raw_desc else ""
+            description = re.sub(r"<[^>]+>", "", str(raw_desc))
+
+            creators = doc.get("creator", ["Unknown"])
+            if isinstance(creators, str):
+                creators = [creators]
+
+            results.append({
+                "id": identifier,
+                "title": doc.get("title", "Unknown"),
+                "description": description,
+                "authors": creators,
+                "language": "English",
+                "totalTime": "",
+                "totalTimeSecs": 0,
+                "numSections": 0,
+                "rssUrl": "",
+                "coverUrl": f"https://archive.org/services/img/{identifier}" if identifier else "",
+                "urlLibrivox": "",
+            })
+        return results
+    except httpx.HTTPStatusError as e:
+        logger.error(f"Archive.org audiobook search HTTP error: {e}")
+        raise HTTPException(
+            status_code=e.response.status_code,
+            detail="Archive.org upstream error",
+        )
+    except Exception as e:
+        logger.error(f"Audiobook search failed: {e}")
+        raise HTTPException(
+            status_code=502, detail=f"Audiobook search failed: {str(e)}"
+        )
+
+
+@app.get("/audiobooks/genre/{genre}")
+@limiter.limit("20/minute")
+async def get_audiobooks_by_genre(
+    genre: str = APIPath(..., min_length=1, max_length=100),
+    limit: int = Query(20, ge=1, le=50),
+    request: Request = None,
+):
+    """Browse audiobooks by genre from the LibriVox catalog."""
+    try:
+        params = {"format": "json", "genre": genre, "limit": limit}
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(
+                "https://librivox.org/api/feed/audiobooks",
+                params=params,
+                headers={"User-Agent": "PeacePlayer/1.0"},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+        books = data.get("books", [])
+        return [_format_audiobook(b) for b in books]
+    except httpx.HTTPStatusError as e:
+        logger.error(f"LibriVox genre audiobooks HTTP error: {e}")
+        raise HTTPException(
+            status_code=e.response.status_code,
+            detail="LibriVox upstream error",
+        )
+    except Exception as e:
+        logger.error(f"Genre audiobooks failed: {e}")
+        raise HTTPException(
+            status_code=502, detail=f"Genre audiobooks failed: {str(e)}"
+        )
+
+
+@app.get("/audiobooks/{book_id}/chapters")
+@limiter.limit("20/minute")
+async def get_audiobook_chapters(
+    book_id: str,
+    limit: int = Query(200, ge=1, le=500),
+    rssUrl: str = None,
+    request: Request = None,
+):
+    """Fetch chapters for an audiobook from its LibriVox RSS feed or Archive.org metadata."""
+    try:
+        # SSRF protection: validate rssUrl domain if provided
+        if rssUrl:
+            from urllib.parse import urlparse
+            parsed = urlparse(rssUrl)
+            allowed_domains = {"librivox.org", "www.librivox.org", "archive.org", "www.archive.org"}
+            if parsed.netloc not in allowed_domains:
+                raise HTTPException(status_code=400, detail="Invalid RSS URL domain")
+            feed_url = rssUrl
+        else:
+            feed_url = None
+
+        # Archive.org fallback for non-numeric book IDs (e.g. "count_monte_cristo_0711_librivox")
+        if not book_id.isdigit() and not rssUrl:
+            try:
+                async with httpx.AsyncClient(timeout=20) as client:
+                    meta_resp = await client.get(f"https://archive.org/metadata/{book_id}/files")
+                    meta_resp.raise_for_status()
+                    files = meta_resp.json().get("result", [])
+
+                    audio_files = [
+                        f for f in files
+                        if f.get("format") in ("VBR MP3", "128Kbps MP3", "64Kbps MP3")
+                        or f.get("name", "").endswith(".mp3")
+                    ]
+                    audio_files.sort(key=lambda f: f.get("name", ""))
+
+                    chapters = []
+                    for i, af in enumerate(audio_files):
+                        filename = af.get("name", "")
+                        title = af.get("title", filename.replace(".mp3", "").replace("_", " "))
+                        duration_str = af.get("length", "0")
+                        try:
+                            duration = int(float(duration_str))
+                        except (ValueError, TypeError):
+                            duration = 0
+
+                        chapters.append({
+                            "guid": f"{book_id}_{i}",
+                            "title": title,
+                            "chapterNumber": i + 1,
+                            "audioUrl": f"https://archive.org/download/{book_id}/{filename}",
+                            "durationSeconds": duration,
+                        })
+
+                    return {"chapters": chapters, "coverUrl": f"https://archive.org/services/img/{book_id}"}
+            except Exception as e:
+                logger.warning(f"Archive.org metadata fetch failed for {book_id}, falling back to RSS: {e}")
+                feed_url = f"https://librivox.org/rss/{book_id}"
+
+        if feed_url is None:
+            feed_url = f"https://librivox.org/rss/{book_id}"
+
+        async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+            resp = await client.get(
+                feed_url, headers={"User-Agent": "PeacePlayer/1.0"}
+            )
+            resp.raise_for_status()
+
+        root = ET.fromstring(resp.text)
+        channel = root.find("channel")
+        if channel is None:
+            raise HTTPException(status_code=400, detail="Invalid RSS feed")
+
+        itunes_ns = "{http://www.itunes.com/dtds/podcast-1.0.dtd}"
+
+        cover_url = ""
+        itunes_image = channel.find(f"{itunes_ns}image")
+        if itunes_image is not None:
+            cover_url = itunes_image.get("href", "")
+
+        chapters = []
+        items = channel.findall("item")
+        for item in items[:limit]:
+            enclosure = item.find("enclosure")
+            audio_url = enclosure.get("url", "") if enclosure is not None else ""
+            if not audio_url:
+                continue
+
+            duration_el = item.find(f"{itunes_ns}duration")
+            duration_secs = 0
+            if duration_el is not None and duration_el.text:
+                duration_secs = _parse_duration(duration_el.text)
+
+            episode_el = item.find(f"{itunes_ns}episode")
+            chapter_number = 0
+            if episode_el is not None and episode_el.text:
+                try:
+                    chapter_number = int(episode_el.text)
+                except ValueError:
+                    pass
+
+            title_el = item.find("title")
+            guid_el = item.find("guid")
+
+            chapters.append({
+                "guid": guid_el.text if guid_el is not None and guid_el.text else audio_url,
+                "title": title_el.text if title_el is not None and title_el.text else "Untitled",
+                "chapterNumber": chapter_number,
+                "audioUrl": audio_url,
+                "durationSeconds": duration_secs,
+            })
+
+        return {"coverUrl": cover_url, "chapters": chapters}
+    except HTTPException:
+        raise
+    except ET.ParseError as e:
+        logger.error(f"Audiobook RSS parse error for {book_id}: {e}")
+        raise HTTPException(status_code=400, detail="Failed to parse audiobook RSS feed")
+    except httpx.HTTPStatusError as e:
+        logger.error(f"Audiobook chapters HTTP error: {e}")
+        raise HTTPException(
+            status_code=e.response.status_code,
+            detail="Audiobook feed upstream error",
+        )
+    except Exception as e:
+        logger.error(f"Audiobook chapters failed: {e}")
+        raise HTTPException(
+            status_code=502, detail=f"Audiobook chapters failed: {str(e)}"
+        )
 
 
 # --- Health check ---

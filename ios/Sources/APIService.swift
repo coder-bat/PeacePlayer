@@ -566,6 +566,127 @@ class APIService {
             .eraseToAnyPublisher()
     }
     
+    // MARK: - Audiobooks
+    
+    func searchAudiobooks(query: String, limit: Int = 20) -> AnyPublisher<[Audiobook], APIError> {
+        guard var components = URLComponents(string: "\(baseURL)/audiobooks/search") else {
+            return Fail(error: APIError.invalidURL).eraseToAnyPublisher()
+        }
+        components.queryItems = [
+            URLQueryItem(name: "query", value: query),
+            URLQueryItem(name: "limit", value: "\(limit)")
+        ]
+        guard let url = components.url else {
+            return Fail(error: APIError.invalidURL).eraseToAnyPublisher()
+        }
+        
+        return session.dataTaskPublisher(for: url)
+            .mapError { APIError.networkError($0) }
+            .flatMap { data, response -> AnyPublisher<Data, APIError> in
+                guard let httpResponse = response as? HTTPURLResponse else {
+                    return Fail(error: APIError.invalidResponse).eraseToAnyPublisher()
+                }
+                if httpResponse.statusCode != 200 {
+                    return Fail(error: APIError.httpError(statusCode: httpResponse.statusCode, message: "")).eraseToAnyPublisher()
+                }
+                return Just(data).setFailureType(to: APIError.self).eraseToAnyPublisher()
+            }
+            .decode(type: [Audiobook].self, decoder: JSONDecoder())
+            .mapError { APIError.decodingError($0) }
+            .receive(on: DispatchQueue.main)
+            .eraseToAnyPublisher()
+    }
+    
+    func getTopAudiobooks(limit: Int = 20, offset: Int = 0) -> AnyPublisher<[Audiobook], APIError> {
+        guard var components = URLComponents(string: "\(baseURL)/audiobooks/top") else {
+            return Fail(error: APIError.invalidURL).eraseToAnyPublisher()
+        }
+        components.queryItems = [
+            URLQueryItem(name: "limit", value: "\(limit)"),
+            URLQueryItem(name: "offset", value: "\(offset)")
+        ]
+        guard let url = components.url else {
+            return Fail(error: APIError.invalidURL).eraseToAnyPublisher()
+        }
+        
+        return session.dataTaskPublisher(for: url)
+            .mapError { APIError.networkError($0) }
+            .flatMap { data, response -> AnyPublisher<Data, APIError> in
+                guard let httpResponse = response as? HTTPURLResponse else {
+                    return Fail(error: APIError.invalidResponse).eraseToAnyPublisher()
+                }
+                if httpResponse.statusCode != 200 {
+                    return Fail(error: APIError.httpError(statusCode: httpResponse.statusCode, message: "")).eraseToAnyPublisher()
+                }
+                return Just(data).setFailureType(to: APIError.self).eraseToAnyPublisher()
+            }
+            .decode(type: [Audiobook].self, decoder: JSONDecoder())
+            .mapError { APIError.decodingError($0) }
+            .receive(on: DispatchQueue.main)
+            .eraseToAnyPublisher()
+    }
+    
+    func getAudiobooksByGenre(genre: String, limit: Int = 20) -> AnyPublisher<[Audiobook], APIError> {
+        let encodedGenre = genre.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? genre
+        guard var components = URLComponents(string: "\(baseURL)/audiobooks/genre/\(encodedGenre)") else {
+            return Fail(error: APIError.invalidURL).eraseToAnyPublisher()
+        }
+        components.queryItems = [
+            URLQueryItem(name: "limit", value: "\(limit)")
+        ]
+        guard let url = components.url else {
+            return Fail(error: APIError.invalidURL).eraseToAnyPublisher()
+        }
+        
+        return session.dataTaskPublisher(for: url)
+            .mapError { APIError.networkError($0) }
+            .flatMap { data, response -> AnyPublisher<Data, APIError> in
+                guard let httpResponse = response as? HTTPURLResponse else {
+                    return Fail(error: APIError.invalidResponse).eraseToAnyPublisher()
+                }
+                if httpResponse.statusCode != 200 {
+                    return Fail(error: APIError.httpError(statusCode: httpResponse.statusCode, message: "")).eraseToAnyPublisher()
+                }
+                return Just(data).setFailureType(to: APIError.self).eraseToAnyPublisher()
+            }
+            .decode(type: [Audiobook].self, decoder: JSONDecoder())
+            .mapError { APIError.decodingError($0) }
+            .receive(on: DispatchQueue.main)
+            .eraseToAnyPublisher()
+    }
+    
+    func getAudiobookChapters(bookId: String, rssUrl: String? = nil) -> AnyPublisher<AudiobookChaptersResponse, APIError> {
+        guard var components = URLComponents(string: "\(baseURL)/audiobooks/\(bookId)/chapters") else {
+            return Fail(error: APIError.invalidURL).eraseToAnyPublisher()
+        }
+        var queryItems: [URLQueryItem] = []
+        if let rssUrl = rssUrl, !rssUrl.isEmpty {
+            queryItems.append(URLQueryItem(name: "rssUrl", value: rssUrl))
+        }
+        if !queryItems.isEmpty {
+            components.queryItems = queryItems
+        }
+        guard let url = components.url else {
+            return Fail(error: APIError.invalidURL).eraseToAnyPublisher()
+        }
+        
+        return session.dataTaskPublisher(for: url)
+            .mapError { APIError.networkError($0) }
+            .flatMap { data, response -> AnyPublisher<Data, APIError> in
+                guard let httpResponse = response as? HTTPURLResponse else {
+                    return Fail(error: APIError.invalidResponse).eraseToAnyPublisher()
+                }
+                if httpResponse.statusCode != 200 {
+                    return Fail(error: APIError.httpError(statusCode: httpResponse.statusCode, message: "")).eraseToAnyPublisher()
+                }
+                return Just(data).setFailureType(to: APIError.self).eraseToAnyPublisher()
+            }
+            .decode(type: AudiobookChaptersResponse.self, decoder: JSONDecoder())
+            .mapError { APIError.decodingError($0) }
+            .receive(on: DispatchQueue.main)
+            .eraseToAnyPublisher()
+    }
+    
     // MARK: - Lyrics Parsing
     
     private func parseLyrics(_ lyricsText: String) -> [LyricsLine] {
@@ -643,6 +764,13 @@ class APIService {
             }
             .eraseToAnyPublisher()
     }
+}
+
+// MARK: - Audiobook Response Model
+
+struct AudiobookChaptersResponse: Codable {
+    let coverUrl: String
+    let chapters: [AudiobookChapter]
 }
 
 // MARK: - Waveform Response Model
