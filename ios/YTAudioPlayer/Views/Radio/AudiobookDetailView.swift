@@ -184,7 +184,13 @@ struct AudiobookDetailView: View {
                 }
             }) {
                 HStack(spacing: 8) {
-                    Image(systemName: "book.fill")
+                    if viewModel.isLoadingChapters {
+                        ProgressView()
+                            .scaleEffect(0.8)
+                            .tint(.black)
+                    } else {
+                        Image(systemName: "book.fill")
+                    }
                     Text("Continue · Chapter \(chapterIndex + 1)")
                         .font(.system(size: 14, weight: .bold, design: .monospaced))
                 }
@@ -193,6 +199,8 @@ struct AudiobookDetailView: View {
                 .padding(.vertical, 12)
                 .background(Capsule().fill(Theme.cyberCyan))
             }
+            .disabled(viewModel.isLoadingChapters)
+            .opacity(viewModel.isLoadingChapters ? 0.7 : 1.0)
             .padding(.horizontal, 40)
             .padding(.top, 12)
             .accessibilityLabel("Continue reading at chapter \(chapterIndex + 1)")

@@ -41,19 +41,43 @@ struct MiniPlayer: View {
 
                         if playerState.contentType == .liveRadio {
                             Text("LIVE")
+                                .fixedSize()
                                 .font(.system(size: 9, weight: .heavy, design: .monospaced))
                                 .foregroundColor(.white)
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 2)
                                 .background(Capsule().fill(Theme.cyberMagenta))
                         }
+
+                        if playerState.contentType == .audiobook {
+                            Image(systemName: "book.fill")
+                                .font(.system(size: 10))
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 2)
+                                .background(Capsule().fill(Theme.cyberCyan))
+                        }
                     }
 
-                    Text(playerState.currentItem?.track.displayArtist ?? "")
-                        .font(.system(size: 13))
-                        .foregroundColor(.cyberDim)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
+                    if playerState.contentType == .audiobook {
+                        if !playerState.currentChapters.isEmpty {
+                            Text("Ch. \(playerState.currentChapterIndex + 1) of \(playerState.currentChapters.count)")
+                                .font(.system(size: 11))
+                                .foregroundColor(Theme.cyberDim)
+                                .lineLimit(1)
+                        } else {
+                            Text("Loading chapters...")
+                                .font(.system(size: 11))
+                                .foregroundColor(Theme.cyberDim.opacity(0.6))
+                                .lineLimit(1)
+                        }
+                    } else {
+                        Text(playerState.currentItem?.track.displayArtist ?? "")
+                            .font(.system(size: 13))
+                            .foregroundColor(Theme.cyberDim)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                    }
                 }
                 .frame(maxWidth: 180, alignment: .leading)
             }

@@ -33,6 +33,7 @@ enum PlaybackContentType {
     case track
     case liveRadio
     case podcastEpisode
+    case audiobook
 }
 
 /// Represents the repeat mode
@@ -141,6 +142,11 @@ class PlayerState: ObservableObject {
 
     /// Content type for current playback
     @Published var contentType: PlaybackContentType = .track
+
+    /// Audiobook chapter tracking
+    @Published var currentChapters: [AudiobookChapter] = []
+    @Published var currentChapterIndex: Int = 0
+    @Published var currentBookId: String = ""
     
     // MARK: - Private Properties
     
@@ -202,6 +208,10 @@ class PlayerState: ObservableObject {
         // Use expected duration from track metadata if available
         if expectedDuration > 0 {
             return expectedDuration
+        }
+        // Audiobook chapters and podcasts can be long — skip the 20-min sanity check
+        if contentType == .audiobook || contentType == .podcastEpisode {
+            return duration
         }
         // If AVPlayer reports unreasonably long duration (>20 min), assume it's wrong
         // and use a default of 3 minutes for display purposes
@@ -680,9 +690,9 @@ class PlayerState: ObservableObject {
         updateRemoteControls()
     }
 
-    /// Set playback rate (0.5 to 2.0)
+    /// Set playback rate (0.5 to 3.0)
     func setPlaybackRate(_ rate: Float) {
-        guard rate >= 0.5 && rate <= 2.0 else { return }
+        guard rate >= 0.5 && rate <= 3.0 else { return }
 
         playbackRate = rate
         player?.rate = rate
@@ -754,6 +764,12 @@ class PlayerState: ObservableObject {
     func playRadioStation(_ station: RadioStation) {
         guard let url = URL(string: station.urlResolved) else { return }
 
+        // Clean up previous playback state
+        removeTimeObserver()
+        cancelQualityUpgrade()
+        cancellables.removeAll()
+        NotificationCenter.default.removeObserver(self)
+
         player?.pause()
         contentType = .liveRadio
 
@@ -782,6 +798,13 @@ class PlayerState: ObservableObject {
 
     func playPodcastEpisode(_ episode: PodcastEpisode) {
         guard let url = episode.audioURL else { return }
+
+        savePodcastPosition()  // Save current position before cleanup
+        // Clean up previous playback state
+        removeTimeObserver()
+        cancelQualityUpgrade()
+        cancellables.removeAll()
+        NotificationCenter.default.removeObserver(self)
 
         player?.pause()
         contentType = .podcastEpisode
@@ -822,6 +845,92 @@ class PlayerState: ObservableObject {
               let guid = currentItem?.track.videoId else { return }
         let key = "podcast_position_\(guid)"
         UserDefaults.standard.set(currentTime, forKey: key)
+    }
+
+    // MARK: - Audiobook Playback
+
+    func playAudiobookChapter(_ chapter: AudiobookChapter, chapters: [AudiobookChapter], bookTitle: String, bookId: String) {
+        guard let url = chapter.audioURL else { return }
+
+        savePodcastPosition()
+        saveAudiobookPosition()
+
+        removeTimeObserver()
+        cancelQualityUpgrade()
+        cancellables.removeAll()
+        NotificationCenter.default.removeObserver(self)
+
+        player?.pause()
+        contentType = .audiobook
+
+        currentChapters = chapters
+        currentChapterIndex = chapters.firstIndex(where: { $0.guid == chapter.guid }) ?? 0
+        currentBookId = bookId
+
+        let audiobookTrack = Track(
+            videoId: chapter.guid,
+            title: chapter.displayTitle,
+            artists: [bookTitle],
+            album: "Chapter \(chapter.chapterNumber) of \(chapters.count)",
+            durationSeconds: chapter.durationSeconds,
+            thumbnails: [],
+            isExplicit: false,
+            videoType: "AUDIOBOOK_CHAPTER"
+        )
+
+        let item = QueueItem(track: audiobookTrack, streamUrl: chapter.audioUrl, source: .stream)
+        currentItem = item
+        expectedDuration = Double(chapter.durationSeconds)
+
+        let playerItem = AVPlayerItem(url: url)
+        player = AVPlayer(playerItem: playerItem)
+        player?.volume = Float(volume)
+        player?.play()
+        playbackState = .playing
+        setupPlayerObservers()
+
+        // Resume from saved position
+        let key = "audiobook_position_\(chapter.guid)"
+        let savedPosition = UserDefaults.standard.double(forKey: key)
+        if savedPosition > 0 {
+            let time = CMTime(seconds: savedPosition, preferredTimescale: 600)
+            player?.seek(to: time)
+        }
+
+        UserDefaults.standard.set(currentChapterIndex, forKey: "audiobook_chapter_\(bookId)")
+    }
+
+    func saveAudiobookPosition() {
+        guard contentType == .audiobook,
+              let guid = currentItem?.track.videoId else { return }
+        let key = "audiobook_position_\(guid)"
+        UserDefaults.standard.set(currentTime, forKey: key)
+        if !currentBookId.isEmpty {
+            UserDefaults.standard.set(currentChapterIndex, forKey: "audiobook_chapter_\(currentBookId)")
+        }
+    }
+
+    func skipToNextChapter() {
+        guard contentType == .audiobook else { return }
+        saveAudiobookPosition()
+        let nextIndex = currentChapterIndex + 1
+        guard nextIndex < currentChapters.count else { return }
+        playAudiobookChapter(currentChapters[nextIndex], chapters: currentChapters, bookTitle: currentItem?.track.artists.first ?? "", bookId: currentBookId)
+    }
+
+    func skipToPreviousChapter() {
+        guard contentType == .audiobook else { return }
+        saveAudiobookPosition()
+        if currentTime > 5 {
+            seek(to: 0)
+            return
+        }
+        let prevIndex = currentChapterIndex - 1
+        guard prevIndex >= 0 else {
+            seek(to: 0)
+            return
+        }
+        playAudiobookChapter(currentChapters[prevIndex], chapters: currentChapters, bookTitle: currentItem?.track.artists.first ?? "", bookId: currentBookId)
     }
 
     func skipForward(_ seconds: Double = 15) {
@@ -1297,6 +1406,14 @@ class PlayerState: ObservableObject {
                 savePodcastPosition()
             }
         }
+
+        // Auto-save audiobook position every ~10 seconds
+        if contentType == .audiobook {
+            let intTime = Int(currentTime)
+            if intTime > 0 && intTime % 10 == 0 {
+                saveAudiobookPosition()
+            }
+        }
     }
     
     @objc private func playerDidFinishPlaying() {
@@ -1307,6 +1424,44 @@ class PlayerState: ObservableObject {
                 let newItem = AVPlayerItem(url: url)
                 player?.replaceCurrentItem(with: newItem)
                 player?.play()
+            }
+            return
+        }
+        // Audiobook: auto-advance to next chapter
+        if contentType == .audiobook {
+            saveAudiobookPosition()
+            // Check "End of Chapter" sleep timer
+            let sleepTimer = SleepTimer.shared
+            if sleepTimer.isActive && sleepTimer.selectedMinutes == 0 {
+                print("🌙 End of chapter sleep timer triggered")
+                DispatchQueue.main.async {
+                    sleepTimer.cancel()
+                }
+                return
+            }
+            let nextIndex = currentChapterIndex + 1
+            if nextIndex < currentChapters.count {
+                print("📖 Auto-advancing to chapter \(nextIndex + 1)")
+                // Update library progress when chapter completes
+                AudiobookLibrary.shared.updateProgress(
+                    bookId: currentBookId,
+                    chapterIndex: nextIndex,
+                    chaptersCompleted: nextIndex
+                )
+                DispatchQueue.main.async { [weak self] in
+                    guard let self = self else { return }
+                    self.playAudiobookChapter(self.currentChapters[nextIndex], chapters: self.currentChapters, bookTitle: self.currentItem?.track.artists.first ?? "", bookId: self.currentBookId)
+                }
+            } else {
+                print("📖 Audiobook completed")
+                AudiobookLibrary.shared.updateProgress(
+                    bookId: currentBookId,
+                    chapterIndex: currentChapters.count - 1,
+                    chaptersCompleted: currentChapters.count
+                )
+                DispatchQueue.main.async { [weak self] in
+                    self?.playbackState = .idle
+                }
             }
             return
         }

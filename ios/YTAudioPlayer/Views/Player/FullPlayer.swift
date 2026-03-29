@@ -46,6 +46,7 @@ struct FullPlayer: View {
     @State private var showAntiAlgorithm = false
     @State private var showGestureHints = false
     @State private var playbackSpeed: Float = 1.0
+    @State private var isPulsing = false
     @AppStorage("hasSeenGestureHints") private var hasSeenGestureHints = false
     @StateObject private var hapticEngine = HapticSymphonyEngine.shared
     @Environment(\.accessibilityReduceMotion) var reduceMotion
@@ -479,13 +480,33 @@ struct FullPlayer: View {
 
             if playerState.contentType == .liveRadio {
                 HStack(spacing: 6) {
-                    Circle()
-                        .fill(Theme.cyberMagenta)
-                        .frame(width: 8, height: 8)
+                    ZStack {
+                        Circle()
+                            .fill(Theme.cyberMagenta.opacity(0.3))
+                            .frame(width: 14, height: 14)
+                            .scaleEffect(isPulsing ? 1.3 : 0.8)
+                            .opacity(isPulsing ? 0.0 : 0.6)
+                        Circle()
+                            .fill(Theme.cyberMagenta)
+                            .frame(width: 8, height: 8)
+                    }
+                    .frame(width: 20, height: 20)
                     Text("LIVE")
                         .font(.system(size: 12, weight: .heavy, design: .monospaced))
                         .foregroundColor(Theme.cyberMagenta)
                 }
+                .onAppear {
+                    withAnimation(reduceMotion ? .none : .easeInOut(duration: 1.0).repeatForever(autoreverses: true)) {
+                        isPulsing = true
+                    }
+                }
+                .onDisappear {
+                    isPulsing = false
+                }
+            } else if playerState.contentType == .audiobook && !playerState.currentChapters.isEmpty {
+                Text("Chapter \(playerState.currentChapterIndex + 1) of \(playerState.currentChapters.count)")
+                    .font(.system(size: 13, design: .monospaced))
+                    .foregroundColor(Theme.cyberDim)
             }
 
             if let memory = songMemoryManager.memory(for: currentTrack) {
@@ -605,7 +626,7 @@ struct FullPlayer: View {
             }
             primaryControlsSection
                 .padding(.bottom, 6)
-            if playerState.contentType == .podcastEpisode {
+            if playerState.contentType == .podcastEpisode || playerState.contentType == .audiobook {
                 Button(action: { cyclePlaybackSpeed() }) {
                     Text(playbackSpeedText)
                         .font(.system(size: 13, weight: .bold, design: .monospaced))
@@ -624,7 +645,7 @@ struct FullPlayer: View {
         HStack(spacing: 34) {
             // Previous / Skip backward
             if playerState.contentType == .liveRadio {
-                Spacer().frame(width: 28)
+                Spacer().frame(width: 44)
             } else if playerState.contentType == .podcastEpisode {
                 Button(action: {
                     HapticManager.light()
@@ -635,6 +656,19 @@ struct FullPlayer: View {
                         .foregroundColor(.white)
                 }
                 .frame(width: 44, height: 44)
+            } else if playerState.contentType == .audiobook {
+                let isFirstChapter = playerState.currentChapterIndex <= 0
+                Button(action: {
+                    HapticManager.light()
+                    playerState.skipToPreviousChapter()
+                }) {
+                    Image(systemName: "backward.end.fill")
+                        .font(.system(size: 24))
+                        .foregroundColor(.white)
+                        .opacity(isFirstChapter ? 0.3 : 1.0)
+                }
+                .frame(width: 44, height: 44)
+                .disabled(isFirstChapter)
             } else {
                 PlayerControlButton(
                     icon: "backward.fill",
@@ -677,7 +711,7 @@ struct FullPlayer: View {
             
             // Next / Skip forward
             if playerState.contentType == .liveRadio {
-                Spacer().frame(width: 28)
+                Spacer().frame(width: 44)
             } else if playerState.contentType == .podcastEpisode {
                 Button(action: {
                     HapticManager.light()
@@ -688,6 +722,19 @@ struct FullPlayer: View {
                         .foregroundColor(.white)
                 }
                 .frame(width: 44, height: 44)
+            } else if playerState.contentType == .audiobook {
+                let isLastChapter = playerState.currentChapterIndex >= playerState.currentChapters.count - 1 || playerState.currentChapters.isEmpty
+                Button(action: {
+                    HapticManager.light()
+                    playerState.skipToNextChapter()
+                }) {
+                    Image(systemName: "forward.end.fill")
+                        .font(.system(size: 24))
+                        .foregroundColor(.white)
+                        .opacity(isLastChapter ? 0.3 : 1.0)
+                }
+                .frame(width: 44, height: 44)
+                .disabled(isLastChapter)
             } else {
                 PlayerControlButton(
                     icon: "forward.fill",
