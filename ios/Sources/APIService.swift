@@ -32,12 +32,20 @@ class APIService {
         #endif
     }()
     
-    private let session = URLSession.shared
-    
+    private let session: URLSession
+    private let maxRetries = 3
+    private let retryDelay: TimeInterval = 2.0
+
     private init() {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 30
+        config.timeoutIntervalForResource = 60
+        config.waitsForConnectivity = true
+        config.requestCachePolicy = .reloadIgnoringLocalCacheData
+        self.session = URLSession(configuration: config)
         print("🔗 APIService initialized with baseURL: \(baseURL)")
     }
-    
+
     func search(query: String, limit: Int = 20) -> AnyPublisher<[Track], APIError> {
         guard let url = URL(string: "\(baseURL)/search") else {
             return Fail(error: APIError.invalidURL).eraseToAnyPublisher()
@@ -57,13 +65,17 @@ class APIService {
                     return Fail(error: APIError.invalidResponse).eraseToAnyPublisher()
                 }
                 if httpResponse.statusCode != 200 {
-                    print("❌ HTTP \(httpResponse.statusCode): \(String(data: data, encoding: .utf8) ?? "")")
-                    return Fail(error: APIError.httpError(statusCode: httpResponse.statusCode, message: "")).eraseToAnyPublisher()
+                    let body = String(data: data, encoding: .utf8) ?? ""
+                    print("❌ [APIService] HTTP \(httpResponse.statusCode): \(body.prefix(500))")
+                    return Fail(error: APIError.httpError(statusCode: httpResponse.statusCode, message: body)).eraseToAnyPublisher()
                 }
                 return Just(data).setFailureType(to: APIError.self).eraseToAnyPublisher()
             }
             .decode(type: [Track].self, decoder: JSONDecoder())
-            .mapError { APIError.decodingError($0) }
+            .mapError { error -> APIError in
+                print("❌ [APIService] Search decode error: \(error)")
+                return APIError.decodingError(error)
+            }
             .receive(on: DispatchQueue.main)
             .eraseToAnyPublisher()
     }
@@ -291,6 +303,41 @@ class APIService {
             .eraseToAnyPublisher()
     }
     
+    // MARK: - Guitar Chords
+
+    func getChords(title: String, artist: String) -> AnyPublisher<ChordsResult, APIError> {
+        var components = URLComponents(string: "\(baseURL)/chords")
+        components?.queryItems = [
+            URLQueryItem(name: "title", value: title),
+            URLQueryItem(name: "artist", value: artist)
+        ]
+        guard let url = components?.url else {
+            return Fail(error: APIError.invalidURL).eraseToAnyPublisher()
+        }
+        return session.dataTaskPublisher(for: url)
+            .mapError { APIError.networkError($0) }
+            .flatMap { data, response -> AnyPublisher<Data, APIError> in
+                guard let http = response as? HTTPURLResponse else {
+                    return Fail(error: APIError.invalidResponse).eraseToAnyPublisher()
+                }
+                if http.statusCode == 404 {
+                    return Fail(error: APIError.httpError(statusCode: 404, message: "No chords found")).eraseToAnyPublisher()
+                }
+                guard http.statusCode == 200 else {
+                    let body = String(data: data, encoding: .utf8) ?? ""
+                    return Fail(error: APIError.httpError(statusCode: http.statusCode, message: body)).eraseToAnyPublisher()
+                }
+                return Just(data).setFailureType(to: APIError.self).eraseToAnyPublisher()
+            }
+            .decode(type: ChordsResult.self, decoder: JSONDecoder())
+            .mapError { error -> APIError in
+                if let apiError = error as? APIError { return apiError }
+                return APIError.decodingError(error)
+            }
+            .receive(on: DispatchQueue.main)
+            .eraseToAnyPublisher()
+    }
+
     // MARK: - Playlist Search
     
     func searchPlaylists(query: String, limit: Int = 10) -> AnyPublisher<[YouTubePlaylist], APIError> {
@@ -771,6 +818,18 @@ class APIService {
 struct AudiobookChaptersResponse: Codable {
     let coverUrl: String
     let chapters: [AudiobookChapter]
+}
+
+// MARK: - Chords Response Model
+
+struct ChordsResult: Codable {
+    let found: Bool
+    let title: String
+    let artist: String
+    let url: String
+    let songsterrId: Int
+    let hasChords: Bool
+    let hasPlayer: Bool
 }
 
 // MARK: - Waveform Response Model

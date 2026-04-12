@@ -7,6 +7,44 @@
 
 import CoreData
 
+// MARK: - Value Transformers for Core Data Arrays
+
+@objc(StringArrayTransformer)
+final class StringArrayTransformer: NSSecureUnarchiveFromDataTransformer {
+    static let name = NSValueTransformerName("StringArrayTransformer")
+    override static var allowedTopLevelClasses: [AnyClass] { [NSArray.self, NSString.self] }
+    static func register() {
+        ValueTransformer.setValueTransformer(StringArrayTransformer(), forName: name)
+    }
+}
+
+@objc(ThumbnailURLArrayTransformer)
+final class ThumbnailURLArrayTransformer: NSSecureUnarchiveFromDataTransformer {
+    static let name = NSValueTransformerName("ThumbnailURLArrayTransformer")
+    override static var allowedTopLevelClasses: [AnyClass] { [NSArray.self, NSString.self] }
+    static func register() {
+        ValueTransformer.setValueTransformer(ThumbnailURLArrayTransformer(), forName: name)
+    }
+}
+
+@objc(TrackOrderArrayTransformer)
+final class TrackOrderArrayTransformer: NSSecureUnarchiveFromDataTransformer {
+    static let name = NSValueTransformerName("TrackOrderArrayTransformer")
+    override static var allowedTopLevelClasses: [AnyClass] { [NSArray.self, NSString.self] }
+    static func register() {
+        ValueTransformer.setValueTransformer(TrackOrderArrayTransformer(), forName: name)
+    }
+}
+
+@objc(SeedVideoIdArrayTransformer)
+final class SeedVideoIdArrayTransformer: NSSecureUnarchiveFromDataTransformer {
+    static let name = NSValueTransformerName("SeedVideoIdArrayTransformer")
+    override static var allowedTopLevelClasses: [AnyClass] { [NSArray.self, NSString.self] }
+    static func register() {
+        ValueTransformer.setValueTransformer(SeedVideoIdArrayTransformer(), forName: name)
+    }
+}
+
 struct PersistenceController {
     static let shared = PersistenceController()
 
@@ -29,6 +67,13 @@ struct PersistenceController {
     }
 
     init(inMemory: Bool = false) {
+        // Register custom value transformers BEFORE initializing Core Data
+        StringArrayTransformer.register()
+        ThumbnailURLArrayTransformer.register()
+        TrackOrderArrayTransformer.register()
+        SeedVideoIdArrayTransformer.register()
+        print("✅ Core Data value transformers registered")
+
         container = NSPersistentContainer(name: "YTAudioPlayer")
 
         if inMemory {

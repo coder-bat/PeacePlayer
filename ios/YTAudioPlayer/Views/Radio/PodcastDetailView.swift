@@ -18,17 +18,30 @@ struct PodcastDetailView: View {
                         .padding(.top, 12)
                         .padding(.bottom, 16)
                     
+                    // Close button
+                    HStack {
+                        Spacer()
+                        Button(action: { dismiss() }) {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 14, weight: .bold))
+                                .foregroundColor(Theme.cyberDim)
+                                .padding(15)
+                                .background(Circle().fill(Theme.cyberSurface))
+                        }
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.top, 4)
+                    
                     headerSection
                     
                     Divider()
-                        .background(Theme.cyberDim.opacity(0.3))
+                        .background(Theme.cyberDim.opacity(0.2))
                         .padding(.horizontal, 20)
                         .padding(.vertical, 16)
                     
                     episodesList
-                    
-                    Spacer(minLength: 100)
                 }
+                .padding(.bottom, 90)
             }
         }
         .task {
@@ -59,10 +72,13 @@ struct PodcastDetailView: View {
                     .font(.system(size: 20, weight: .bold))
                     .foregroundColor(.white)
                     .multilineTextAlignment(.center)
+                    .lineLimit(2)
                 
                 Text(show.artistName)
                     .font(.system(size: 14, weight: .medium))
                     .foregroundColor(Theme.cyberMagenta)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
                 
                 if !show.displayGenres.isEmpty {
                     Text(show.displayGenres)
@@ -76,6 +92,8 @@ struct PodcastDetailView: View {
             }
         }
         .padding(.horizontal, 20)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(show.collectionName) by \(show.artistName), \(show.trackCount) episodes")
     }
     
     // MARK: - Episodes
@@ -86,16 +104,38 @@ struct PodcastDetailView: View {
                 ForEach(0..<5, id: \.self) { _ in
                     episodeShimmer
                 }
+            } else if viewModel.currentEpisodes.isEmpty && viewModel.errorMessage != nil {
+                VStack(spacing: 16) {
+                    Image(systemName: "wifi.exclamationmark")
+                        .font(.system(size: 36))
+                        .foregroundColor(Theme.cyberDim)
+                    Text("Failed to load episodes")
+                        .font(.system(size: 14, weight: .medium, design: .monospaced))
+                        .foregroundColor(Theme.tertiaryText)
+                    Button(action: {
+                        viewModel.loadEpisodes(for: show)
+                    }) {
+                        Text("RETRY")
+                            .font(.system(size: 12, weight: .bold, design: .monospaced))
+                            .foregroundColor(.black)
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 8)
+                            .background(Capsule().fill(Theme.cyberCyan))
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 40)
             } else if viewModel.currentEpisodes.isEmpty {
                 VStack(spacing: 12) {
-                    Image(systemName: "exclamationmark.triangle")
-                        .font(.system(size: 32))
+                    Image(systemName: "tray")
+                        .font(.system(size: 36))
                         .foregroundColor(Theme.cyberDim)
-                    Text("No episodes found")
-                        .font(.system(size: 14, design: .monospaced))
-                        .foregroundColor(Theme.cyberDim)
+                    Text("No episodes available")
+                        .font(.system(size: 14, weight: .medium, design: .monospaced))
+                        .foregroundColor(Theme.tertiaryText)
                 }
-                .padding(.top, 40)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 40)
             } else {
                 HStack {
                     Text("EPISODES")
@@ -116,7 +156,7 @@ struct PodcastDetailView: View {
                     .padding(.horizontal, 20)
                     
                     Divider()
-                        .background(Theme.cyberDim.opacity(0.15))
+                        .background(Theme.cyberDim.opacity(0.2))
                         .padding(.horizontal, 20)
                 }
             }
@@ -207,6 +247,7 @@ struct PodcastEpisodeRow: View {
                                 Capsule()
                                     .fill(Theme.cyberMagenta)
                                     .frame(width: geo.size.width * progressFraction)
+                                    .animation(.easeIn(duration: 0.3), value: progressFraction)
                             }
                         }
                         .frame(height: 3)
@@ -220,7 +261,10 @@ struct PodcastEpisodeRow: View {
                     Image(systemName: hasProgress ? "play.circle.fill" : "play.circle")
                         .font(.system(size: 32))
                         .foregroundColor(Theme.cyberMagenta)
+                        .contentShape(Circle().inset(by: -6))
                 }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Play \(episode.title)")
             }
             
             if !episode.description.isEmpty {
@@ -234,5 +278,8 @@ struct PodcastEpisodeRow: View {
             }
         }
         .padding(.vertical, 10)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(episode.title), \(episode.formattedDate), \(episode.durationText)")
+        .accessibilityHint("Double tap to play episode")
     }
 }

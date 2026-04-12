@@ -261,6 +261,7 @@ struct SearchView: View {
                     }
                 }
             }
+
         }
         .listStyle(.insetGrouped)
         .modifier(ScrollDismissesKeyboardModifier())
@@ -949,7 +950,7 @@ class SearchViewModel: ObservableObject {
     @Published var recentSearches: [String] = []
     @Published var searchText = ""
     @Published var activeFilter: SearchFilter = .all
-    
+
     private var cancellables = Set<AnyCancellable>()
     
     init() {
@@ -974,11 +975,20 @@ class SearchViewModel: ObservableObject {
         UserDefaults.standard.set(recentSearches, forKey: "recentSearches")
     }
     
+    private var lastLibraryFetch: Date?
+    private let minimumLibraryFetchInterval: TimeInterval = 30 // Only fetch every 30 seconds max
+
     func refreshDownloadedIds() {
+        // Throttle library fetches to prevent rate limiting (429 errors)
+        if let lastFetch = lastLibraryFetch, Date().timeIntervalSince(lastFetch) < minimumLibraryFetchInterval {
+            return // Skip this fetch, too soon
+        }
+        lastLibraryFetch = Date()
+
         APIService.shared.fetchLibrary()
             .sink(receiveCompletion: { completion in
                 if case .failure(let error) = completion {
-                    print("⚠️ [SearchView] Request failed: \(error.localizedDescription)")
+                    print("⚠️ [SearchView] Library fetch failed: \(error.localizedDescription)")
                 }
             },
                   receiveValue: { [weak self] tracks in
@@ -999,17 +1009,18 @@ class SearchViewModel: ObservableObject {
         PlayerState.shared.currentItem?.track.videoId == track.videoId
     }
     
+    @MainActor
     func search(query: String) {
         guard !query.isEmpty else { return }
-        
+
         isLoading = true
         hasSearched = true
         saveRecentSearch(query)
-        
+
         results = []
         playlistResults = []
-        
-        // Search for songs
+
+        // Search for songs (YouTube)
         APIService.shared.search(query: query, limit: 20)
             .handleErrors(with: .shared, retry: { [weak self] in
                 self?.search(query: query)
@@ -1024,8 +1035,8 @@ class SearchViewModel: ObservableObject {
                 self?.refreshDownloadedIds()
             })
             .store(in: &cancellables)
-        
-        // Search for playlists
+
+        // Search for playlists (YouTube)
         print("🔍 Searching playlists for: \(query)")
         APIService.shared.searchPlaylists(query: query, limit: 10)
             .handleErrors(with: .shared)
@@ -1038,7 +1049,7 @@ class SearchViewModel: ObservableObject {
             })
             .store(in: &cancellables)
     }
-    
+
     func clearSearch() {
         results = []
         playlistResults = []
@@ -1047,10 +1058,23 @@ class SearchViewModel: ObservableObject {
     }
     
     func playTrack(_ track: Track) {
-        performPlayTrack(track)
+        Task { @MainActor in
+            await performPlayTrack(track)
+        }
     }
     
+    @MainActor
     private func performPlayTrack(_ track: Track) {
+        // Show loading indicator immediately before fetching stream URL
+        let loadingItem = QueueItem(
+            track: track,
+            streamUrl: "",
+            source: .stream,
+            contentSource: .youtube
+        )
+        PlayerState.shared.currentItem = loadingItem
+        PlayerState.shared.playbackState = .loading
+
         APIService.shared.getStreamUrl(videoId: track.videoId)
             .handleErrors(with: .shared, retry: { [weak self] in
                 self?.performPlayTrack(track)
@@ -1064,7 +1088,8 @@ class SearchViewModel: ObservableObject {
                 let item = QueueItem(
                     track: track,
                     streamUrl: streamInfo.streamUrl,
-                    source: .stream
+                    source: .stream,
+                    contentSource: .youtube
                 )
                 PlayerState.shared.play(item: item)
             })
@@ -1092,7 +1117,8 @@ class SearchViewModel: ObservableObject {
                 let item = QueueItem(
                     track: track,
                     streamUrl: streamInfo.streamUrl,
-                    source: .stream
+                    source: .stream,
+                    contentSource: .youtube
                 )
                 PlayerState.shared.addToQueue(item)
                 HapticManager.success()
@@ -1107,7 +1133,8 @@ class SearchViewModel: ObservableObject {
                 let item = QueueItem(
                     track: track,
                     streamUrl: streamInfo.streamUrl,
-                    source: .stream
+                    source: .stream,
+                    contentSource: .youtube
                 )
                 PlayerState.shared.addToQueueNext(item)
                 HapticManager.success()

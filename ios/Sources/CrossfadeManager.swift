@@ -95,14 +95,19 @@ class CrossfadeManager: ObservableObject {
         let playerItem = AVPlayerItem(url: url)
         nextPlayer = AVPlayer(playerItem: playerItem)
         nextPlayer?.volume = 0  // Start silent
+        // Ensure background playback for crossfade preparation
+        nextPlayer?.audiovisualBackgroundPlaybackPolicy = .continuesIfPossible
 
-        // Preload the asset
+        // Preload the asset and start buffering by playing at rate 0
         playerItem.asset.loadValuesAsynchronously(forKeys: ["playable", "duration"]) { [weak self] in
             DispatchQueue.main.async {
                 var error: NSError?
                 let status = playerItem.asset.statusOfValue(forKey: "playable", error: &error)
                 if status == .loaded {
-                    print("✅ Next track ready for crossfade")
+                    print("✅ Next track asset loaded, starting pre-buffering")
+                    // Start player paused to force actual buffering
+                    self?.nextPlayer?.playImmediately(atRate: 0)
+                    self?.nextPlayer?.pause()
                 } else if let error = error {
                     print("❌ Failed to preload next track: \(error)")
                 }
@@ -127,6 +132,13 @@ class CrossfadeManager: ObservableObject {
 
         guard !isCrossfading else {
             print("⚠️ Crossfade already in progress")
+            return
+        }
+
+        // Ensure the next player is ready to play
+        guard let nextItem = next.currentItem, nextItem.status == .readyToPlay else {
+            print("⚠️ Next player not ready to play, aborting crossfade")
+            completion()
             return
         }
 

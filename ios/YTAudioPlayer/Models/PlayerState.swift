@@ -10,6 +10,7 @@ import Combine
 import AVFoundation
 import UIKit
 import MediaPlayer
+import SwiftUI
 
 /// Represents the current playback state
 enum PlaybackState: Equatable {
@@ -59,23 +60,52 @@ enum RepeatMode: String, CaseIterable {
     }
 }
 
+/// Represents the content source origin
+enum ContentSource: Equatable {
+    case youtube
+    case local
+
+    var displayName: String {
+        switch self {
+        case .youtube: return "YouTube"
+        case .local: return "Downloaded"
+        }
+    }
+
+    var iconName: String {
+        switch self {
+        case .youtube: return "play.rectangle.fill"
+        case .local: return "arrow.down.circle.fill"
+        }
+    }
+
+    var tintColor: Color {
+        switch self {
+        case .youtube: return .red
+        case .local: return .green
+        }
+    }
+}
+
 /// Represents an item in the playback queue
 struct QueueItem: Identifiable, Equatable {
     let id = UUID()
     let track: Track
     let streamUrl: String
     let source: TrackSource
+    let contentSource: ContentSource
     let createdAt: Date
-    
+
     enum TrackSource: Equatable {
         case stream
         case local(path: String)
     }
-    
-    init(track: Track, streamUrl: String, source: TrackSource, createdAt: Date = Date()) {
+
+    init(track: Track, streamUrl: String, source: TrackSource, contentSource: ContentSource = .youtube, createdAt: Date = Date()) {
         self.track = track
         self.streamUrl = streamUrl
         self.source = source
+        self.contentSource = contentSource
         self.createdAt = createdAt
     }
     
@@ -173,7 +203,13 @@ class PlayerState: ObservableObject {
 
     // Serial queue for completion handling to prevent race conditions
     private let completionQueue = DispatchQueue(label: "com.ytaudio.completion", qos: .userInitiated)
-    
+
+    // Background task for track transitions when app is backgrounded
+    private var trackTransitionBackgroundTask: UIBackgroundTaskIdentifier = .invalid
+
+    // Stall recovery
+    private var isPlaybackStalled = false
+
     // MARK: - Computed Properties
     
     var hasNextTrack: Bool {
@@ -231,8 +267,9 @@ class PlayerState: ObservableObject {
     
     private init() {
         setupAudioSession()
+        setupAudioSessionObservers()
         restoreQueue()
-        
+
         // Register for memory warnings
         NotificationCenter.default.addObserver(
             self,
@@ -240,7 +277,7 @@ class PlayerState: ObservableObject {
             name: UIApplication.didReceiveMemoryWarningNotification,
             object: nil
         )
-        
+
         // Periodic cleanup every 5 minutes
         cleanupTimer = Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { [weak self] _ in
             self?.cleanupOldItems()
@@ -314,7 +351,107 @@ class PlayerState: ObservableObject {
             print("❌ Audio session setup failed: \(error)")
         }
     }
-    
+
+    private func setupAudioSessionObservers() {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleAudioSessionInterruption),
+            name: AVAudioSession.interruptionNotification,
+            object: AVAudioSession.sharedInstance()
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleAudioSessionRouteChange),
+            name: AVAudioSession.routeChangeNotification,
+            object: AVAudioSession.sharedInstance()
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleMediaServicesReset),
+            name: AVAudioSession.mediaServicesWereResetNotification,
+            object: nil
+        )
+    }
+
+    @objc private func handleAudioSessionInterruption(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let typeValue = userInfo[AVAudioSessionInterruptionTypeKey] as? UInt,
+              let type = AVAudioSession.InterruptionType(rawValue: typeValue) else { return }
+
+        switch type {
+        case .began:
+            print("🔇 Audio interruption began")
+            DispatchQueue.main.async { [weak self] in
+                self?.player?.pause()
+            }
+        case .ended:
+            guard let optionsValue = userInfo[AVAudioSessionInterruptionOptionKey] as? UInt else { return }
+            let options = AVAudioSession.InterruptionOptions(rawValue: optionsValue)
+
+            if options.contains(.shouldResume) {
+                print("🔊 Audio interruption ended, resuming playback")
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                    do {
+                        try AVAudioSession.sharedInstance().setActive(true)
+                    } catch {
+                        print("❌ Failed to reactivate audio session: \(error)")
+                    }
+                    self?.player?.play()
+                    self?.player?.rate = self?.playbackRate ?? 1.0
+                }
+            }
+        @unknown default:
+            break
+        }
+    }
+
+    @objc private func handleAudioSessionRouteChange(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let reasonValue = userInfo[AVAudioSessionRouteChangeReasonKey] as? UInt,
+              let reason = AVAudioSession.RouteChangeReason(rawValue: reasonValue) else { return }
+
+        switch reason {
+        case .newDeviceAvailable, .oldDeviceUnavailable:
+            print("🎧 Audio route changed, ensuring session is active")
+            do {
+                try AVAudioSession.sharedInstance().setActive(true)
+            } catch {
+                print("❌ Failed to activate audio session after route change: \(error)")
+            }
+        default:
+            break
+        }
+    }
+
+    @objc private func handleMediaServicesReset(_ notification: Notification) {
+        print("🔄 Media services were reset, rebuilding audio session and player")
+        setupAudioSession()
+        if let current = currentItem {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                self?.play(item: current, addToQueue: false)
+            }
+        }
+    }
+
+    // MARK: - Background Task Helpers
+
+    private func beginTrackTransitionBackgroundTask() {
+        endTrackTransitionBackgroundTask()
+        trackTransitionBackgroundTask = UIApplication.shared.beginBackgroundTask(withName: "com.peaceplayer.trackTransition") { [weak self] in
+            self?.endTrackTransitionBackgroundTask()
+        }
+        if trackTransitionBackgroundTask != .invalid {
+            print("🔒 Background task started for track transition")
+        }
+    }
+
+    private func endTrackTransitionBackgroundTask() {
+        guard trackTransitionBackgroundTask != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(trackTransitionBackgroundTask)
+        trackTransitionBackgroundTask = .invalid
+        print("🔓 Background task ended for track transition")
+    }
+
     // MARK: - Playback Control
 
     /// Play a track with local file check (plays local file if available, otherwise streams)
@@ -406,6 +543,8 @@ class PlayerState: ObservableObject {
         print("🔊 Creating AVPlayer...")
         player = AVPlayer(playerItem: playerItem)
         player?.volume = Float(volume)
+        // Ensure background playback continues on iOS 16+
+        player?.audiovisualBackgroundPlaybackPolicy = .continuesIfPossible
         // Don't wait to minimize stalling - start immediately and let it buffer as it plays
         player?.automaticallyWaitsToMinimizeStalling = false
         print("✅ AVPlayer created with fast-start config")
@@ -427,26 +566,7 @@ class PlayerState: ObservableObject {
         player?.play()
         player?.rate = playbackRate
         playbackState = .playing
-        
-        // Monitor for actual ready state (for debugging)
-        playerItem.publisher(for: \.status)
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] status in
-                switch status {
-                case .readyToPlay:
-                    print("✅ Player item ready to play (buffered enough)")
-                    self?.retryCount = 0  // Reset retry count on success
-                case .failed:
-                    if let error = self?.player?.currentItem?.error {
-                        print("❌ Player item failed: \(error)")
-                        self?.playbackState = .error("Playback failed")
-                    }
-                default:
-                    break
-                }
-            }
-            .store(in: &cancellables)
-        
+
         print("🔊 Auto-populating queue...")
         QueuePrefetcher.shared.autoPopulateQueue(startingFrom: item.track)
         
@@ -597,6 +717,7 @@ class PlayerState: ObservableObject {
             currentIndex = index
             play(item: item, addToQueue: false)
         }
+        endTrackTransitionBackgroundTask()
     }
     
     private func refreshAndPlay(item: QueueItem, at index: Int) {
@@ -606,24 +727,26 @@ class PlayerState: ObservableObject {
                     if case .failure(let error) = result {
                         print("❌ Failed to refresh stream URL: \(error)")
                         self?.playbackState = .error("Failed to load audio")
+                        self?.endTrackTransitionBackgroundTask()
                     }
                 },
                 receiveValue: { [weak self] streamInfo in
                     guard let self = self else { return }
-                    
+
                     // Create new item with fresh URL
                     let refreshedItem = QueueItem(
                         track: item.track,
                         streamUrl: streamInfo.streamUrl,
                         source: .stream
                     )
-                    
+
                     // Update queue with refreshed item
                     self.queue[index] = refreshedItem
-                    
+
                     print("▶️ URL refreshed, playing...")
                     self.currentIndex = index
                     self.play(item: refreshedItem, addToQueue: false)
+                    self.endTrackTransitionBackgroundTask()
                 }
             )
             .store(in: &cancellables)
@@ -1048,7 +1171,8 @@ class PlayerState: ObservableObject {
     
     func nextTrack(useCrossfade: Bool = true, userSkipped: Bool = false) {
         print("⏭️ nextTrack called. Queue count: \(queue.count), currentIndex: \(currentIndex)")
-        
+        beginTrackTransitionBackgroundTask()
+
         // Anti-Algorithm: track skip/complete
         if let currentVideoId = currentItem?.track.videoId {
             if userSkipped {
@@ -1057,22 +1181,24 @@ class PlayerState: ObservableObject {
         }
         guard !queue.isEmpty else {
             print("⏭️ Queue is empty!")
+            endTrackTransitionBackgroundTask()
             return
         }
-        
+
         if repeatMode == .one {
             // Repeat current
             seek(to: 0)
+            endTrackTransitionBackgroundTask()
             return
         }
-        
+
         let nextIndex = currentIndex + 1
         print("⏭️ Next index: \(nextIndex), queue.count: \(queue.count)")
-        
+
         if nextIndex < queue.count {
             let nextItem = queue[nextIndex]
             print("⏭️ Playing next: \(nextItem.track.title), streamUrl: \(nextItem.streamUrl.prefix(50))...")
-            
+
             // Check if we should use crossfade
             if useCrossfade && CrossfadeManager.shared.isEnabled {
                 performCrossfadeToNextItem(nextItem, at: nextIndex)
@@ -1085,6 +1211,7 @@ class PlayerState: ObservableObject {
             playQueue(at: 0)
         } else {
             print("⏭️ End of queue reached")
+            endTrackTransitionBackgroundTask()
         }
     }
     
@@ -1100,6 +1227,7 @@ class PlayerState: ObservableObject {
         guard CrossfadeManager.shared.canCrossfade() else {
             print("⚠️ Cannot crossfade - nextPlayer not prepared. Falling back to regular playback.")
             playQueue(at: index, isCrossfadeFallback: true)
+            endTrackTransitionBackgroundTask()
             return
         }
         
@@ -1118,22 +1246,24 @@ class PlayerState: ObservableObject {
             guard self.player != nil else {
                 print("❌ Crossfade completed but player is nil - forcing fallback")
                 self.playQueue(at: index, isCrossfadeFallback: true)
+                self.endTrackTransitionBackgroundTask()
                 return
             }
             
             // Setup observers on new player
             self.setupPlayerObservers()
-            
+
             // Update state
             self.playbackState = .playing
-            
+
             // Update remote controls
             self.updateRemoteControls()
-            
+
             // Prepare next track for future crossfade
             self.prepareNextTrackForCrossfade()
-            
+
             print("✅ Crossfade complete, now playing: \(item.track.title)")
+            self.endTrackTransitionBackgroundTask()
         }
         
         // Add to recently played
@@ -1298,19 +1428,43 @@ class PlayerState: ObservableObject {
             name: .AVPlayerItemDidPlayToEndTime,
             object: player.currentItem
         )
-        
-        // Observe buffering
+
+        // Observe playback failure mid-track
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(playerFailedToPlayToEndTime),
+            name: .AVPlayerItemFailedToPlayToEndTime,
+            object: player.currentItem
+        )
+
+        // Observe playback stall
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(playerPlaybackStalled),
+            name: .AVPlayerItemPlaybackStalled,
+            object: player.currentItem
+        )
+
+        // Observe buffering / stall recovery
         player.currentItem?.publisher(for: \.isPlaybackLikelyToKeepUp)
             .receive(on: DispatchQueue.main)
             .sink { [weak self] isLikelyToKeepUp in
-                guard let self = self, self.playbackState == .buffering else { return }
+                guard let self = self else { return }
                 print("🔊 isPlaybackLikelyToKeepUp: \(isLikelyToKeepUp)")
                 if isLikelyToKeepUp {
-                    self.playbackState = .playing
+                    if self.isPlaybackStalled {
+                        self.isPlaybackStalled = false
+                        print("🔄 Recovery from stall: resuming playback")
+                        self.player?.play()
+                        self.player?.rate = self.playbackRate
+                        self.playbackState = .playing
+                    } else if self.playbackState == .buffering {
+                        self.playbackState = .playing
+                    }
                 }
             }
             .store(in: &cancellables)
-        
+
         print("✅ setupPlayerObservers completed")
     }
     
@@ -1388,10 +1542,18 @@ class PlayerState: ObservableObject {
                 }
             }
 
-            // Check if track has reached the end based on effective duration
-            // Dispatch to serial queue to prevent race with playerDidFinishPlaying
-            if current >= effectiveTotal - 0.5 && current <= effectiveTotal + 2.0 && !playbackState.isLoading {
-                print("🏁 Track reached effective duration end (current: \(current), effective: \(effectiveTotal))")
+            // Check if track has reached the end - use actual player duration primarily
+            // Only trigger if within 0.5s of actual duration and duration is valid
+            // This prevents false triggers when metadata duration differs from actual audio
+            let actualDuration = player.currentItem?.duration.seconds ?? 0
+            let isNearActualEnd = actualDuration.isFinite && actualDuration > 0 && current >= actualDuration - 0.5
+            let isNearEffectiveEnd = effectiveTotal > 0 && current >= effectiveTotal - 0.5
+            // Require near actual duration, or near effective duration with close match (< 5s difference)
+            let durationMismatch = abs(actualDuration - effectiveTotal) < 5
+            let shouldTriggerCompletion = isNearActualEnd || (isNearEffectiveEnd && durationMismatch)
+
+            if shouldTriggerCompletion && !playbackState.isLoading {
+                print("🏁 Track reached end (current: \(current), actual: \(actualDuration), effective: \(effectiveTotal))")
                 completionQueue.async { [weak self] in
                     self?.handleTrackCompletion()
                 }
@@ -1466,8 +1628,38 @@ class PlayerState: ObservableObject {
             return
         }
         // Dispatch to serial queue to prevent race with updateProgress
+        beginTrackTransitionBackgroundTask()
         completionQueue.async { [weak self] in
             self?.handleTrackCompletion()
+        }
+    }
+
+    @objc private func playerFailedToPlayToEndTime(_ notification: Notification) {
+        let error = notification.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? Error
+        print("❌ Player failed to play to end time: \(error?.localizedDescription ?? "Unknown error")")
+
+        if let error = error as NSError? {
+            print("❌ Failure domain: \(error.domain), code: \(error.code)")
+        }
+
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            if self.retryCount < self.maxRetries, let item = self.currentItem {
+                self.retryCount += 1
+                print("🔄 Retrying after mid-track failure (attempt \(self.retryCount)/\(self.maxRetries))...")
+                self.refreshAndPlayCurrentItem()
+            } else {
+                print("❌ Max retries reached after failure, skipping to next track")
+                self.nextTrack()
+            }
+        }
+    }
+
+    @objc private func playerPlaybackStalled(_ notification: Notification) {
+        print("⚠️ Playback stalled (buffer underrun)")
+        DispatchQueue.main.async { [weak self] in
+            self?.isPlaybackStalled = true
+            self?.playbackState = .buffering
         }
     }
 
@@ -1521,6 +1713,7 @@ class PlayerState: ObservableObject {
         // Move to next track on main thread
         DispatchQueue.main.async { [weak self] in
             self?.nextTrack()
+            self?.endTrackTransitionBackgroundTask()
         }
     }
     

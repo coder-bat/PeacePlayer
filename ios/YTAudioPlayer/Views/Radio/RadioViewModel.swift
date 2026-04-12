@@ -11,6 +11,7 @@ import Combine
 enum RadioSection: String, CaseIterable {
     case stations = "Stations"
     case podcasts = "Podcasts"
+    case audiobooks = "Books"
     case songRadio = "Song Radio"
 }
 
@@ -32,10 +33,23 @@ class RadioViewModel: ObservableObject {
     @Published var isLoadingPodcasts = false
     
     // Song Radio
+    @Published var songRadioSearchResults: [Track] = []
     @Published var songRadioTracks: [Track] = []
     @Published var songRadioSeed: Track?
     @Published var isLoadingSongRadio = false
     @Published var recentSongRadios: [Track] = []
+    
+    // Audiobooks
+    @Published var topAudiobooks: [Audiobook] = []
+    @Published var audiobookSearchResults: [Audiobook] = []
+    @Published var audiobookGenreResults: [Audiobook] = []
+    @Published var selectedAudiobookGenre: String = ""
+    @Published var isLoadingAudiobooks = false
+    
+    // Audiobook chapters (for detail view)
+    @Published var currentChapters: [AudiobookChapter] = []
+    @Published var currentChaptersCoverUrl: String = ""
+    @Published var isLoadingChapters = false
     
     // Podcast episodes (for detail view)
     @Published var currentEpisodes: [PodcastEpisode] = []
@@ -49,6 +63,7 @@ class RadioViewModel: ObservableObject {
     
     static let radioGenres = ["lofi", "jazz", "classical", "electronic", "ambient", "hiphop", "rock", "pop", "news", "chill"]
     static let podcastGenres = ["Comedy", "Technology", "True Crime", "News", "Education", "Science", "Music", "Business", "Health", "Sports"]
+    static let audiobookGenres = ["Fiction", "Science Fiction", "Mystery", "Romance", "Fantasy", "History", "Philosophy", "Poetry", "Biography", "Children"]
     
     init() {
         loadRecentSongRadios()
@@ -60,14 +75,23 @@ class RadioViewModel: ObservableObject {
             .debounce(for: .milliseconds(500), scheduler: DispatchQueue.main)
             .removeDuplicates()
             .sink { [weak self] query in
-                guard let self = self, !query.isEmpty else { return }
+                guard let self = self else { return }
+                guard !query.isEmpty else {
+                    self.songRadioSearchResults = []
+                    self.stationSearchResults = []
+                    self.podcastSearchResults = []
+                    self.audiobookSearchResults = []
+                    return
+                }
                 switch self.selectedSection {
                 case .stations:
                     self.searchStations(query: query)
                 case .podcasts:
                     self.searchPodcasts(query: query)
+                case .audiobooks:
+                    self.searchAudiobooks(query: query)
                 case .songRadio:
-                    break
+                    self.searchSongRadio(query: query)
                 }
             }
     }
@@ -75,7 +99,8 @@ class RadioViewModel: ObservableObject {
     // MARK: - Radio Stations
     
     func loadTopStations() {
-        guard topStations.isEmpty else { return }
+        // Remove lazy loading guard - always refresh to ensure data is fresh
+        // guard topStations.isEmpty else { return }
         isLoadingStations = true
         APIService.shared.getTopRadioStations(limit: 30)
             .sink(receiveCompletion: { [weak self] completion in
@@ -131,7 +156,8 @@ class RadioViewModel: ObservableObject {
     // MARK: - Podcasts
     
     func loadTopPodcasts() {
-        guard topPodcasts.isEmpty else { return }
+        // Remove lazy loading guard - always refresh to ensure data is fresh
+        // guard topPodcasts.isEmpty else { return }
         isLoadingPodcasts = true
         APIService.shared.getTopPodcasts(limit: 20)
             .sink(receiveCompletion: { [weak self] completion in
@@ -181,7 +207,96 @@ class RadioViewModel: ObservableObject {
         HapticManager.medium()
     }
     
+    // MARK: - Audiobooks
+    
+    func loadTopAudiobooks() {
+        // Remove lazy loading guard - always refresh to ensure data is fresh
+        // guard topAudiobooks.isEmpty else { return }
+        isLoadingAudiobooks = true
+        APIService.shared.getTopAudiobooks(limit: 20)
+            .sink(receiveCompletion: { [weak self] completion in
+                self?.isLoadingAudiobooks = false
+                if case .failure = completion {
+                    self?.setError("Failed to load audiobooks")
+                }
+            }, receiveValue: { [weak self] books in
+                self?.topAudiobooks = books
+            })
+            .store(in: &cancellables)
+    }
+    
+    func searchAudiobooks(query: String) {
+        isLoadingAudiobooks = true
+        isSearching = true
+        APIService.shared.searchAudiobooks(query: query, limit: 20)
+            .sink(receiveCompletion: { [weak self] completion in
+                self?.isLoadingAudiobooks = false
+                self?.isSearching = false
+                if case .failure = completion {
+                    self?.setError("Search failed")
+                }
+            }, receiveValue: { [weak self] books in
+                self?.audiobookSearchResults = books
+            })
+            .store(in: &cancellables)
+    }
+    
+    func loadAudiobooksByGenre(_ genre: String) {
+        selectedAudiobookGenre = genre
+        audiobookGenreResults = []
+        isLoadingAudiobooks = true
+        APIService.shared.getAudiobooksByGenre(genre: genre, limit: 20)
+            .sink(receiveCompletion: { [weak self] completion in
+                self?.isLoadingAudiobooks = false
+                if case .failure = completion {
+                    self?.setError("Failed to load genre audiobooks")
+                }
+            }, receiveValue: { [weak self] books in
+                self?.audiobookGenreResults = books
+            })
+            .store(in: &cancellables)
+    }
+    
+    func loadChapters(for book: Audiobook) {
+        isLoadingChapters = true
+        currentChapters = []
+        currentChaptersCoverUrl = ""
+        let rssUrl = book.rssUrl.isEmpty ? nil : book.rssUrl
+        APIService.shared.getAudiobookChapters(bookId: book.id, rssUrl: rssUrl)
+            .sink(receiveCompletion: { [weak self] completion in
+                self?.isLoadingChapters = false
+                if case .failure = completion {
+                    self?.setError("Failed to load chapters")
+                }
+            }, receiveValue: { [weak self] response in
+                self?.currentChapters = response.chapters
+                self?.currentChaptersCoverUrl = response.coverUrl
+            })
+            .store(in: &cancellables)
+    }
+    
+    func playChapter(_ chapter: AudiobookChapter, from book: Audiobook) {
+        PlayerState.shared.playAudiobookChapter(chapter, chapters: currentChapters, bookTitle: book.title, bookId: book.id)
+        HapticManager.medium()
+    }
+    
     // MARK: - Song Radio
+    
+    private func searchSongRadio(query: String) {
+        isSearching = true
+        songRadioSearchResults = []
+        
+        APIService.shared.search(query: query, limit: 20)
+            .sink(receiveCompletion: { [weak self] completion in
+                self?.isSearching = false
+                if case .failure = completion {
+                    self?.setError("Search failed")
+                }
+            }, receiveValue: { [weak self] tracks in
+                self?.songRadioSearchResults = tracks
+            })
+            .store(in: &cancellables)
+    }
     
     func startSongRadio(from track: Track) {
         songRadioSeed = track

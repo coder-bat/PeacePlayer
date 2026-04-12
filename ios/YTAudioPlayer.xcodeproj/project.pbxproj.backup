@@ -28,6 +28,7 @@
 		27129EDE50F530DACA2F06C6 /* SharedNowPlayingState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39607B6AF4B8C14661E4BD57 /* SharedNowPlayingState.swift */; };
 		28D77829AC53C12E84404744 /* WaveformService.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBE8F43DE06B1E954F4B8253 /* WaveformService.swift */; };
 		28DA1B0BE3D506C0F8F453BD /* VibeButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FD6C9133D1AAC6ED27C1C6E /* VibeButton.swift */; };
+		2966777DF1CECB9150E37B07 /* PlexAuthManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 128A8B744AFCF1C683B53156 /* PlexAuthManager.swift */; };
 		31D763D1C31605E03A21E40A /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A4D4641A6DFB5120002B115 /* ContentView.swift */; };
 		3AED7D7B7AFFE647BBE51BB6 /* PlaylistPreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8058065A2605621D9ACACE55 /* PlaylistPreviewView.swift */; };
 		3BB2A579043A9DD6436D840D /* LyricsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18E15FD0563E96D55099054E /* LyricsView.swift */; };
@@ -47,6 +48,7 @@
 		4BC5091048EA1A3A2A7E84C3 /* CDPlaybackQueue.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C24DADEFA01341F4375FFC7 /* CDPlaybackQueue.swift */; };
 		4C726AD1EF1C2CDF7FDEAE4A /* APIService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2DC7C7A6C85A67E6E8A396B7 /* APIService.swift */; };
 		4D6A527EE649761ECB230D05 /* WaveformSeekBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = F840DBF6CA592DD70E72DE96 /* WaveformSeekBar.swift */; };
+		52FA110C52A4A15C6C9475E1 /* PlexLibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3522292D899B74C29B70B30 /* PlexLibraryView.swift */; };
 		53DA8B167595D7F4ADF19A19 /* PeacePlayerWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = EEF09BAF35538031E49EF185 /* PeacePlayerWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		571D3F2F6C4A72685CCB351C /* DownloadManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81EA1A4BB116D2F93B0F6583 /* DownloadManager.swift */; };
 		59FD33DCC881E466C04441AA /* AudioFileManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EF0530BEA3CA49F77294BD5 /* AudioFileManager.swift */; };
@@ -55,15 +57,18 @@
 		64C1ECE13E01AD382B4686CB /* WidgetSyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B50C9E287B0A4F7F51A35D9E /* WidgetSyncService.swift */; };
 		6B6D4703CDB4630DE579B7BF /* RadioStation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AD9FA06AB4DA3A52DE6B4DE /* RadioStation.swift */; };
 		6D48A263167C2C30184B9CE6 /* AntiAlgorithmEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7F42F1245CDFCF53C966438 /* AntiAlgorithmEngine.swift */; };
+		6FB926D68B49DF05853061E7 /* PlexLibraryViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBF7BEC1125D836E31C827E6 /* PlexLibraryViewModel.swift */; };
 		703966C0D0D178E48D862DCE /* TimeCapsuleSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = BEE7FAB3BC473E98C032B33E /* TimeCapsuleSheet.swift */; };
 		71051DB8F7576A994552CAEE /* CDExplorationSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = C093FD9610D16277ED5165D2 /* CDExplorationSession.swift */; };
 		71A8BD06A9F42E4975F48413 /* DataMigrationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBE97B2112349FC1878F32F2 /* DataMigrationService.swift */; };
 		7212DCD348C334105B0515DF /* SongMemoryManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A308A4408650D872CCCD07E3 /* SongMemoryManager.swift */; };
 		727F0F7304F75D9D10720955 /* CDTimeCapsule.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2D4513B824538A95162D77F /* CDTimeCapsule.swift */; };
 		72F7CB6D449CE6BC37C1264D /* PodcastDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F978DE8926BE1986CFFCC519 /* PodcastDetailView.swift */; };
+		751F34C53EF27397BF40D4E7 /* PlexTokenStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1898E251B8ECE481E5F0255D /* PlexTokenStore.swift */; };
 		767F84264D5A0147FDAF1576 /* Track.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D823E6945F2F8CBC4462532 /* Track.swift */; };
 		77FD52EB43AA6E5026CB07CC /* CDSongMemory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B4016A8C3A0B1C8CBA1EE85 /* CDSongMemory.swift */; };
 		78BD0AAC59A23CF49966023E /* SongMemoryBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00CA580AB7F5354A0D5782EA /* SongMemoryBadge.swift */; };
+		7A984BEE7BBDBC6B87931058 /* PlexAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B27947DCEC2399CE11351A2F /* PlexAPIClient.swift */; };
 		7C07C4E773283C6DEBAA8C16 /* UndoToastView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0AD7FD93A65608ABFCFB8FFC /* UndoToastView.swift */; };
 		7D496762667FBBEEB8155D6B /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E573FA0E404DC92944C06F18 /* SettingsView.swift */; };
 		7E6173BEB257A83B995CB0F4 /* YourMixesSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77F33052A1B8F3DB38A5F463 /* YourMixesSection.swift */; };
@@ -107,6 +112,7 @@
 		D050B1B83ACB8AAF43880F18 /* CDPlayHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7B66197499F82FB42CA5A72 /* CDPlayHistory.swift */; };
 		D37834AA30D9890282DAD69E /* SongMemorySheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66BD129E2917B007A83C0746 /* SongMemorySheet.swift */; };
 		D68E450CDE257229340947C7 /* LibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1AD3F94F37ADACD364BBCA1A /* LibraryView.swift */; };
+		DFA6C819A046A8B46D8D1F5D /* PlexModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 75F3CFAEC157412E33C97C3F /* PlexModels.swift */; };
 		E06930EDFBFCCD1AAFC5CA26 /* ResumeWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56CE1E3E13C142FD71EAE1CE /* ResumeWidget.swift */; };
 		E4A057D3EE2614044B6A02BB /* RadioView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BED7A5996ADE9C070ADDB77E /* RadioView.swift */; };
 		E4DD50078C377D1364FC654B /* NowPlayingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D79E2B6FEEF4F68BA60A747A /* NowPlayingService.swift */; };
@@ -121,6 +127,7 @@
 		F9BB4CD51A3E1CC3C6C97227 /* TimeCapsuleRevealView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D33505D848F52ECC770A4E76 /* TimeCapsuleRevealView.swift */; };
 		FCC18AB0C67C1A57062B9ADD /* PlaylistDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38ADEC1060AD8D53A3241FFA /* PlaylistDetailView.swift */; };
 		FDB9DC04823CF79D053C24CD /* RecentlyPlayedView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6AF72E449870436F01005365 /* RecentlyPlayedView.swift */; };
+		FECDBC78FDB8D995CEF1F91E /* PlexServerSetupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACBF244A54C586C256188FAC /* PlexServerSetupView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -157,8 +164,10 @@
 		0BFC375ECD06E998CB697145 /* QueueRestorer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueueRestorer.swift; sourceTree = "<group>"; };
 		0C5E9F809A825611AC8B66A3 /* GestureCoachOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GestureCoachOverlay.swift; sourceTree = "<group>"; };
 		0F15FD3F181894856FF634D2 /* PeacePlayerWidgetBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeacePlayerWidgetBundle.swift; sourceTree = "<group>"; };
+		128A8B744AFCF1C683B53156 /* PlexAuthManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlexAuthManager.swift; sourceTree = "<group>"; };
 		12DF773336B5A83BFF1FC347 /* PlayerState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerState.swift; sourceTree = "<group>"; };
 		16EA893B48AC5117E1F23A9D /* AudiobookDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudiobookDetailView.swift; sourceTree = "<group>"; };
+		1898E251B8ECE481E5F0255D /* PlexTokenStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlexTokenStore.swift; sourceTree = "<group>"; };
 		18CB5E604384AA12AE84E2D5 /* AddToPlaylistSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddToPlaylistSheet.swift; sourceTree = "<group>"; };
 		18E15FD0563E96D55099054E /* LyricsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LyricsView.swift; sourceTree = "<group>"; };
 		19520AA0983D814BCB1EF105 /* DataManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DataManager.swift; sourceTree = "<group>"; };
@@ -203,6 +212,7 @@
 		6DD3231842D340EFCDFED59A /* NetworkMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkMonitor.swift; sourceTree = "<group>"; };
 		6EEB0E0B1BCCEC02E21A234F /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
 		6FD6C9133D1AAC6ED27C1C6E /* VibeButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VibeButton.swift; sourceTree = "<group>"; };
+		75F3CFAEC157412E33C97C3F /* PlexModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlexModels.swift; sourceTree = "<group>"; };
 		76677939C02D48D7D20B2C63 /* ErrorHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErrorHandler.swift; sourceTree = "<group>"; };
 		77F33052A1B8F3DB38A5F463 /* YourMixesSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = YourMixesSection.swift; sourceTree = "<group>"; };
 		785DCEDCD8EB51E04FA7944C /* CDDownloadedTrack.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CDDownloadedTrack.swift; sourceTree = "<group>"; };
@@ -224,10 +234,13 @@
 		9E3A88A80AAC57024D2E8EDC /* Podcast.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Podcast.swift; sourceTree = "<group>"; };
 		A034B260A80AFAE29827DB83 /* PlaylistManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaylistManager.swift; sourceTree = "<group>"; };
 		A308A4408650D872CCCD07E3 /* SongMemoryManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SongMemoryManager.swift; sourceTree = "<group>"; };
+		A3522292D899B74C29B70B30 /* PlexLibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlexLibraryView.swift; sourceTree = "<group>"; };
 		A712241C4A648E0B24D1E794 /* YTAudioPlayer.xcdatamodel */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcdatamodel; path = YTAudioPlayer.xcdatamodel; sourceTree = "<group>"; };
 		A8BFAE5836927828B11D8D41 /* Audiobook.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Audiobook.swift; sourceTree = "<group>"; };
 		AAF86CA6FC3C6EAD53ACA11F /* CDPlaylist.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CDPlaylist.swift; sourceTree = "<group>"; };
+		ACBF244A54C586C256188FAC /* PlexServerSetupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlexServerSetupView.swift; sourceTree = "<group>"; };
 		B09F71767D3BB29E47770E59 /* GestureEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GestureEngine.swift; sourceTree = "<group>"; };
+		B27947DCEC2399CE11351A2F /* PlexAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlexAPIClient.swift; sourceTree = "<group>"; };
 		B2A9468FFD7CCB3F04EED038 /* LikeButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LikeButton.swift; sourceTree = "<group>"; };
 		B344F2CAD91FD76A9E1E66BD /* MoodBrowseSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoodBrowseSection.swift; sourceTree = "<group>"; };
 		B50C9E287B0A4F7F51A35D9E /* WidgetSyncService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetSyncService.swift; sourceTree = "<group>"; };
@@ -253,6 +266,7 @@
 		D33505D848F52ECC770A4E76 /* TimeCapsuleRevealView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimeCapsuleRevealView.swift; sourceTree = "<group>"; };
 		D353D6C05094B36F8EA15622 /* FullPlayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FullPlayer.swift; sourceTree = "<group>"; };
 		D79E2B6FEEF4F68BA60A747A /* NowPlayingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NowPlayingService.swift; sourceTree = "<group>"; };
+		DBF7BEC1125D836E31C827E6 /* PlexLibraryViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlexLibraryViewModel.swift; sourceTree = "<group>"; };
 		DC0F1A4A8D19C80A2DFBE1FB /* DownloadQueueView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadQueueView.swift; sourceTree = "<group>"; };
 		DD1CDA2632A97CF4AA80E901 /* CDUserStats.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CDUserStats.swift; sourceTree = "<group>"; };
 		DD294748DED4ED3AD0D85677 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
@@ -283,6 +297,7 @@
 		055BFD308927A61F6CEFB1D8 /* Models */ = {
 			isa = PBXGroup;
 			children = (
+				75F3CFAEC157412E33C97C3F /* PlexModels.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -411,6 +426,7 @@
 				B50C9E287B0A4F7F51A35D9E /* WidgetSyncService.swift */,
 				67609839B0C75045B46184AD /* YTAudioPlayer.xcdatamodeld */,
 				3EE2B3910804FD509343D69F /* Entities */,
+				E1B0E62034BCD6E5A999BB0E /* Plex */,
 			);
 			path = Sources;
 			sourceTree = "<group>";
@@ -461,6 +477,16 @@
 			path = PeacePlayerWidget;
 			sourceTree = "<group>";
 		};
+		7C43229BEBF1BF4BC33A5176 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				A3522292D899B74C29B70B30 /* PlexLibraryView.swift */,
+				DBF7BEC1125D836E31C827E6 /* PlexLibraryViewModel.swift */,
+				ACBF244A54C586C256188FAC /* PlexServerSetupView.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
 		A22DEF899D9FF4981C036CF4 /* YTAudioPlayer */ = {
 			isa = PBXGroup;
 			children = (
@@ -497,6 +523,7 @@
 		C4BE6AB19895D4D66EBB0CF0 /* API */ = {
 			isa = PBXGroup;
 			children = (
+				B27947DCEC2399CE11351A2F /* PlexAPIClient.swift */,
 			);
 			path = API;
 			sourceTree = "<group>";
@@ -518,8 +545,21 @@
 		D44A17ED236E770450D262B7 /* Auth */ = {
 			isa = PBXGroup;
 			children = (
+				128A8B744AFCF1C683B53156 /* PlexAuthManager.swift */,
+				1898E251B8ECE481E5F0255D /* PlexTokenStore.swift */,
 			);
 			path = Auth;
+			sourceTree = "<group>";
+		};
+		E1B0E62034BCD6E5A999BB0E /* Plex */ = {
+			isa = PBXGroup;
+			children = (
+				C4BE6AB19895D4D66EBB0CF0 /* API */,
+				D44A17ED236E770450D262B7 /* Auth */,
+				055BFD308927A61F6CEFB1D8 /* Models */,
+				7C43229BEBF1BF4BC33A5176 /* Views */,
+			);
+			path = Plex;
 			sourceTree = "<group>";
 		};
 		E2F30AF9FFD7B234816565DA /* TimeCapsule */ = {
@@ -715,6 +755,13 @@
 				8B1FF9A708E9B49E655C70F5 /* PlaylistManager.swift in Sources */,
 				3AED7D7B7AFFE647BBE51BB6 /* PlaylistPreviewView.swift in Sources */,
 				B5A9F19389EDBC0B9918E9F3 /* PlaylistsView.swift in Sources */,
+				7A984BEE7BBDBC6B87931058 /* PlexAPIClient.swift in Sources */,
+				2966777DF1CECB9150E37B07 /* PlexAuthManager.swift in Sources */,
+				52FA110C52A4A15C6C9475E1 /* PlexLibraryView.swift in Sources */,
+				6FB926D68B49DF05853061E7 /* PlexLibraryViewModel.swift in Sources */,
+				DFA6C819A046A8B46D8D1F5D /* PlexModels.swift in Sources */,
+				FECDBC78FDB8D995CEF1F91E /* PlexServerSetupView.swift in Sources */,
+				751F34C53EF27397BF40D4E7 /* PlexTokenStore.swift in Sources */,
 				17E37B566853BA3E3477D5E9 /* Podcast.swift in Sources */,
 				72F7CB6D449CE6BC37C1264D /* PodcastDetailView.swift in Sources */,
 				CACFA81048924F3A32D52F5D /* QRCodeGenerator.swift in Sources */,

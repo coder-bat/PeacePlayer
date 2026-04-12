@@ -45,6 +45,10 @@ struct ContentView: View {
                 RadioView(viewModel: radioViewModel)
                     .safeAreaInset(edge: .bottom, spacing: 0) { miniPlayerView }
                     .tag(5)
+
+                SettingsView()
+                    .safeAreaInset(edge: .bottom, spacing: 0) { miniPlayerView }
+                    .tag(6)
             }
             .modifier(HideNativeTabBar())
             .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -205,6 +209,7 @@ struct CyberpunkTabBar: View {
         TabDef(icon: "music.note.house.fill",        label: "Library",   tag: 3),
         TabDef(icon: "arrow.down.circle.fill",       label: "Downloads", tag: 4),
         TabDef(icon: "radio.fill",                   label: "Radio",     tag: 5),
+        TabDef(icon: "gearshape.fill",               label: "Settings",  tag: 6),
     ]
 
     var body: some View {
@@ -294,6 +299,8 @@ struct CyberpunkTabItem: View {
                 // Monospaced uppercase label
                 Text(label.uppercased())
                     .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
                     .foregroundColor(isSelected ? .cyberCyan : .cyberDim)
 
                 // Active indicator dot

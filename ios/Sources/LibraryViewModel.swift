@@ -202,7 +202,8 @@ class LibraryViewModel: ObservableObject {
         let item = QueueItem(
             track: trackObj,
             streamUrl: localURL.absoluteString,
-            source: .local(path: localURL.path)
+            source: .local(path: localURL.path),
+            contentSource: .local
         )
         PlayerState.shared.addToQueueNext(item)
     }
@@ -213,7 +214,8 @@ class LibraryViewModel: ObservableObject {
         let item = QueueItem(
             track: trackObj,
             streamUrl: localURL.absoluteString,
-            source: .local(path: localURL.path)
+            source: .local(path: localURL.path),
+            contentSource: .local
         )
         PlayerState.shared.addToQueue(item)
     }

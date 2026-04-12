@@ -8,6 +8,121 @@
 import SwiftUI
 import Combine
 
+// MARK: - All Recently Played View
+struct AllRecentlyPlayedView: View {
+    @Environment(\.dismiss) private var dismiss
+    @StateObject private var viewModel = HomeViewModel()
+
+    var body: some View {
+        NavigationView {
+            ZStack {
+                Color.cyberBackground.ignoresSafeArea()
+
+                VStack(spacing: 0) {
+                    // Play / Shuffle action buttons
+                    if !viewModel.recentlyPlayed.isEmpty {
+                        HStack(spacing: 16) {
+                            Button(action: {
+                                HapticManager.medium()
+                                viewModel.playTrack(viewModel.recentlyPlayed[0])
+                            }) {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "play.fill")
+                                        .font(.system(size: 16, weight: .semibold))
+                                    Text("PLAY")
+                                        .font(.system(size: 14, weight: .bold, design: .monospaced))
+                                }
+                                .foregroundColor(.cyberBackground)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 48)
+                                .background(Color.cyberCyan)
+                                .cornerRadius(8)
+                                .shadow(color: Color.cyberCyan.opacity(0.5), radius: 12, x: 0, y: 0)
+                            }
+
+                            Button(action: {
+                                HapticManager.medium()
+                                let shuffled = viewModel.recentlyPlayed.shuffled()
+                                viewModel.playTrack(shuffled[0])
+                            }) {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "shuffle")
+                                        .font(.system(size: 16, weight: .semibold))
+                                    Text("SHUFFLE")
+                                        .font(.system(size: 14, weight: .bold, design: .monospaced))
+                                }
+                                .foregroundColor(.cyberCyan)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 48)
+                                .background(Color.cyberSurface)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .stroke(Color.cyberCyan.opacity(0.5), lineWidth: 1)
+                                )
+                                .cornerRadius(8)
+                            }
+                        }
+                        .padding(.horizontal)
+                        .padding(.vertical, 12)
+                        .background(Color.cyberBackground)
+                    }
+
+                    List {
+                        ForEach(viewModel.recentlyPlayed) { track in
+                            Button {
+                                viewModel.playTrack(track)
+                            } label: {
+                                HStack(spacing: 12) {
+                                    CachedAsyncImage(url: track.artworkURL) {
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .fill(Color.cyberDim.opacity(0.3))
+                                    }
+                                    .frame(width: 50, height: 50)
+                                    .clipShape(RoundedRectangle(cornerRadius: 8))
+
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(track.title)
+                                            .font(.system(size: 16, weight: .medium))
+                                            .foregroundColor(.white)
+                                            .lineLimit(1)
+                                            .minimumScaleFactor(0.8)
+
+                                        Text(track.displayArtist)
+                                            .font(.system(size: 14))
+                                            .foregroundColor(.cyberDim)
+                                            .lineLimit(1)
+                                            .minimumScaleFactor(0.8)
+                                    }
+
+                                    Spacer()
+                                }
+                            }
+                            .buttonStyle(.plain)
+                            .listRowBackground(Color.cyberSurface)
+                        }
+                    }
+                    .listStyle(.plain)
+                    .background(Color.cyberBackground)
+                }
+            }
+            .navigationTitle("Recently Played")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                    .foregroundColor(.cyberCyan)
+                }
+            }
+            .onAppear {
+                viewModel.loadData()
+            }
+        }
+        .preferredColorScheme(.dark)
+    }
+}
+
 struct HomeView: View {
     @StateObject private var playerState = PlayerState.shared
     @StateObject private var viewModel = HomeViewModel()
@@ -177,9 +292,15 @@ struct HomeView: View {
     private func recentlyPlayedList(tracks: [Track]) -> some View {
         let baseList = List {
             ForEach(tracks) { track in
+                let isCurrentTrack = playerState.currentItem?.track.videoId == track.videoId
+                let isPlaying = isCurrentTrack && playerState.playbackState == .playing
+                let isLoading = isCurrentTrack && (playerState.playbackState == .loading || playerState.playbackState == .buffering)
+
                 HomeRecentTrackRow(
                     track: track,
                     isDownloaded: viewModel.isDownloaded(track),
+                    isPlaying: isPlaying,
+                    isLoading: isLoading,
                     onPlay: {
                         viewModel.playTrack(track)
                     },
@@ -694,7 +815,17 @@ class HomeViewModel: ObservableObject {
         }
     }
 
+    @MainActor
     func playTrack(_ track: Track) {
+        // Show loading indicator immediately before fetching stream URL
+        let loadingItem = QueueItem(
+            track: track,
+            streamUrl: "",
+            source: .stream
+        )
+        PlayerState.shared.currentItem = loadingItem
+        PlayerState.shared.playbackState = .loading
+
         APIService.shared.getStreamUrl(videoId: track.videoId)
             .handleErrors(with: .shared, retry: { [weak self] in
                 self?.playTrack(track)
@@ -757,7 +888,9 @@ class HomeViewModel: ObservableObject {
             }, receiveValue: { [weak self] tracks in
                 guard let self = self, !tracks.isEmpty else { return }
 
-                self.playTrack(tracks[0])
+                Task { @MainActor in
+                    self.playTrack(tracks[0])
+                }
 
                 self.vibeCancellables.removeAll()
                 for track in tracks.dropFirst() {
@@ -784,9 +917,37 @@ class HomeViewModel: ObservableObject {
     }
 }
 
+// MARK: - Playing Bars Indicator
+
+struct PlayingBarsIndicator: View {
+    @State private var animate = false
+
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(0..<3) { index in
+                RoundedRectangle(cornerRadius: 1)
+                    .fill(Color.cyberCyan)
+                    .frame(width: 3, height: animate ? 16 : 6)
+                    .animation(
+                        Animation.easeInOut(duration: 0.4)
+                            .repeatForever(autoreverses: true)
+                            .delay(Double(index) * 0.15),
+                        value: animate
+                    )
+            }
+        }
+        .frame(width: 30, height: 30)
+        .onAppear {
+            animate = true
+        }
+    }
+}
+
 struct HomeRecentTrackRow: View {
     let track: Track
     let isDownloaded: Bool
+    let isPlaying: Bool
+    let isLoading: Bool
     let onPlay: () -> Void
     let onAddToQueue: () -> Void
     let onAddToPlaylist: () -> Void
@@ -818,25 +979,38 @@ struct HomeRecentTrackRow: View {
 
                 Spacer()
 
-                if isDownloaded {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 14))
-                        .foregroundColor(.cyberCyan)
-                }
+                HStack(spacing: 8) {
+                    if isDownloaded {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 14))
+                            .foregroundColor(.cyberCyan)
+                    }
 
-                Image(systemName: "play.fill")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(.cyberCyan)
-                    .frame(width: 30, height: 30)
-                    .background(
-                        Circle()
-                            .fill(Color.cyberSurface)
-                            .overlay(
+                    // Playing/Loading indicator
+                    if isLoading {
+                        ProgressView()
+                            .scaleEffect(0.7)
+                            .tint(.cyberCyan)
+                            .frame(width: 30, height: 30)
+                    } else if isPlaying {
+                        // Animated playing indicator
+                        PlayingBarsIndicator()
+                            .frame(width: 30, height: 30)
+                    } else {
+                        Image(systemName: "play.fill")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(.cyberCyan)
+                            .frame(width: 30, height: 30)
+                            .background(
                                 Circle()
-                                    .stroke(Color.cyberCyan.opacity(0.3), lineWidth: 1)
+                                    .fill(Color.cyberSurface)
+                                    .overlay(
+                                        Circle()
+                                            .stroke(Color.cyberCyan.opacity(0.3), lineWidth: 1)
+                                    )
                             )
-                    )
-            }
+                    }
+                }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
             .background(
@@ -870,125 +1044,11 @@ struct HomeRecentTrackRow: View {
     }
 }
 
-// MARK: - All Recently Played View
-struct AllRecentlyPlayedView: View {
-    @Environment(\.dismiss) private var dismiss
-    @StateObject private var viewModel = HomeViewModel()
-
-    var body: some View {
-        NavigationView {
-            ZStack {
-                Color.cyberBackground.ignoresSafeArea()
-
-                VStack(spacing: 0) {
-                    // Play / Shuffle action buttons
-                    if !viewModel.recentlyPlayed.isEmpty {
-                        HStack(spacing: 16) {
-                            Button(action: {
-                                HapticManager.medium()
-                                viewModel.playTrack(viewModel.recentlyPlayed[0])
-                            }) {
-                                HStack(spacing: 6) {
-                                    Image(systemName: "play.fill")
-                                        .font(.system(size: 16, weight: .semibold))
-                                    Text("PLAY")
-                                        .font(.system(size: 14, weight: .bold, design: .monospaced))
-                                }
-                                .foregroundColor(.cyberBackground)
-                                .frame(maxWidth: .infinity)
-                                .frame(height: 48)
-                                .background(Color.cyberCyan)
-                                .cornerRadius(8)
-                                .shadow(color: Color.cyberCyan.opacity(0.5), radius: 12, x: 0, y: 0)
-                            }
-
-                            Button(action: {
-                                HapticManager.medium()
-                                let shuffled = viewModel.recentlyPlayed.shuffled()
-                                viewModel.playTrack(shuffled[0])
-                            }) {
-                                HStack(spacing: 6) {
-                                    Image(systemName: "shuffle")
-                                        .font(.system(size: 16, weight: .semibold))
-                                    Text("SHUFFLE")
-                                        .font(.system(size: 14, weight: .bold, design: .monospaced))
-                                }
-                                .foregroundColor(.cyberCyan)
-                                .frame(maxWidth: .infinity)
-                                .frame(height: 48)
-                                .background(Color.cyberSurface)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 8)
-                                        .stroke(Color.cyberCyan.opacity(0.5), lineWidth: 1)
-                                )
-                                .cornerRadius(8)
-                            }
-                        }
-                        .padding(.horizontal)
-                        .padding(.vertical, 12)
-                        .background(Color.cyberBackground)
-                    }
-
-                    List {
-                        ForEach(viewModel.recentlyPlayed) { track in
-                            Button {
-                                viewModel.playTrack(track)
-                            } label: {
-                                HStack(spacing: 12) {
-                                    CachedAsyncImage(url: track.artworkURL) {
-                                        RoundedRectangle(cornerRadius: 8)
-                                            .fill(Color.cyberDim.opacity(0.3))
-                                    }
-                                    .frame(width: 50, height: 50)
-                                    .clipShape(RoundedRectangle(cornerRadius: 8))
-
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text(track.title)
-                                            .font(.system(size: 16, weight: .medium))
-                                            .foregroundColor(.white)
-                                            .lineLimit(1)
-                                            .minimumScaleFactor(0.8)
-
-                                        Text(track.displayArtist)
-                                            .font(.system(size: 14))
-                                            .foregroundColor(.cyberDim)
-                                            .lineLimit(1)
-                                            .minimumScaleFactor(0.8)
-                                    }
-
-                                    Spacer()
-                                }
-                            }
-                            .buttonStyle(.plain)
-                            .listRowBackground(Color.cyberSurface)
-                        }
-                    }
-                    .listStyle(.plain)
-                    .background(Color.cyberBackground)
-                }
-            }
-            .navigationTitle("Recently Played")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Done") {
-                        dismiss()
-                    }
-                    .foregroundColor(.cyberCyan)
-                }
-            }
-            .onAppear {
-                viewModel.loadData()
-            }
-        }
-        .preferredColorScheme(.dark)
-    }
-}
-
 // MARK: - Preview
 struct HomeView_Previews: PreviewProvider {
     static var previews: some View {
         HomeView()
             .preferredColorScheme(.dark)
     }
+}
 }

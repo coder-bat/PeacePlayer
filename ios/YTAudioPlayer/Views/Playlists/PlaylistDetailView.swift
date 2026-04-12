@@ -24,6 +24,7 @@ struct PlaylistDetailView: View {
     @State private var trackToAdd: Track?
     @State private var memoryTrack: Track?
     @State private var scrollOffset: CGFloat = 0
+    @State private var loadingTrackId: String? = nil
     @Environment(\.dismiss) private var dismiss
 
     private var currentPlaylist: Playlist? {
@@ -328,6 +329,7 @@ struct PlaylistDetailView: View {
             index: index + 1,
             isPlaying: playerState.currentItem?.track.videoId == track.videoId,
             isEditing: isEditing,
+            isLoading: loadingTrackId == track.videoId,
             downloadTask: downloadManager.taskForTrack(track),
             isDownloaded: downloadManager.taskForTrack(track)?.status == .completed,
             hasMemory: songMemoryManager.hasMemory(for: track),
@@ -354,7 +356,20 @@ struct PlaylistDetailView: View {
         playlistManager.playPlaylist(playlist.id, shuffle: shuffle)
     }
 
+    @MainActor
     private func playTrack(_ track: Track) {
+        loadingTrackId = track.videoId
+        HapticManager.light()
+
+        // Show loading indicator immediately before fetching stream URL
+        let loadingItem = QueueItem(
+            track: track,
+            streamUrl: "",
+            source: .stream
+        )
+        playerState.currentItem = loadingItem
+        playerState.playbackState = .loading
+
         APIService.shared.getStreamUrl(videoId: track.videoId)
             .handleErrors(with: .shared)
             .sink(receiveValue: { streamInfo in
@@ -364,11 +379,13 @@ struct PlaylistDetailView: View {
                     source: .stream
                 )
                 playerState.play(item: item)
+                loadingTrackId = nil
             })
             .store(in: &playlistManager.cancellables)
     }
 
     private func addTrackToQueue(_ track: Track) {
+        HapticManager.light()
         APIService.shared.getStreamUrl(videoId: track.videoId)
             .handleErrors(with: .shared)
             .sink(receiveValue: { streamInfo in
@@ -378,12 +395,12 @@ struct PlaylistDetailView: View {
                     source: .stream
                 )
                 playerState.addToQueue(item)
-                HapticManager.light()
             })
             .store(in: &playlistManager.cancellables)
     }
 
     private func playTrackNext(_ track: Track) {
+        HapticManager.light()
         APIService.shared.getStreamUrl(videoId: track.videoId)
             .handleErrors(with: .shared)
             .sink(receiveValue: { streamInfo in
@@ -393,7 +410,6 @@ struct PlaylistDetailView: View {
                     source: .stream
                 )
                 playerState.addToQueueNext(item)
-                HapticManager.light()
             })
             .store(in: &playlistManager.cancellables)
     }
@@ -659,6 +675,7 @@ struct CyberpunkTrackRow: View {
     let index: Int
     let isPlaying: Bool
     let isEditing: Bool
+    let isLoading: Bool
     let downloadTask: DownloadTask?
     let isDownloaded: Bool
     let hasMemory: Bool
@@ -754,10 +771,16 @@ struct CyberpunkTrackRow: View {
                 }
 
                 // Play button
-                Button(action: onPlay) {
-                    Image(systemName: isPlaying ? "pause.fill" : "play.fill")
-                        .font(.system(size: 26))
-                        .foregroundColor(isPlaying ? Theme.cyberCyan : Theme.cyberDim)
+                if isLoading {
+                    ProgressView()
+                        .progressViewStyle(CircularProgressViewStyle(tint: Theme.cyberCyan))
+                        .frame(width: 26, height: 26)
+                } else {
+                    Button(action: onPlay) {
+                        Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                            .font(.system(size: 26))
+                            .foregroundColor(isPlaying ? Theme.cyberCyan : Theme.cyberDim)
+                    }
                 }
             }
         }

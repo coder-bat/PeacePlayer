@@ -4,9 +4,9 @@ import SwiftUI
 
 struct RadioView: View {
     @ObservedObject var viewModel: RadioViewModel
+    @ObservedObject var library = AudiobookLibrary.shared
     @State private var showPodcastDetail: PodcastShow?
     @State private var selectedAudiobook: Audiobook?
-    @State private var showAudiobookDetail = false
 
     private func dismissKeyboard() {
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
@@ -66,10 +66,8 @@ struct RadioView: View {
         .sheet(item: $showPodcastDetail) { show in
             PodcastDetailView(show: show, viewModel: viewModel)
         }
-        .sheet(isPresented: $showAudiobookDetail) {
-            if let book = selectedAudiobook {
-                AudiobookDetailView(book: book, viewModel: viewModel, library: .shared)
-            }
+        .sheet(item: $selectedAudiobook) { book in
+            AudiobookDetailView(book: book, viewModel: viewModel, library: .shared)
         }
     }
 
@@ -480,18 +478,46 @@ struct RadioView: View {
                         .tint(Theme.cyberCyan)
                         .padding(20)
                 } else if viewModel.audiobookSearchResults.isEmpty {
-                    emptySearchState(icon: "book.closed", text: "No audiobooks found")
+                    if viewModel.errorMessage != nil {
+                        VStack(spacing: 12) {
+                            Image(systemName: "wifi.slash")
+                                .font(.system(size: 36))
+                                .foregroundColor(Theme.cyberDim)
+                            Text("SEARCH_FAILED")
+                                .font(.system(size: 12, weight: .bold, design: .monospaced))
+                                .foregroundColor(Theme.cyberDim)
+                            Button {
+                                HapticManager.light()
+                                viewModel.searchAudiobooks(query: viewModel.searchText)
+                            } label: {
+                                Text("RETRY")
+                                    .font(.system(size: 12, weight: .bold, design: .monospaced))
+                                    .foregroundColor(.black)
+                                    .padding(.horizontal, 20)
+                                    .padding(.vertical, 8)
+                                    .background(Capsule().fill(Theme.cyberCyan))
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 40)
+                    } else {
+                        emptySearchState(icon: "book.closed", text: "No audiobooks found")
+                    }
                 } else {
                     sectionHeader("SEARCH_RESULTS", count: viewModel.audiobookSearchResults.count)
                     ForEach(viewModel.audiobookSearchResults) { book in
                         AudiobookRow(book: book) {
                             selectedAudiobook = book
-                            showAudiobookDetail = true
                         }
                         .padding(.horizontal, 20)
                     }
                 }
             } else {
+                // My Library section (only when not filtering by genre)
+                if !library.books.isEmpty && viewModel.selectedAudiobookGenre.isEmpty {
+                    myLibrarySection
+                }
+
                 audiobookGenreChips
 
                 if !viewModel.selectedAudiobookGenre.isEmpty {
@@ -507,7 +533,6 @@ struct RadioView: View {
                                 ForEach(viewModel.topAudiobooks.prefix(10)) { book in
                                     AudiobookCard(book: book) {
                                         selectedAudiobook = book
-                                        showAudiobookDetail = true
                                     }
                                 }
                             }
@@ -531,6 +556,45 @@ struct RadioView: View {
         .padding(.top, 8)
     }
 
+    private var myLibrarySection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Image(systemName: "books.vertical.fill")
+                    .font(.system(size: 12))
+                    .foregroundColor(Theme.cyberCyan)
+                Text("MY_LIBRARY")
+                    .font(.system(size: 12, weight: .bold, design: .monospaced))
+                    .foregroundColor(Theme.cyberCyan)
+                Text("(\(library.books.count))")
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundColor(Theme.cyberDim)
+                Spacer()
+            }
+            .padding(.horizontal, 20)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(spacing: 14) {
+                    ForEach(library.books) { libraryBook in
+                        LibraryBookCard(libraryBook: libraryBook) {
+                            HapticManager.light()
+                            selectedAudiobook = libraryBook.audiobook
+                        }
+                    }
+                }
+                .padding(.horizontal, 20)
+            }
+            .overlay(alignment: .trailing) {
+                LinearGradient(
+                    colors: [Theme.cyberBackground.opacity(0), Theme.cyberBackground],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+                .frame(width: 24)
+                .allowsHitTesting(false)
+            }
+        }
+    }
+
     private var audiobookGenreChips: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
@@ -544,17 +608,25 @@ struct RadioView: View {
                         }
                         HapticManager.light()
                     } label: {
-                        Text(genre.uppercased())
-                            .font(.system(size: 10, weight: .bold, design: .monospaced))
-                            .foregroundColor(viewModel.selectedAudiobookGenre == genre ? .black : Theme.cyberCyan)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 10)
-                            .background(
-                                Capsule()
-                                    .fill(viewModel.selectedAudiobookGenre == genre ? Theme.cyberCyan : Color.clear)
-                            )
-                            .overlay(Capsule().stroke(Theme.cyberCyan.opacity(0.3), lineWidth: 1.5))
+                        HStack(spacing: 4) {
+                            if viewModel.selectedAudiobookGenre == genre && viewModel.isLoadingAudiobooks {
+                                ProgressView()
+                                    .scaleEffect(0.6)
+                                    .tint(.black)
+                            }
+                            Text(genre.uppercased())
+                                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                        }
+                        .foregroundColor(viewModel.selectedAudiobookGenre == genre ? .black : Theme.cyberCyan)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                        .background(
+                            Capsule()
+                                .fill(viewModel.selectedAudiobookGenre == genre ? Theme.cyberCyan : Color.clear)
+                        )
+                        .overlay(Capsule().stroke(Theme.cyberCyan.opacity(0.3), lineWidth: 1.5))
                     }
+                    .disabled(viewModel.isLoadingAudiobooks)
                     .accessibilityLabel("\(genre) audiobooks")
                     .accessibilityAddTraits(viewModel.selectedAudiobookGenre == genre ? .isSelected : [])
                 }
@@ -591,7 +663,6 @@ struct RadioView: View {
                     ForEach(books) { book in
                         AudiobookCard(book: book) {
                             selectedAudiobook = book
-                            showAudiobookDetail = true
                         }
                     }
                 }
@@ -870,6 +941,83 @@ struct AudiobookCard: View {
         .buttonStyle(.plain)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(book.title) by \(book.displayAuthors)")
+    }
+}
+
+// MARK: - LibraryBookCard
+
+struct LibraryBookCard: View {
+    let libraryBook: LibraryBook
+    let onTap: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            VStack(alignment: .leading, spacing: 8) {
+                // Cover art with progress overlay
+                ZStack(alignment: .bottom) {
+                    CachedAsyncImage(url: libraryBook.audiobook.coverURL) { image in
+                        image.resizable().aspectRatio(contentMode: .fill)
+                    } placeholder: {
+                        RoundedRectangle(cornerRadius: CornerRadius.sm)
+                            .fill(Theme.cyberSurface)
+                            .overlay(
+                                Image(systemName: "book.closed.fill")
+                                    .font(.title2)
+                                    .foregroundColor(Theme.cyberDim)
+                            )
+                    }
+                    .frame(width: 120, height: 160)
+                    .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm))
+
+                    // Progress bar at bottom of cover
+                    GeometryReader { geo in
+                        VStack {
+                            Spacer()
+                            ZStack(alignment: .leading) {
+                                Rectangle()
+                                    .fill(Color.black.opacity(0.5))
+                                    .frame(height: 3)
+                                Rectangle()
+                                    .fill(libraryBook.isComplete ? Theme.cyberCyan : Theme.cyberMagenta)
+                                    .frame(width: geo.size.width * libraryBook.progress, height: 3)
+                            }
+                        }
+                    }
+                    .frame(width: 120, height: 160)
+                    .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm))
+
+                    // Completion badge
+                    if libraryBook.isComplete {
+                        HStack(spacing: 3) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.system(size: 9))
+                            Text("DONE")
+                                .font(.system(size: 8, weight: .bold, design: .monospaced))
+                        }
+                        .foregroundColor(.black)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Capsule().fill(Theme.cyberCyan))
+                        .padding(.bottom, 8)
+                    }
+                }
+
+                Text(libraryBook.audiobook.title)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.white)
+                    .lineLimit(2)
+                    .frame(width: 120, alignment: .leading)
+
+                Text(libraryBook.progressText)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(Theme.cyberDim)
+                    .frame(width: 120, alignment: .leading)
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(libraryBook.audiobook.title), \(libraryBook.progressText)")
+        .accessibilityHint(libraryBook.isComplete ? "Completed" : "Tap to continue reading")
     }
 }
 

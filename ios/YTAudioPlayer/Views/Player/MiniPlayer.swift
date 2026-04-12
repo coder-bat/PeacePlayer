@@ -72,11 +72,28 @@ struct MiniPlayer: View {
                                 .lineLimit(1)
                         }
                     } else {
-                        Text(playerState.currentItem?.track.displayArtist ?? "")
-                            .font(.system(size: 13))
-                            .foregroundColor(Theme.cyberDim)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.8)
+                        HStack(spacing: 6) {
+                            Text(playerState.currentItem?.track.displayArtist ?? "")
+                                .font(.system(size: 13))
+                                .foregroundColor(Theme.cyberDim)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.8)
+
+                            // Source indicator
+                            if let contentSource = playerState.currentItem?.contentSource {
+                                HStack(spacing: 2) {
+                                    Image(systemName: contentSource.iconName)
+                                        .font(.system(size: 8))
+                                    Text(contentSource.displayName)
+                                        .font(.system(size: 8, weight: .medium))
+                                }
+                                .foregroundColor(contentSource.tintColor)
+                                .padding(.horizontal, 4)
+                                .padding(.vertical, 1)
+                                .background(contentSource.tintColor.opacity(0.15))
+                                .cornerRadius(4)
+                            }
+                        }
                     }
                 }
                 .frame(maxWidth: 180, alignment: .leading)

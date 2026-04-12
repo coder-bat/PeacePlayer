@@ -219,9 +219,14 @@ class NowPlayingService {
     }
 
     // MARK: - Artwork Loading
+    private var currentArtworkCancellable: AnyCancellable?
+
     private func loadArtwork(url: URL, videoId: String, completion: @escaping (MPMediaItemArtwork?) -> Void) {
+        // Cancel any in-flight artwork load to prevent memory growth
+        currentArtworkCancellable?.cancel()
+
         // Use ImageCache to load image
-        ImageCache.shared.image(for: url)
+        currentArtworkCancellable = ImageCache.shared.image(for: url)
             .receive(on: DispatchQueue.main)
             .first()
             .sink { image in
@@ -232,7 +237,6 @@ class NowPlayingService {
                     completion(nil)
                 }
             }
-            .store(in: &cancellables)
     }
 
     // MARK: - Artwork Cache Management

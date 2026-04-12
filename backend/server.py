@@ -1473,11 +1473,22 @@ async def get_audiobook_chapters(
                     meta_resp.raise_for_status()
                     files = meta_resp.json().get("result", [])
 
-                    audio_files = [
+                    # Prefer higher quality: VBR > 128Kbps, skip 64Kbps duplicates
+                    all_mp3 = [
                         f for f in files
-                        if f.get("format") in ("VBR MP3", "128Kbps MP3", "64Kbps MP3")
-                        or f.get("name", "").endswith(".mp3")
+                        if f.get("name", "").endswith(".mp3")
                     ]
+                    # Group by base name (without _64kb suffix)
+                    seen_bases = set()
+                    audio_files = []
+                    # Sort so VBR/128k come before 64kb variants
+                    all_mp3.sort(key=lambda f: (f.get("name", ""), "64kb" in f.get("name", "")))
+                    for f in all_mp3:
+                        name = f.get("name", "")
+                        base = name.replace("_64kb", "").replace("_128kb", "")
+                        if base not in seen_bases:
+                            seen_bases.add(base)
+                            audio_files.append(f)
                     audio_files.sort(key=lambda f: f.get("name", ""))
 
                     chapters = []
@@ -1573,6 +1584,60 @@ async def get_audiobook_chapters(
         raise HTTPException(
             status_code=502, detail=f"Audiobook chapters failed: {str(e)}"
         )
+
+
+# --- Guitar Chords ---
+@app.get("/chords")
+@limiter.limit("30/minute")
+async def get_chords(request: Request, title: str = Query(...), artist: str = Query("")):
+    """Search Songsterr for guitar chords/tabs matching a song title and artist."""
+    query = f"{title} {artist}".strip()
+    try:
+        resp = _requests.get(
+            "https://www.songsterr.com/api/songs",
+            params={"pattern": query},
+            timeout=6,
+            headers={"User-Agent": "Mozilla/5.0"}
+        )
+        resp.raise_for_status()
+        songs = resp.json()
+    except Exception as e:
+        logging.warning(f"Songsterr search failed: {e}")
+        raise HTTPException(status_code=502, detail="Chord search service unavailable")
+
+    if not songs:
+        raise HTTPException(status_code=404, detail="No chords found for this song")
+
+    top = songs[0]
+    song_id = top.get("songId", 0)
+    song_title = top.get("title", title)
+    song_artist = top.get("artist", artist)
+
+    def slugify(text: str) -> str:
+        text = text.lower().strip()
+        text = re.sub(r"[^\w\s-]", "", text)
+        return re.sub(r"[\s_]+", "-", text)
+
+    artist_slug = slugify(song_artist)
+    title_slug = slugify(song_title)
+
+    if artist_slug and title_slug:
+        tab_url = f"https://www.songsterr.com/a/wsa/{artist_slug}-{title_slug}-tab-s{song_id}"
+    else:
+        tab_url = f"https://www.songsterr.com/?pattern={query.replace(' ', '+')}"
+
+    has_chords = top.get("hasChords", False)
+    has_player = top.get("hasPlayer", False)
+
+    return {
+        "found": True,
+        "title": song_title,
+        "artist": song_artist,
+        "url": tab_url,
+        "songsterrId": song_id,
+        "hasChords": has_chords,
+        "hasPlayer": has_player,
+    }
 
 
 # --- Health check ---

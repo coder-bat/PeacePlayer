@@ -44,6 +44,7 @@ struct FullPlayer: View {
     @State private var showTimeCapsule = false
     @State private var showTimeCapsuleVault = false
     @State private var showAntiAlgorithm = false
+    @State private var showChords = false
     @State private var showGestureHints = false
     @State private var playbackSpeed: Float = 1.0
     @State private var isPulsing = false
@@ -177,6 +178,9 @@ struct FullPlayer: View {
             .sheet(isPresented: $showAntiAlgorithm) {
                 AntiAlgorithmView()
             }
+            .sheet(isPresented: $showChords) {
+                ChordsView()
+            }
             .offset(y: dragOffset)
             .onAppear {
                 extractDominantColor()
@@ -212,9 +216,8 @@ struct FullPlayer: View {
                 }
                 .frame(height: 0)
 
-                VStack(spacing: 10) {
+                VStack(spacing: 20) {
                     artworkSection
-                        .padding(.top, 6)
                     trackInfoSection
                     playbackControlsSection
                     VolumeSlider()
@@ -380,84 +383,104 @@ struct FullPlayer: View {
         }
     }
     
-    // MARK: - Artwork Section
+    // MARK: - Artwork Section (full-width cyberpunk hero banner)
     private var artworkSection: some View {
-        GeometryReader { geometry in
-            let size = min(geometry.size.width - 48, 380)
+        let w = UIScreen.main.bounds.width
+        let h = w * 0.68          // ~3:2 panoramic — room for album art without going too flat
+        let slash: CGFloat = 40   // diagonal drop: right side is 40pt higher than left
+
+        return ZStack {
+            // Artwork layer
             ZStack {
-                // Artwork view
-                ZStack {
-                    ArtworkImage(
-                        url: playerState.currentItem?.track.artworkURL,
-                        size: size
+                Color.cyberDim.opacity(0.15)
+                    .overlay(
+                        Image(systemName: "music.note")
+                            .font(.system(size: 56))
+                            .foregroundColor(.cyberDim)
                     )
+                CachedAsyncImage(url: playerState.currentItem?.track.artworkURL) { EmptyView() }
+                    .frame(width: w, height: h)
 
-                    if playerState.playbackState.isLoading {
-                        RoundedRectangle(cornerRadius: CornerRadius.md)
-                            .fill(Color.black.opacity(0.5))
-                        VStack(spacing: 16) {
-                            ProgressView()
-                                .scaleEffect(1.5)
-                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                            Text("Loading...")
-                                .font(.subheadline)
-                                .foregroundColor(.white)
-                        }
+                if playerState.playbackState.isLoading {
+                    Color.black.opacity(0.5)
+                    VStack(spacing: 16) {
+                        ProgressView()
+                            .scaleEffect(1.5)
+                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                        Text("Loading...")
+                            .font(.subheadline)
+                            .foregroundColor(.white)
                     }
                 }
-                .opacity(showingVisualizer ? 0 : 1)
-                .rotation3DEffect(.degrees(showingVisualizer ? -90 : 0), axis: (x: 0, y: 1, z: 0))
-
-                // Visualizer view
-                ZStack {
-                    RoundedRectangle(cornerRadius: CornerRadius.md)
-                        .fill(Color.black)
-
-                    NeuralFreqVisualizer(engine: AudioVisualizerEngine.shared, style: .neural)
-                        .frame(width: size, height: size)
-                        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
-                }
-                .opacity(showingVisualizer ? 1 : 0)
-                .rotation3DEffect(.degrees(showingVisualizer ? 0 : 90), axis: (x: 0, y: 1, z: 0))
             }
-            .frame(width: size, height: size)
-            .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
-            .overlay(
-                RoundedRectangle(cornerRadius: CornerRadius.md)
-                    .stroke(
-                        showingVisualizer ? Color.cyberCyan.opacity(0.6) :
-                            (currentTrackIsLiked ? Color.red.opacity(0.55) : Color.clear),
-                        lineWidth: (showingVisualizer || currentTrackIsLiked) ? 1.5 : 0
-                    )
-            )
-            .shadow(
-                color: showingVisualizer
-                    ? Color.cyberCyan.opacity(0.35)
-                    : (currentTrackIsLiked ? Color.red.opacity(likePulse ? 0.45 : 0.22) : Color.black.opacity(0.3)),
-                radius: showingVisualizer ? 24 : (currentTrackIsLiked ? (likePulse ? 26 : 18) : 20),
-                x: 0, y: 10
-            )
-            .scaleEffect((playerState.playbackState.isPlaying ? 1.0 : 0.94) * (likePulse ? 1.06 : 1.0))
-            .animation(reduceMotion ? .none : .spring(response: 0.5, dampingFraction: 0.75), value: showingVisualizer)
-            .animation(reduceMotion ? .none : .spring(response: 0.3, dampingFraction: 0.8), value: playerState.playbackState.isPlaying)
-            .animation(reduceMotion ? .none : .spring(response: 0.25, dampingFraction: 0.6), value: likePulse)
-            .frame(maxWidth: .infinity, alignment: .center)
-            .onTapGesture(count: 2) {
-                if !showingVisualizer { toggleCurrentTrackLike() }
+            .opacity(showingVisualizer ? 0 : 1)
+            .rotation3DEffect(.degrees(showingVisualizer ? -90 : 0), axis: (x: 0, y: 1, z: 0))
+
+            // Visualizer layer
+            ZStack {
+                Color.black
+                NeuralFreqVisualizer(engine: AudioVisualizerEngine.shared, style: .neural)
+                    .frame(width: w, height: h)
             }
-            .gesture(
-                DragGesture(minimumDistance: 30, coordinateSpace: .local)
-                    .onEnded { value in
-                        let horizontal = abs(value.translation.width)
-                        let vertical = abs(value.translation.height)
-                        guard horizontal > vertical else { return }
-                        withAnimation(reduceMotion ? .none : .spring(response: 0.5, dampingFraction: 0.75)) {
-                            showingVisualizer.toggle()
-                        }
-                    }
-            )
+            .opacity(showingVisualizer ? 1 : 0)
+            .rotation3DEffect(.degrees(showingVisualizer ? 0 : 90), axis: (x: 0, y: 1, z: 0))
         }
-        .aspectRatio(1, contentMode: .fit)
+        .frame(width: w, height: h)
+        // Diagonal clip
+        .clipShape(CyberpunkHeroShape(slashDrop: slash))
+        // Subtle border tracing the full hero shape
+        .overlay(
+            CyberpunkHeroShape(slashDrop: slash)
+                .stroke(
+                    showingVisualizer
+                        ? Color.cyberCyan.opacity(0.45)
+                        : (currentTrackIsLiked ? Color.red.opacity(0.45) : Color.white.opacity(0.07)),
+                    lineWidth: 1
+                )
+        )
+        // Glowing diagonal accent line along the bottom slash
+        .overlay(
+            CyberpunkDiagonalEdge(slashDrop: slash)
+                .stroke(
+                    LinearGradient(
+                        colors: [
+                            Color.cyberCyan.opacity(0.15),
+                            Color.cyberCyan.opacity(showingVisualizer ? 1.0 : 0.75),
+                            Color.cyberCyan.opacity(0.15)
+                        ],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    ),
+                    lineWidth: 2
+                )
+                .shadow(color: Color.cyberCyan.opacity(0.85), radius: 10, x: 0, y: 0)
+        )
+        .shadow(
+            color: showingVisualizer
+                ? Color.cyberCyan.opacity(0.35)
+                : (currentTrackIsLiked ? Color.red.opacity(likePulse ? 0.45 : 0.22) : Color.cyberCyan.opacity(0.1)),
+            radius: showingVisualizer ? 22 : 10,
+            x: 0, y: 6
+        )
+        .scaleEffect(likePulse ? 1.025 : 1.0)
+        .animation(reduceMotion ? .none : .spring(response: 0.5, dampingFraction: 0.75), value: showingVisualizer)
+        .animation(reduceMotion ? .none : .spring(response: 0.25, dampingFraction: 0.6), value: likePulse)
+        // Extend past the parent VStack's 24pt horizontal padding to go edge-to-edge
+        .padding(.horizontal, -24)
+        .onTapGesture(count: 2) {
+            if !showingVisualizer { toggleCurrentTrackLike() }
+        }
+        .gesture(
+            DragGesture(minimumDistance: 30, coordinateSpace: .local)
+                .onEnded { value in
+                    let horizontal = abs(value.translation.width)
+                    let vertical = abs(value.translation.height)
+                    guard horizontal > vertical else { return }
+                    withAnimation(reduceMotion ? .none : .spring(response: 0.5, dampingFraction: 0.75)) {
+                        showingVisualizer.toggle()
+                    }
+                }
+        )
     }
     
     // MARK: - Track Info
@@ -507,6 +530,21 @@ struct FullPlayer: View {
                 Text("Chapter \(playerState.currentChapterIndex + 1) of \(playerState.currentChapters.count)")
                     .font(.system(size: 13, design: .monospaced))
                     .foregroundColor(Theme.cyberDim)
+            }
+
+            // Content Source Indicator
+            if let contentSource = playerState.currentItem?.contentSource {
+                HStack(spacing: 4) {
+                    Image(systemName: contentSource.iconName)
+                        .font(.system(size: 10))
+                    Text(contentSource.displayName)
+                        .font(.system(size: 11, weight: .medium))
+                }
+                .foregroundColor(contentSource.tintColor)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(contentSource.tintColor.opacity(0.15))
+                .cornerRadius(6)
             }
 
             if let memory = songMemoryManager.memory(for: currentTrack) {
@@ -625,7 +663,6 @@ struct FullPlayer: View {
                 progressSection
             }
             primaryControlsSection
-                .padding(.bottom, 6)
             if playerState.contentType == .podcastEpisode || playerState.contentType == .audiobook {
                 Button(action: { cyclePlaybackSpeed() }) {
                     Text(playbackSpeedText)
@@ -637,6 +674,7 @@ struct FullPlayer: View {
                 }
             }
             secondaryControlsRow
+                .padding(.top, 12)
         }
     }
     
@@ -849,6 +887,16 @@ struct FullPlayer: View {
                 }
             )
 
+            // Guitar Chords
+            MoreActionButton(
+                icon: "guitars",
+                title: "Chords",
+                action: {
+                    HapticManager.light()
+                    showChords = true
+                }
+            )
+
             MoreActionButton(
                 icon: songMemoryManager.hasMemory(for: playerState.currentItem?.track) ? "sparkles.rectangle.stack.fill" : "square.and.pencil",
                 title: "Memory",
@@ -879,16 +927,11 @@ struct FullPlayer: View {
                 HapticManager.light()
                 showTimeCapsule = true
             } label: {
-                VStack(spacing: 6) {
-                    Image(systemName: "hourglass")
-                        .font(.system(size: 20))
-                        .foregroundColor(.white)
-                    Text("Capsule")
-                        .font(.caption)
-                        .foregroundColor(Theme.tertiaryText)
-                }
-                .frame(maxWidth: .infinity)
-                .frame(height: 60)
+                Image(systemName: "hourglass")
+                    .font(.system(size: 22))
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 44)
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Time Capsule")
@@ -1058,17 +1101,11 @@ struct MoreActionButton: View {
     
     var body: some View {
         Button(action: action) {
-            VStack(spacing: 6) {
-                Image(systemName: icon)
-                    .font(.system(size: 20))
-                    .foregroundColor(.white)
-                
-                Text(title)
-                    .font(.caption)
-                    .foregroundColor(Theme.tertiaryText)
-            }
-            .frame(maxWidth: .infinity)
-            .frame(height: 60)
+            Image(systemName: icon)
+                .font(.system(size: 22))
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity)
+                .frame(height: 44)
         }
         .buttonStyle(.plain)
     }
@@ -1128,25 +1165,47 @@ struct ArtworkBackground: View {
     }
 }
 
+// MARK: - Cyberpunk Hero Shapes
+
+/// Full clip shape: sharp edges, diagonal bottom slash (left low → right high, i.e. /)
+struct CyberpunkHeroShape: Shape {
+    var slashDrop: CGFloat = 40
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: 0, y: 0))
+        path.addLine(to: CGPoint(x: rect.width, y: 0))
+        path.addLine(to: CGPoint(x: rect.width, y: rect.height - slashDrop))
+        path.addLine(to: CGPoint(x: 0, y: rect.height))
+        path.closeSubpath()
+        return path
+    }
+}
+
+/// Just the bottom diagonal — used for the glowing cyan accent stroke
+struct CyberpunkDiagonalEdge: Shape {
+    var slashDrop: CGFloat = 40
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: 0, y: rect.height))
+        path.addLine(to: CGPoint(x: rect.width, y: rect.height - slashDrop))
+        return path
+    }
+}
+
 // MARK: - AirPlay Button
 struct AirPlayButton: View {
     var body: some View {
         ZStack {
-            // Visual content
-            VStack(spacing: 6) {
-                AirPlayIcon()
-                    .frame(width: 20, height: 20)
-                
-                Text("AirPlay")
-                    .font(.caption)
-                    .foregroundColor(Theme.tertiaryText)
-            }
-            
+            AirPlayIcon()
+                .frame(width: 22, height: 22)
+
             // Invisible but tappable route picker overlay
             AirPlayRoutePickerView()
         }
         .frame(maxWidth: .infinity)
-        .frame(height: 60)
+        .frame(height: 44)
     }
 }
 
