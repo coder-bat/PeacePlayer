@@ -20,15 +20,15 @@ struct SongMemoryBadge: View {
                 .minimumScaleFactor(0.8)
         }
         .font(.system(size: 10, weight: .bold, design: .monospaced))
-        .foregroundColor(.cyberYellow)
-        .padding(.horizontal, 8)
+        .foregroundColor(Theme.cyberYellow)
+        .padding(.horizontal, Spacing.xs)
         .padding(.vertical, 5)
         .background(
             Capsule()
-                .fill(Color.cyberYellow.opacity(0.12))
+                .fill(Theme.cyberYellow.opacity(0.12))
                 .overlay(
                     Capsule()
-                        .stroke(Color.cyberYellow.opacity(0.3), lineWidth: 1)
+                        .stroke(Theme.cyberYellow.opacity(0.3), lineWidth: 1)
                 )
         )
     }

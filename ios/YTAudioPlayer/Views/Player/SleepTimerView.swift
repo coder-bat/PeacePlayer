@@ -71,6 +71,7 @@ class SleepTimer: ObservableObject {
 struct SleepTimerView: View {
     @StateObject private var timer = SleepTimer.shared
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) var reduceMotion
 
     var body: some View {
         NavigationView {
@@ -122,7 +123,7 @@ struct SleepTimerView: View {
                     .stroke(Color.cyberCyan, style: StrokeStyle(lineWidth: 12, lineCap: .round))
                     .frame(width: 200, height: 200)
                     .rotationEffect(.degrees(-90))
-                    .animation(.linear, value: timer.remainingTime)
+                    .animation(reduceMotion ? .none : .linear, value: timer.remainingTime)
                     .shadow(color: Color.cyberCyan.opacity(0.5), radius: 8)
 
                 VStack {

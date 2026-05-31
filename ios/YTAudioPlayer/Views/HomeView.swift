@@ -21,23 +21,23 @@ struct AllRecentlyPlayedView: View {
                 VStack(spacing: 0) {
                     // Play / Shuffle action buttons
                     if !viewModel.recentlyPlayed.isEmpty {
-                        HStack(spacing: 16) {
+                        HStack(spacing: Spacing.md) {
                             Button(action: {
                                 HapticManager.medium()
                                 viewModel.playTrack(viewModel.recentlyPlayed[0])
                             }) {
-                                HStack(spacing: 6) {
+                                HStack(spacing: Spacing.xxs) {
                                     Image(systemName: "play.fill")
-                                        .font(.system(size: 16, weight: .semibold))
+                                        .font(.system(size: IconSize.sm, weight: .semibold))
                                     Text("PLAY")
                                         .font(.system(size: 14, weight: .bold, design: .monospaced))
                                 }
-                                .foregroundColor(.cyberBackground)
+                                .foregroundColor(Theme.cyberBackground)
                                 .frame(maxWidth: .infinity)
                                 .frame(height: 48)
-                                .background(Color.cyberCyan)
-                                .cornerRadius(8)
-                                .shadow(color: Color.cyberCyan.opacity(0.5), radius: 12, x: 0, y: 0)
+                                .background(Theme.cyberCyan)
+                                .cornerRadius(CornerRadius.sm)
+                                .shadow(color: Theme.cyberCyan.opacity(0.5), radius: 12, x: 0, y: 0)
                             }
 
                             Button(action: {
@@ -45,26 +45,26 @@ struct AllRecentlyPlayedView: View {
                                 let shuffled = viewModel.recentlyPlayed.shuffled()
                                 viewModel.playTrack(shuffled[0])
                             }) {
-                                HStack(spacing: 6) {
+                                HStack(spacing: Spacing.xxs) {
                                     Image(systemName: "shuffle")
-                                        .font(.system(size: 16, weight: .semibold))
+                                        .font(.system(size: IconSize.sm, weight: .semibold))
                                     Text("SHUFFLE")
                                         .font(.system(size: 14, weight: .bold, design: .monospaced))
                                 }
-                                .foregroundColor(.cyberCyan)
+                                .foregroundColor(Theme.cyberCyan)
                                 .frame(maxWidth: .infinity)
                                 .frame(height: 48)
-                                .background(Color.cyberSurface)
+                                .background(Theme.cyberSurface)
                                 .overlay(
-                                    RoundedRectangle(cornerRadius: 8)
-                                        .stroke(Color.cyberCyan.opacity(0.5), lineWidth: 1)
+                                    RoundedRectangle(cornerRadius: CornerRadius.sm)
+                                        .stroke(Theme.cyberCyan.opacity(0.5), lineWidth: 1)
                                 )
-                                .cornerRadius(8)
+                                .cornerRadius(CornerRadius.sm)
                             }
                         }
-                        .padding(.horizontal)
-                        .padding(.vertical, 12)
-                        .background(Color.cyberBackground)
+                        .padding(.horizontal, Spacing.md)
+                        .padding(.vertical, Spacing.sm)
+                        .background(Theme.cyberBackground)
                     }
 
                     List {
@@ -126,6 +126,7 @@ struct AllRecentlyPlayedView: View {
 struct HomeView: View {
     @StateObject private var playerState = PlayerState.shared
     @StateObject private var viewModel = HomeViewModel()
+    @StateObject private var favoriteArtists = FavoriteArtistsManager.shared
     @State private var showAllRecent = false
     @State private var showAddToPlaylistSheet = false
     @State private var selectedTrack: Track?
@@ -151,6 +152,10 @@ struct HomeView: View {
 
                         // Quick vibes - instant play chips
                         vibesSection
+                            .padding(.top, 24)
+
+                        // FOR YOU - Favorite artists suggestions
+                        favoriteArtistsSection
                             .padding(.top, 24)
 
                         // Recently played - horizontal scroll
@@ -204,7 +209,6 @@ struct HomeView: View {
                 Text("PeacePlayer")
                     .font(.system(size: 12, weight: .bold, design: .monospaced))
                     .foregroundColor(.cyberCyan)
-                    .glow(color: .cyberCyan, radius: 8)
             }
 
             Spacer()
@@ -259,6 +263,80 @@ struct HomeView: View {
         }
     }
 
+    // MARK: - Favorite Artists Section (FOR YOU)
+    private var favoriteArtistsSection: some View {
+        Group {
+            if !favoriteArtists.isEmpty && !viewModel.artistSuggestions.isEmpty {
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("FOR YOU")
+                        .font(.system(size: 12, weight: .bold, design: .monospaced))
+                        .foregroundColor(.cyberCyan)
+                        .padding(.horizontal, 20)
+
+                    ForEach(favoriteArtists.getArtists(), id: \.self) { artist in
+                        if let tracks = viewModel.artistSuggestions[artist], !tracks.isEmpty {
+                            VStack(alignment: .leading, spacing: 10) {
+                                HStack {
+                                    Text(artist.uppercased())
+                                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                                        .foregroundColor(.cyberMagenta)
+
+                                    Spacer()
+
+                                    Button {
+                                        HapticManager.light()
+                                        viewModel.playVibeTracks(tracks)
+                                    } label: {
+                                        Image(systemName: "play.fill")
+                                            .font(.system(size: 11, weight: .semibold))
+                                            .foregroundColor(.cyberCyan)
+                                            .frame(width: 28, height: 28)
+                                            .background(Color.cyberSurface)
+                                            .cornerRadius(6)
+                                    }
+
+                                    Button {
+                                        HapticManager.light()
+                                        viewModel.playVibeTracks(tracks.shuffled())
+                                    } label: {
+                                        Image(systemName: "shuffle")
+                                            .font(.system(size: 11, weight: .semibold))
+                                            .foregroundColor(.cyberMagenta)
+                                            .frame(width: 28, height: 28)
+                                            .background(Color.cyberSurface)
+                                            .cornerRadius(6)
+                                    }
+                                }
+                                .padding(.horizontal, 20)
+
+                                ScrollView(.horizontal, showsIndicators: false) {
+                                    HStack(spacing: 14) {
+                                        ForEach(tracks) { track in
+                                            ArtistSuggestionCard(track: track) {
+                                                viewModel.playTrack(track)
+                                            } onPlayNext: {
+                                                viewModel.playTrack(track)
+                                                PlayerState.shared.addToQueue(PlayerState.shared.currentItem!)
+                                            } onAddToQueue: {
+                                                viewModel.addToQueue(track)
+                                            } onAddToPlaylist: {
+                                                selectedTrack = track
+                                                showAddToPlaylistSheet = true
+                                            } onDownload: {
+                                                viewModel.downloadTrack(track)
+                                            }
+                                        }
+                                    }
+                                    .padding(.horizontal, 20)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // MARK: - Recently Played
     private var recentlyPlayedSection: some View {
         Group {
@@ -290,6 +368,9 @@ struct HomeView: View {
 
     @ViewBuilder
     private func recentlyPlayedList(tracks: [Track]) -> some View {
+        let rowHeight: CGFloat = 64
+        let contentHeight = CGFloat(tracks.count) * rowHeight
+
         let baseList = List {
             ForEach(tracks) { track in
                 let isCurrentTrack = playerState.currentItem?.track.videoId == track.videoId
@@ -304,14 +385,9 @@ struct HomeView: View {
                     onPlay: {
                         viewModel.playTrack(track)
                     },
-                    onAddToQueue: {
+                    onPlayNext: {
                         HapticManager.light()
                         viewModel.addToQueue(track)
-                    },
-                    onAddToPlaylist: {
-                        HapticManager.light()
-                        selectedTrack = track
-                        showAddToPlaylistSheet = true
                     },
                     onDownload: {
                         HapticManager.light()
@@ -325,7 +401,7 @@ struct HomeView: View {
         }
         .listStyle(.plain)
         .environment(\.defaultMinListRowHeight, 1)
-        .frame(height: CGFloat(tracks.count) * 76)
+        .frame(height: contentHeight)
 
         if #available(iOS 16.0, *) {
             baseList
@@ -454,7 +530,6 @@ struct NowPlayingHero: View {
                         Text("Now Playing")
                             .font(.system(size: 10, weight: .bold, design: .monospaced))
                             .foregroundColor(.cyberCyan)
-                            .glow(color: .cyberCyan, radius: 4)
 
                         Text(track.title)
                             .font(.system(size: 18, weight: .bold))
@@ -480,7 +555,6 @@ struct NowPlayingHero: View {
                     Image(systemName: isPlaying ? "pause.circle.fill" : "play.circle.fill")
                         .font(.system(size: 44))
                         .foregroundColor(.cyberCyan)
-                        .glow(color: .cyberCyan, radius: 8)
                 }
                 .padding(20)
             }
@@ -573,7 +647,6 @@ struct EmptyHero: View {
                     Image(systemName: "waveform")
                         .font(.system(size: 48))
                         .foregroundColor(.cyberCyan)
-                        .glow(color: .cyberCyan, radius: 12)
 
                     Text("Start Listening")
                         .font(.system(size: 14, weight: .bold, design: .monospaced))
@@ -695,6 +768,96 @@ struct MinimalTrackCard: View {
     }
 }
 
+// MARK: - Artist Suggestion Card
+struct ArtistSuggestionCard: View {
+    let track: Track
+    let onPlay: () -> Void
+    let onPlayNext: () -> Void
+    let onAddToQueue: () -> Void
+    let onAddToPlaylist: () -> Void
+    let onDownload: () -> Void
+
+    @StateObject private var playlistManager = PlaylistManager.shared
+
+    private var isLiked: Bool {
+        playlistManager.isLiked(trackId: track.videoId)
+    }
+
+    private var isDownloaded: Bool {
+        DownloadManager.shared.isAlreadyDownloaded(track)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            CachedAsyncImage(url: track.artworkURL) {
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Color.cyberDim.opacity(0.2))
+            }
+            .frame(width: 130, height: 130)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(
+                        LinearGradient(
+                            colors: [.cyberCyan.opacity(0.6), .cyberMagenta.opacity(0.6)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 1.5
+                    )
+            )
+            .shadow(color: .cyberCyan.opacity(0.3), radius: 8, x: 0, y: 0)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(track.title)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.white)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.8)
+
+                Text(track.displayArtist)
+                    .font(.system(size: 11))
+                    .foregroundColor(.cyberDim)
+                    .lineLimit(1)
+            }
+            .frame(width: 130, alignment: .leading)
+        }
+        .contextMenu {
+            Button(action: onPlay) {
+                Label("Play", systemImage: "play.fill")
+            }
+            Button(action: onPlayNext) {
+                Label("Play Next", systemImage: "text.badge.plus")
+            }
+            Button(action: onAddToQueue) {
+                Label("Add to Queue", systemImage: "plus")
+            }
+            Button(action: onAddToPlaylist) {
+                Label("Add to Playlist", systemImage: "music.note.list")
+            }
+            Button {
+                playlistManager.toggleLike(trackId: track.videoId)
+                HapticManager.medium()
+            } label: {
+                Label(isLiked ? "Unlike" : "Like", systemImage: isLiked ? "heart.fill" : "heart")
+            }
+            Button(action: onDownload) {
+                Label(isDownloaded ? "Downloaded" : "Download", systemImage: isDownloaded ? "checkmark.circle.fill" : "arrow.down.circle")
+            }
+        }
+        .swipeActions(edge: .trailing) {
+            Button(action: onDownload) {
+                Label("Download", systemImage: "arrow.down")
+            }
+            .tint(.cyberCyan)
+            Button(action: onAddToQueue) {
+                Label("Queue", systemImage: "plus")
+            }
+            .tint(.cyberMagenta)
+        }
+    }
+}
+
 // MARK: - Cyber Button
 struct CyberButton: View {
     let icon: String
@@ -727,12 +890,12 @@ struct StatItem: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(value)
-                .font(.system(size: 16, weight: .bold, design: .monospaced))
-                .foregroundColor(.cyberCyan)
+                .font(Typography.playerTitle)
+                .foregroundColor(Theme.cyberCyan)
 
             Text(label)
-                .font(.system(size: 10, weight: .medium, design: .monospaced))
-                .foregroundColor(.cyberDim)
+                .font(Typography.caption2)
+                .foregroundColor(Theme.cyberDim)
                 .textCase(.uppercase)
         }
     }
@@ -765,16 +928,26 @@ class HomeViewModel: ObservableObject {
     @Published var downloadCount = 0
     @Published var totalListeningTime: TimeInterval = 0
     @Published var isLoading = true
+    @Published var artistSuggestions: [String: [Track]] = [:]
 
     private let dataManager = DataManager.shared
+    private let favoriteArtists = FavoriteArtistsManager.shared
     private var cancellables = Set<AnyCancellable>()
     private var vibeCancellables = Set<AnyCancellable>()
+    private var suggestionCancellables = Set<AnyCancellable>()
 
     init() {
         dataManager.$recentlyPlayed
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
                 self?.loadData()
+            }
+            .store(in: &cancellables)
+
+        favoriteArtists.$artists
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] artists in
+                self?.fetchSuggestionsForFavoriteArtists(artists)
             }
             .store(in: &cancellables)
     }
@@ -915,12 +1088,59 @@ class HomeViewModel: ObservableObject {
             })
             .store(in: &cancellables)
     }
+
+    func playVibeTracks(_ tracks: [Track]) {
+        guard !tracks.isEmpty else { return }
+
+        vibeCancellables.removeAll()
+
+        Task { @MainActor in
+            self.playTrack(tracks[0])
+        }
+
+        for track in tracks.dropFirst() {
+            APIService.shared.getStreamUrl(videoId: track.videoId)
+                .sink(receiveCompletion: { completion in
+                    if case .failure(let error) = completion {
+                        print("⚠️ [HomeView] Stream URL failed: \(error.localizedDescription)")
+                    }
+                }, receiveValue: { streamInfo in
+                    let item = QueueItem(
+                        track: track,
+                        streamUrl: streamInfo.streamUrl,
+                        source: .stream
+                    )
+                    PlayerState.shared.addToQueue(item)
+                })
+                .store(in: &vibeCancellables)
+        }
+
+        HapticManager.medium()
+    }
+
+    func fetchSuggestionsForFavoriteArtists(_ artists: [String]) {
+        suggestionCancellables.removeAll()
+        artistSuggestions.removeAll()
+
+        for artist in artists {
+            APIService.shared.search(query: artist, limit: 5)
+                .sink(receiveCompletion: { _ in },
+                      receiveValue: { [weak self] tracks in
+                    guard let self = self, !tracks.isEmpty else { return }
+                    DispatchQueue.main.async {
+                        self.artistSuggestions[artist] = tracks
+                    }
+                })
+                .store(in: &suggestionCancellables)
+        }
+    }
 }
 
 // MARK: - Playing Bars Indicator
 
 struct PlayingBarsIndicator: View {
     @State private var animate = false
+    @Environment(\.accessibilityReduceMotion) var reduceMotion
 
     var body: some View {
         HStack(spacing: 2) {
@@ -929,7 +1149,7 @@ struct PlayingBarsIndicator: View {
                     .fill(Color.cyberCyan)
                     .frame(width: 3, height: animate ? 16 : 6)
                     .animation(
-                        Animation.easeInOut(duration: 0.4)
+                        reduceMotion ? .none : Animation.easeInOut(duration: 0.4)
                             .repeatForever(autoreverses: true)
                             .delay(Double(index) * 0.15),
                         value: animate
@@ -938,7 +1158,9 @@ struct PlayingBarsIndicator: View {
         }
         .frame(width: 30, height: 30)
         .onAppear {
-            animate = true
+            if !reduceMotion {
+                animate = true
+            }
         }
     }
 }
@@ -949,8 +1171,7 @@ struct HomeRecentTrackRow: View {
     let isPlaying: Bool
     let isLoading: Bool
     let onPlay: () -> Void
-    let onAddToQueue: () -> Void
-    let onAddToPlaylist: () -> Void
+    let onPlayNext: () -> Void
     let onDownload: () -> Void
 
     var body: some View {
@@ -979,9 +1200,10 @@ struct HomeRecentTrackRow: View {
 
                 Spacer()
 
+                // Play indicator cluster
                 HStack(spacing: 8) {
                     if isDownloaded {
-                        Image(systemName: "checkmark.circle.fill")
+                        Image(systemName: "arrow.down.circle.fill")
                             .font(.system(size: 14))
                             .foregroundColor(.cyberCyan)
                     }
@@ -991,54 +1213,29 @@ struct HomeRecentTrackRow: View {
                         ProgressView()
                             .scaleEffect(0.7)
                             .tint(.cyberCyan)
-                            .frame(width: 30, height: 30)
                     } else if isPlaying {
-                        // Animated playing indicator
                         PlayingBarsIndicator()
-                            .frame(width: 30, height: 30)
                     } else {
                         Image(systemName: "play.fill")
                             .font(.system(size: 12, weight: .semibold))
                             .foregroundColor(.cyberCyan)
-                            .frame(width: 30, height: 30)
-                            .background(
-                                Circle()
-                                    .fill(Color.cyberSurface)
-                                    .overlay(
-                                        Circle()
-                                            .stroke(Color.cyberCyan.opacity(0.3), lineWidth: 1)
-                                    )
-                            )
                     }
                 }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .background(
-                RoundedRectangle(cornerRadius: 14)
-                    .fill(Color.cyberSurface)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 14)
-                            .stroke(Color.cyberCyan.opacity(0.08), lineWidth: 1)
-                    )
-            )
+                .frame(width: 36)
+            }
         }
         .buttonStyle(.plain)
         .swipeActions(edge: .leading, allowsFullSwipe: false) {
-            Button(action: onAddToQueue) {
-                Label("Queue", systemImage: "text.badge.plus")
+            Button(action: onPlayNext) {
+                Label("Next", systemImage: "text.badge.plus")
             }
-            .tint(.orange)
-
-            Button(action: onAddToPlaylist) {
-                Label("Playlist", systemImage: "music.note.list")
-            }
-            .tint(.blue)
+            .tint(Theme.cyberMagenta)
         }
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             Button(action: onDownload) {
                 Label(isDownloaded ? "Downloaded" : "Download", systemImage: isDownloaded ? "checkmark" : "arrow.down")
             }
-            .tint(.cyberCyan)
+            .tint(Theme.cyberCyan)
             .disabled(isDownloaded)
         }
     }
@@ -1050,5 +1247,4 @@ struct HomeView_Previews: PreviewProvider {
         HomeView()
             .preferredColorScheme(.dark)
     }
-}
 }

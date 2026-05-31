@@ -55,6 +55,11 @@ enum Theme {
     static let playerControls = Color.white
     static let progressTrack = Color.white.opacity(0.3)
     static let progressFill = Color.white
+
+    // MARK: Player Text Colors (Semantic aliases for player context)
+    static let playerTitleText = Color.white
+    static let playerSubtitleText = Color.white.opacity(0.8)
+    static let playerBackgroundOverlay = Color.black.opacity(0.5)
     
     // MARK: UI Element Colors
     static let divider = Color.gray.opacity(0.2)
@@ -161,4 +166,13 @@ enum OpacityLevel {
     static let strong: Double = 0.7
     static let heavy: Double = 0.85
     static let full: Double = 1.0
+}
+
+// MARK: - Animation Durations
+enum AnimationDuration {
+    static let fast: Double = 0.1
+    static let normal: Double = 0.2
+    static let slow: Double = 0.3
+    static let verySlow: Double = 0.4
+    static let shimmer: Double = 1.5
 }

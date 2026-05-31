@@ -217,7 +217,7 @@ struct VibeButton: View {
                 icon: "cloud.rain.fill",
                 title: "Rainy Day",
                 subtitle: "Cozy & calm",
-                color: Theme.tertiaryText,
+                color: Theme.cyberDim,
                 searchQuery: "rainy day lo-fi acoustic"
             )
         ]
@@ -229,29 +229,38 @@ struct VibeMenu: View {
     let vibes: [VibeSuggestion]
     let onSelect: (VibeSuggestion) -> Void
     let onClose: () -> Void
-    
+
     var body: some View {
-        VStack(spacing: 12) {
-            ForEach(vibes) { vibe in
-                VibeMenuItem(vibe: vibe, onTap: {
-                    onSelect(vibe)
-                })
+        ZStack {
+            // Dimmed scrim - tap to dismiss
+            Color.black.opacity(0.3)
+                .onTapGesture {
+                    onClose()
+                }
+
+            VStack(spacing: 12) {
+                ForEach(vibes) { vibe in
+                    VibeMenuItem(vibe: vibe, onTap: {
+                        onSelect(vibe)
+                    })
+                }
             }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 16)
+            .background(
+                RoundedRectangle(cornerRadius: 20)
+                    .fill(Theme.cyberSurface)
+                    .shadow(color: Color.black.opacity(0.3), radius: 20, x: 0, y: 10)
+            )
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 16)
-        .background(
-            RoundedRectangle(cornerRadius: 20)
-                .fill(Color(.systemBackground))
-                .shadow(color: Color.black.opacity(0.2), radius: 20, x: 0, y: 10)
-        )
+        .ignoresSafeArea()
     }
 }
 
 struct VibeMenuItem: View {
     let vibe: VibeSuggestion
     let onTap: () -> Void
-    
+
     var body: some View {
         Button(action: onTap) {
             HStack(spacing: 12) {
@@ -260,35 +269,36 @@ struct VibeMenuItem: View {
                     .foregroundColor(vibe.color)
                     .frame(width: 40, height: 40)
                     .background(vibe.color.opacity(0.15))
-                    .cornerRadius(10)
-                
+                    .cornerRadius(CornerRadius.sm)
+
                 VStack(alignment: .leading, spacing: 2) {
                     Text(vibe.title)
                         .font(.system(size: 16, weight: .semibold))
-                    
+                        .foregroundColor(Theme.primaryText)
+
                     Text(vibe.subtitle)
                         .font(.system(size: 13))
-                        .foregroundColor(.secondary)
+                        .foregroundColor(Theme.secondaryText)
                 }
-                
+
                 Spacer()
-                
+
                 Image(systemName: "play.fill")
                     .foregroundColor(vibe.color)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
-            .background(Color(.systemGray6))
-            .cornerRadius(12)
+            .background(Theme.cyberSurface)
+            .cornerRadius(CornerRadius.md)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.pressable)
     }
 }
 
 // MARK: - Vibe Picker Sheet
 struct VibePickerSheet: View {
     @Environment(\.dismiss) private var dismiss
-    
+
     let allVibes: [VibeSuggestion] = [
         VibeSuggestion(icon: "sun.max.fill", title: "Morning", subtitle: "Start your day", color: .orange, searchQuery: "morning"),
         VibeSuggestion(icon: "briefcase.fill", title: "Focus", subtitle: "Work & study", color: .blue, searchQuery: "focus"),
@@ -296,22 +306,26 @@ struct VibePickerSheet: View {
         VibeSuggestion(icon: "moon.stars.fill", title: "Evening", subtitle: "Wind down", color: .indigo, searchQuery: "chill"),
         VibeSuggestion(icon: "moon.fill", title: "Sleep", subtitle: "Rest easy", color: .purple, searchQuery: "sleep"),
         VibeSuggestion(icon: "heart.fill", title: "Feel Good", subtitle: "Happy vibes", color: .pink, searchQuery: "happy"),
-        VibeSuggestion(icon: "cloud.rain.fill", title: "Rainy Day", subtitle: "Cozy & calm", color: Theme.tertiaryText, searchQuery: "lofi"),
+        VibeSuggestion(icon: "cloud.rain.fill", title: "Rainy Day", subtitle: "Cozy & calm", color: Theme.cyberDim, searchQuery: "lofi"),
         VibeSuggestion(icon: "party.popper.fill", title: "Party", subtitle: "Let's celebrate", color: .yellow, searchQuery: "party")
     ]
-    
+
     var body: some View {
         NavigationView {
-            ScrollView {
-                LazyVGrid(columns: [
-                    GridItem(.flexible()),
-                    GridItem(.flexible())
-                ], spacing: 16) {
-                    ForEach(allVibes) { vibe in
-                        VibeGridItem(vibe: vibe)
+            ZStack {
+                Theme.cyberBackground.ignoresSafeArea()
+
+                ScrollView {
+                    LazyVGrid(columns: [
+                        GridItem(.flexible()),
+                        GridItem(.flexible())
+                    ], spacing: 16) {
+                        ForEach(allVibes) { vibe in
+                            VibeGridItem(vibe: vibe)
+                        }
                     }
+                    .padding()
                 }
-                .padding()
             }
             .navigationTitle("Choose Your Vibe")
             .navigationBarTitleDisplayMode(.large)
@@ -320,9 +334,11 @@ struct VibePickerSheet: View {
                     Button("Done") {
                         dismiss()
                     }
+                    .foregroundColor(Theme.cyberCyan)
                 }
             }
         }
+        .preferredColorScheme(.dark)
     }
 }
 

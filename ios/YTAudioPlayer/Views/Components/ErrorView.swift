@@ -105,34 +105,34 @@ struct ErrorView: View {
             // Icon with animation
             ZStack {
                 Circle()
-                    .fill(Color.red.opacity(0.1))
+                    .fill(Theme.error.opacity(0.1))
                     .frame(width: 120, height: 120)
-                
+
                 Image(systemName: type.icon)
                     .font(.system(size: 50))
-                    .foregroundColor(.red)
+                    .foregroundColor(Theme.error)
             }
             
             // Text content
             VStack(spacing: 12) {
                 Text(type.title)
-                    .font(.title2)
+                    .font(Typography.title2)
                     .fontWeight(.bold)
                     .multilineTextAlignment(.center)
-                
+
                 Text(type.message)
-                    .font(.body)
-                    .foregroundColor(.secondary)
+                    .font(Typography.body)
+                    .foregroundColor(Theme.secondaryText)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 32)
-                
+
                 if let details = details {
                     Text(details)
-                        .font(.caption)
-                        .foregroundColor(.cyberDim)
+                        .font(Typography.caption1)
+                        .foregroundColor(Theme.cyberDim)
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 32)
-                        .padding(.top, 8)
+                        .padding(.top, Spacing.xs)
                 }
             }
             
@@ -149,14 +149,14 @@ struct ErrorView: View {
                         Image(systemName: "arrow.clockwise")
                         Text(type.primaryAction)
                     }
-                    .font(.headline)
-                    .foregroundColor(.white)
+                    .font(Typography.headline)
+                    .foregroundColor(Theme.inverseText)
                     .frame(maxWidth: .infinity)
                     .padding()
-                    .background(Color.accentColor)
-                    .cornerRadius(12)
+                    .background(Theme.primary)
+                    .cornerRadius(CornerRadius.md)
                 }
-                
+
                 // Secondary action
                 if let secondaryAction = type.secondaryAction, let onSecondary = onSecondary {
                     Button(action: {
@@ -164,15 +164,15 @@ struct ErrorView: View {
                         onSecondary()
                     }) {
                         Text(secondaryAction)
-                            .font(.headline)
-                            .foregroundColor(.accentColor)
+                            .font(Typography.headline)
+                            .foregroundColor(Theme.primary)
                             .frame(maxWidth: .infinity)
                             .padding()
-                            .background(Color.accentColor.opacity(0.1))
-                            .cornerRadius(12)
+                            .background(Theme.primary.opacity(0.1))
+                            .cornerRadius(CornerRadius.md)
                     }
                 }
-                
+
                 // Dismiss button
                 if let onDismiss = onDismiss {
                     Button(action: {
@@ -180,9 +180,9 @@ struct ErrorView: View {
                         onDismiss()
                     }) {
                         Text("Dismiss")
-                            .font(.body)
-                            .foregroundColor(.secondary)
-                            .padding(.top, 8)
+                            .font(Typography.body)
+                            .foregroundColor(Theme.secondaryText)
+                            .padding(.top, Spacing.xs)
                     }
                 }
             }
@@ -196,27 +196,27 @@ struct ErrorView: View {
 struct InlineErrorRow: View {
     let message: String
     let onRetry: () -> Void
-    
+
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundColor(.orange)
-            
+                .foregroundColor(Theme.warning)
+
             Text(message)
-                .font(.subheadline)
-                .foregroundColor(.secondary)
+                .font(Typography.subheadline)
+                .foregroundColor(Theme.secondaryText)
                 .lineLimit(2)
-            
+
             Spacer()
-            
+
             Button(action: onRetry) {
                 Image(systemName: "arrow.clockwise")
-                    .foregroundColor(.accentColor)
+                    .foregroundColor(Theme.primary)
             }
         }
         .padding()
-        .background(Color.orange.opacity(0.05))
-        .cornerRadius(8)
+        .background(Theme.warning.opacity(0.05))
+        .cornerRadius(CornerRadius.sm)
         .padding(.horizontal)
     }
 }
@@ -225,25 +225,25 @@ struct InlineErrorRow: View {
 struct ErrorToast: View {
     let message: String
     @Binding var isShowing: Bool
-    
+
     var body: some View {
         VStack {
             Spacer()
-            
+
             HStack(spacing: 12) {
                 Image(systemName: "exclamationmark.circle.fill")
-                    .foregroundColor(.red)
-                
+                    .foregroundColor(Theme.error)
+
                 Text(message)
-                    .font(.subheadline)
-                    .foregroundColor(.primary)
-                
+                    .font(Typography.subheadline)
+                    .foregroundColor(Theme.primaryText)
+
                 Spacer()
             }
             .padding()
             .background(.ultraThinMaterial)
-            .cornerRadius(12)
-            .padding(.horizontal, 16)
+            .cornerRadius(CornerRadius.md)
+            .padding(.horizontal, Spacing.md)
             .padding(.bottom, 100)
         }
         .transition(.move(edge: .bottom).combined(with: .opacity))

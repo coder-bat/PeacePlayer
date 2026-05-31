@@ -137,6 +137,7 @@ struct QueueView: View {
                                 }
                                 .swipeActions(edge: .trailing) {
                                     Button(role: .destructive) {
+                                        HapticManager.light()
                                         let actualIndex = playerState.currentIndex + 1 + index
                                         playerState.removeFromQueue(at: actualIndex)
                                     } label: {
@@ -146,6 +147,7 @@ struct QueueView: View {
                             }
                             .onDelete { indexSet in
                                 for index in indexSet {
+                                    HapticManager.light()
                                     let actualIndex = playerState.currentIndex + 1 + index
                                     playerState.removeFromQueue(at: actualIndex)
                                 }

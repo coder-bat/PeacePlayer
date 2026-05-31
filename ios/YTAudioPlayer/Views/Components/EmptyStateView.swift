@@ -62,12 +62,13 @@ struct EmptyStateView: View {
             // Icon
             Image(systemName: type.icon)
                 .font(.system(size: 80, weight: .light))
-                .foregroundColor(Theme.primary.opacity(0.5))
+                .foregroundColor(Theme.cyberCyan)
                 .frame(width: 120, height: 120)
                 .background(
                     Circle()
-                        .fill(Theme.primary.opacity(0.1))
+                        .fill(Theme.cyberCyan.opacity(0.1))
                 )
+                .shadow(color: Theme.cyberCyan.opacity(0.4), radius: 20, x: 0, y: 0)
             
             // Text
             VStack(spacing: 8) {
@@ -88,10 +89,10 @@ struct EmptyStateView: View {
                 Button(action: action) {
                     Text(title)
                         .font(Typography.bodyBold)
-                        .foregroundColor(.white)
+                        .foregroundColor(Theme.inverseText)
                         .padding(.horizontal, 32)
-                        .padding(.vertical, 12)
-                        .background(Theme.primary)
+                        .padding(.vertical, Spacing.sm)
+                        .background(Theme.cyberCyan)
                         .cornerRadius(CornerRadius.md)
                 }
                 .buttonStyle(.pressable)

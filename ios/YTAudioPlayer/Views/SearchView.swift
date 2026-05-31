@@ -378,28 +378,16 @@ struct SearchView: View {
     @ViewBuilder
     private var emptyStateView: some View {
         if viewModel.hasSearched {
-            // No results
-            VStack(spacing: 20) {
-                Image(systemName: "magnifyingglass.circle")
-                    .font(.system(size: 70))
-                    .foregroundColor(.cyberDim)
-
-                Text("No results for \"\(viewModel.searchText)\"")
-                    .font(.title3)
-                    .fontWeight(.semibold)
-                    .foregroundColor(.white)
-
-                Text("Try a different search term")
-                    .foregroundColor(.cyberDim)
-
-                Button("Clear Search") {
+            // No results - use EmptyStateView
+            EmptyStateView(
+                type: .noResults(query: viewModel.searchText),
+                action: {
                     viewModel.searchText = ""
                     viewModel.clearSearch()
                     viewModel.activeFilter = .all
-                }
-                .foregroundColor(.cyberCyan)
-                .padding(.top, 8)
-            }
+                },
+                actionTitle: "Clear Search"
+            )
         } else {
             // Initial state
             ScrollView(showsIndicators: false) {

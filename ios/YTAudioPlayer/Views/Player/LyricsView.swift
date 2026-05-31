@@ -11,7 +11,8 @@ import Combine
 struct LyricsView: View {
     @StateObject private var playerState = PlayerState.shared
     @Environment(\.dismiss) private var dismiss
-    
+    @Environment(\.accessibilityReduceMotion) var reduceMotion
+
     @State private var lyrics: [LyricsLine] = []
     @State private var currentLineIndex = 0
     @State private var isLoading = false
@@ -136,18 +137,19 @@ struct LyricsView: View {
                             .onTapGesture {
                                 // Seek to this line's time
                                 if playerState.duration > 0 {
+                                    HapticManager.light()
                                     playerState.seek(to: line.time / playerState.duration)
                                 }
                             }
                             .scaleEffect(isCurrentLine(index) ? 1.05 : 1.0)
-                            .animation(.easeInOut(duration: 0.2), value: currentLineIndex)
+                            .animation(reduceMotion ? .none : .easeInOut(duration: 0.2), value: currentLineIndex)
                     }
-                    
+
                     Spacer(minLength: 100)
                 }
             }
             .onChange(of: currentLineIndex) { newIndex in
-                withAnimation(.easeOut(duration: 0.3)) {
+                withAnimation(reduceMotion ? .none : .easeOut(duration: 0.3)) {
                     proxy.scrollTo(newIndex, anchor: .center)
                 }
             }

@@ -72,28 +72,11 @@ struct MiniPlayer: View {
                                 .lineLimit(1)
                         }
                     } else {
-                        HStack(spacing: 6) {
-                            Text(playerState.currentItem?.track.displayArtist ?? "")
-                                .font(.system(size: 13))
-                                .foregroundColor(Theme.cyberDim)
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.8)
-
-                            // Source indicator
-                            if let contentSource = playerState.currentItem?.contentSource {
-                                HStack(spacing: 2) {
-                                    Image(systemName: contentSource.iconName)
-                                        .font(.system(size: 8))
-                                    Text(contentSource.displayName)
-                                        .font(.system(size: 8, weight: .medium))
-                                }
-                                .foregroundColor(contentSource.tintColor)
-                                .padding(.horizontal, 4)
-                                .padding(.vertical, 1)
-                                .background(contentSource.tintColor.opacity(0.15))
-                                .cornerRadius(4)
-                            }
-                        }
+                        Text(playerState.currentItem?.track.displayArtist ?? "")
+                            .font(.system(size: 13))
+                            .foregroundColor(Theme.cyberDim)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
                     }
                 }
                 .frame(maxWidth: 180, alignment: .leading)
@@ -146,10 +129,7 @@ struct MiniPlayer: View {
         .frame(maxWidth: .infinity)
         .frame(height: 64)
         .background(
-            ZStack {
-                Rectangle().fill(.ultraThinMaterial)
-                Color.cyberSurface.opacity(0.7)
-            }
+            Rectangle().fill(.ultraThinMaterial)
         )
         .overlay(alignment: .top) {
             // Playback progress bar (hidden for live radio)
@@ -164,15 +144,12 @@ struct MiniPlayer: View {
                 .frame(height: 2)
             }
         }
-        .overlay(alignment: .top) {
-            Color.cyberCyan.opacity(0.15).frame(height: 0.5)
-        }
         .clipShape(RoundedRectangle(cornerRadius: 20))
         .overlay(
             RoundedRectangle(cornerRadius: 20)
-                .stroke(Color.cyberCyan.opacity(0.25), lineWidth: 1)
+                .stroke(Color.cyberCyan.opacity(0.2), lineWidth: 1)
         )
-        .shadow(color: Color.black.opacity(0.5), radius: 16, x: 0, y: 6)
+        .shadow(color: Color.black.opacity(0.3), radius: 10, x: 0, y: 4)
         .padding(.horizontal, 12)
         // Swipe gestures
         .offset(x: offset)
@@ -310,6 +287,7 @@ struct ArtworkView: View {
 // MARK: - Cyber Playing Bars (shared across the app)
 struct CyberPlayingBars: View {
     @State private var animate = false
+    @Environment(\.accessibilityReduceMotion) var reduceMotion
 
     var body: some View {
         HStack(spacing: 2) {
@@ -318,16 +296,19 @@ struct CyberPlayingBars: View {
                     .fill(Color.cyberCyan)
                     .frame(width: 3, height: animate ? 16 : 4)
                     .animation(
-                        .easeInOut(duration: 0.4)
-                        .repeatForever(autoreverses: true)
-                        .delay(Double(index) * 0.15),
+                        reduceMotion ? .none : Animation.easeInOut(duration: 0.4)
+                            .repeatForever(autoreverses: true)
+                            .delay(Double(index) * 0.15),
                         value: animate
                     )
             }
         }
         .onAppear {
-            animate = true
+            if !reduceMotion {
+                animate = true
+            }
         }
+        .accessibilityHidden(true)
     }
 }
 

@@ -43,6 +43,7 @@ class CrossfadeManager: ObservableObject {
     private var isCrossfading = false
     private var cancellables = Set<AnyCancellable>()
     private var crossfadeTimer: Timer?
+    private var isPreparingNextTrack = false  // Guards against duplicate preparation calls
 
     // Original volume to restore after crossfade
     private var originalVolume: Float = 1.0

@@ -31,6 +31,7 @@ struct FullPlayer: View {
     @State private var showAudioSettings = false
     @State private var showShareSheet = false
     @State private var showSongMemory = false
+    @State private var showOrbitalMenu = false
     @State private var dominantColor: Color = .clear
     @State private var colorExtractionTask: Task<Void, Never>?
     @State private var dragOffset: CGFloat = 0
@@ -199,6 +200,23 @@ struct FullPlayer: View {
             .onChange(of: playerState.currentItem?.track.videoId) { _ in
                 extractDominantColor()
                 isTrackInfoExpanded = false
+            }
+            .overlay {
+                OrbitalMenu(
+                    isPresented: $showOrbitalMenu,
+                    onSelectTab: { tag in
+                        showOrbitalMenu = false
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            dismiss()
+                            NotificationCenter.default.post(name: .switchTab, object: tag)
+                        }
+                    },
+                    onDismiss: {
+                        showOrbitalMenu = false
+                    }
+                )
+                .opacity(showOrbitalMenu ? 1 : 0)
+                .animation(.easeInOut(duration: 0.2), value: showOrbitalMenu)
             }
         }
     }
@@ -377,10 +395,6 @@ struct FullPlayer: View {
         .frame(maxWidth: .infinity)
         .padding(.top, 12)
         .padding(.bottom, 8)
-        .contentShape(Rectangle())
-        .onTapGesture {
-            dismiss()
-        }
     }
     
     // MARK: - Artwork Section (full-width cyberpunk hero banner)
@@ -413,8 +427,6 @@ struct FullPlayer: View {
                     }
                 }
             }
-            .opacity(showingVisualizer ? 0 : 1)
-            .rotation3DEffect(.degrees(showingVisualizer ? -90 : 0), axis: (x: 0, y: 1, z: 0))
 
             // Visualizer layer
             ZStack {
@@ -423,48 +435,31 @@ struct FullPlayer: View {
                     .frame(width: w, height: h)
             }
             .opacity(showingVisualizer ? 1 : 0)
-            .rotation3DEffect(.degrees(showingVisualizer ? 0 : 90), axis: (x: 0, y: 1, z: 0))
         }
         .frame(width: w, height: h)
         // Diagonal clip
         .clipShape(CyberpunkHeroShape(slashDrop: slash))
-        // Subtle border tracing the full hero shape
+        // Clean border
         .overlay(
             CyberpunkHeroShape(slashDrop: slash)
                 .stroke(
                     showingVisualizer
-                        ? Color.cyberCyan.opacity(0.45)
-                        : (currentTrackIsLiked ? Color.red.opacity(0.45) : Color.white.opacity(0.07)),
+                        ? Color.cyberCyan.opacity(0.4)
+                        : (currentTrackIsLiked ? Color.red.opacity(0.4) : Color.white.opacity(0.06)),
                     lineWidth: 1
                 )
         )
-        // Glowing diagonal accent line along the bottom slash
-        .overlay(
-            CyberpunkDiagonalEdge(slashDrop: slash)
-                .stroke(
-                    LinearGradient(
-                        colors: [
-                            Color.cyberCyan.opacity(0.15),
-                            Color.cyberCyan.opacity(showingVisualizer ? 1.0 : 0.75),
-                            Color.cyberCyan.opacity(0.15)
-                        ],
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    ),
-                    lineWidth: 2
-                )
-                .shadow(color: Color.cyberCyan.opacity(0.85), radius: 10, x: 0, y: 0)
-        )
+        // Single clean shadow
         .shadow(
             color: showingVisualizer
-                ? Color.cyberCyan.opacity(0.35)
-                : (currentTrackIsLiked ? Color.red.opacity(likePulse ? 0.45 : 0.22) : Color.cyberCyan.opacity(0.1)),
-            radius: showingVisualizer ? 22 : 10,
-            x: 0, y: 6
+                ? Color.cyberCyan.opacity(0.25)
+                : (currentTrackIsLiked ? Color.red.opacity(0.2) : Color.black.opacity(0.3)),
+            radius: 12,
+            x: 0, y: 4
         )
         .scaleEffect(likePulse ? 1.025 : 1.0)
-        .animation(reduceMotion ? .none : .spring(response: 0.5, dampingFraction: 0.75), value: showingVisualizer)
-        .animation(reduceMotion ? .none : .spring(response: 0.25, dampingFraction: 0.6), value: likePulse)
+        .animation(reduceMotion ? .none : .spring(response: 0.4, dampingFraction: 0.75), value: showingVisualizer)
+        .animation(reduceMotion ? .none : .spring(response: 0.25, dampingFraction: 0.7), value: likePulse)
         // Extend past the parent VStack's 24pt horizontal padding to go edge-to-edge
         .padding(.horizontal, -24)
         .onTapGesture(count: 2) {
@@ -481,6 +476,10 @@ struct FullPlayer: View {
                     }
                 }
         )
+        .onLongPressGesture(minimumDuration: 0.6) {
+            HapticManager.medium()
+            showOrbitalMenu = true
+        }
     }
     
     // MARK: - Track Info
@@ -503,28 +502,12 @@ struct FullPlayer: View {
 
             if playerState.contentType == .liveRadio {
                 HStack(spacing: 6) {
-                    ZStack {
-                        Circle()
-                            .fill(Theme.cyberMagenta.opacity(0.3))
-                            .frame(width: 14, height: 14)
-                            .scaleEffect(isPulsing ? 1.3 : 0.8)
-                            .opacity(isPulsing ? 0.0 : 0.6)
-                        Circle()
-                            .fill(Theme.cyberMagenta)
-                            .frame(width: 8, height: 8)
-                    }
-                    .frame(width: 20, height: 20)
+                    Circle()
+                        .fill(Theme.cyberMagenta)
+                        .frame(width: 8, height: 8)
                     Text("LIVE")
                         .font(.system(size: 12, weight: .heavy, design: .monospaced))
                         .foregroundColor(Theme.cyberMagenta)
-                }
-                .onAppear {
-                    withAnimation(reduceMotion ? .none : .easeInOut(duration: 1.0).repeatForever(autoreverses: true)) {
-                        isPulsing = true
-                    }
-                }
-                .onDisappear {
-                    isPulsing = false
                 }
             } else if playerState.contentType == .audiobook && !playerState.currentChapters.isEmpty {
                 Text("Chapter \(playerState.currentChapterIndex + 1) of \(playerState.currentChapters.count)")
@@ -724,7 +707,6 @@ struct FullPlayer: View {
                 Circle()
                     .fill(Color.white)
                     .frame(width: 72, height: 72)
-                    .shadow(color: Color.white.opacity(0.3), radius: 10)
                 
                 if playerState.playbackState.isLoading {
                     ProgressView()
@@ -922,27 +904,16 @@ struct FullPlayer: View {
                 )
             }
 
-            // Time Capsule (tap = bury, long-press = vault)
-            Button {
-                HapticManager.light()
-                showTimeCapsule = true
-            } label: {
-                Image(systemName: "hourglass")
-                    .font(.system(size: 22))
-                    .foregroundColor(.white)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 44)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Time Capsule")
-            .accessibilityHint("Tap to bury current song, hold to open vault")
-            .simultaneousGesture(
-                LongPressGesture(minimumDuration: 0.5).onEnded { _ in
-                    HapticManager.medium()
-                    showTimeCapsuleVault = true
+            // Time Capsule
+            MoreActionButton(
+                icon: "hourglass",
+                title: "Capsule",
+                action: {
+                    HapticManager.light()
+                    showTimeCapsule = true
                 }
             )
-            
+
             // Audio Settings
             MoreActionButton(
                 icon: "waveform",
@@ -952,7 +923,7 @@ struct FullPlayer: View {
                     showAudioSettings = true
                 }
             )
-            
+
             // Share
             MoreActionButton(
                 icon: "square.and.arrow.up",
@@ -962,12 +933,12 @@ struct FullPlayer: View {
                     showShareSheet = true
                 }
             )
-            
+
             // AirPlay / Output Device
             AirPlayButton()
                 .frame(maxWidth: .infinity)
         }
-        .padding(.horizontal, 10)
+        .padding(.horizontal, 12)
     }
 }
 
@@ -1089,7 +1060,7 @@ struct PlayerControlButton: View {
         }
         .accessibilityLabel(label)
         .disabled(!isEnabled)
-        .buttonStyle(.plain)
+        .buttonStyle(.pressable)
     }
 }
 

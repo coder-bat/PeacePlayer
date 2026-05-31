@@ -845,7 +845,7 @@ class PlayerState: ObservableObject {
 
         // CRITICAL FIX: Cancel all Combine subscriptions to prevent duplicate observers
         cancellables.removeAll()
-        
+
         player = nil
         playbackState = .idle
         progress = 0.0
@@ -853,6 +853,9 @@ class PlayerState: ObservableObject {
         duration = 0.0
         expectedDuration = 0.0
         contentType = .track
+
+        // Re-register audio session observers after cleanup for next playback
+        setupAudioSessionObservers()
 
         print("✅ Player stopped and observers cleaned up")
     }
@@ -1542,15 +1545,12 @@ class PlayerState: ObservableObject {
                 }
             }
 
-            // Check if track has reached the end - use actual player duration primarily
-            // Only trigger if within 0.5s of actual duration and duration is valid
-            // This prevents false triggers when metadata duration differs from actual audio
+            // Check if track has reached the end - trigger on either actual AVPlayer duration
+            // OR effective duration (metadata), whichever is reached first
             let actualDuration = player.currentItem?.duration.seconds ?? 0
             let isNearActualEnd = actualDuration.isFinite && actualDuration > 0 && current >= actualDuration - 0.5
             let isNearEffectiveEnd = effectiveTotal > 0 && current >= effectiveTotal - 0.5
-            // Require near actual duration, or near effective duration with close match (< 5s difference)
-            let durationMismatch = abs(actualDuration - effectiveTotal) < 5
-            let shouldTriggerCompletion = isNearActualEnd || (isNearEffectiveEnd && durationMismatch)
+            let shouldTriggerCompletion = isNearActualEnd || isNearEffectiveEnd
 
             if shouldTriggerCompletion && !playbackState.isLoading {
                 print("🏁 Track reached end (current: \(current), actual: \(actualDuration), effective: \(effectiveTotal))")
