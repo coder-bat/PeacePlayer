@@ -66,16 +66,16 @@
       debugServiceExtension = "internal"
       allowLocationSimulation = "YES"
       launchAutomaticallySubstyle = "2">
-      <BuildableProductRunnable
-         runnableDebuggingMode = "0">
+      <RemoteRunnable
+         runnableDebuggingMode = "2"
+         BundleIdentifier = "com.apple.springboard">
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "716416BF920B6C9F1C6A6424"
             BuildableName = "PeacePlayerWidget.appex"
-            BlueprintName = "PeacePlayerWidget"
             ReferencedContainer = "container:YTAudioPlayer.xcodeproj">
          </BuildableReference>
-      </BuildableProductRunnable>
+      </RemoteRunnable>
    </LaunchAction>
    <ProfileAction
       buildConfiguration = "Release"

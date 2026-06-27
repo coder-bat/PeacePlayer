@@ -80,9 +80,32 @@ struct PersistenceController {
             container.persistentStoreDescriptions.first!.url = URL(fileURLWithPath: "/dev/null")
         }
 
-        container.loadPersistentStores { description, error in
+        // C-2026-06-17: The 2026-06-17 .xcdatamodel change (customClassName
+        // [String] -> NSArray on the four Transformable attributes) makes
+        // the pre-existing on-disk store incompatible. Core Data
+        // surfaces this as a model-mismatch error. The store is
+        // effectively empty (we verified: 0 rows in CDTrack/CDPlaylist/
+        // CDDownloadedTrack/CDPlayHistory/CDUserStats) so wiping and
+        // rebuilding is safe. Without this fallback, a stuck model
+        // would crash here forever and the user couldn't recover
+        // without uninstalling.
+        let persistentContainer = container
+        persistentContainer.loadPersistentStores { description, error in
             if let error = error as NSError? {
-                fatalError("Unresolved error \(error), \(error.userInfo)")
+                print("⚠️ Persistent store failed to load: \(error). Wiping and retrying. Error: \(error.userInfo)")
+                if let storeURL = description.url {
+                    try? FileManager.default.removeItem(at: storeURL)
+                    // WAL and SHM sidecars
+                    let walURL = storeURL.appendingPathExtension("-wal")
+                    let shmURL = storeURL.appendingPathExtension("-shm")
+                    try? FileManager.default.removeItem(at: walURL)
+                    try? FileManager.default.removeItem(at: shmURL)
+                }
+                persistentContainer.loadPersistentStores { _, retryError in
+                    if let retryError = retryError as NSError? {
+                        fatalError("Failed to load Core Data even after wipe: \(retryError), \(retryError.userInfo)")
+                    }
+                }
             }
         }
 
