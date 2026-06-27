@@ -241,7 +241,7 @@ enum UnifiedTrackError: Error {
 
 private func generateYouTubeQueueItem(for track: Track) async throws -> QueueItem {
     return try await withCheckedThrowingContinuation { continuation in
-        APIService.shared.getStreamUrl(videoId: track.videoId)
+        StreamURLCache.shared.getStreamUrl(videoId: track.videoId)
             .sink(
                 receiveCompletion: { completion in
                     if case .failure(let error) = completion {

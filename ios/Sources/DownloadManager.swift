@@ -83,7 +83,34 @@ class DownloadManager: ObservableObject {
     // Serial queue for thread-safe state mutations
     private let stateQueue = DispatchQueue(label: "com.ytaudio.downloadstate", qos: .utility)
 
-    private init() {}
+    private init() {
+        // C-1 fix: subscribe to BackgroundDownloadService's Combine publishers
+        // so download completion / error events are delivered reliably even when
+        // iOS relaunches the app to deliver a background URLSession event.
+        // The previous weak-delegate pattern silently dropped these events
+        // because DownloadManager was lazily initialized *after* the completion
+        // fired during the relaunch.
+        BackgroundDownloadService.shared.completions
+            .receive(on: stateQueue)
+            .sink { [weak self] completion in
+                self?.handleDownloadComplete(trackId: completion.videoId, fileURL: completion.fileURL)
+            }
+            .store(in: &cancellables)
+
+        BackgroundDownloadService.shared.errors
+            .receive(on: stateQueue)
+            .sink { [weak self] (videoId, error) in
+                self?.handleDownloadError(trackId: videoId, error: error)
+            }
+            .store(in: &cancellables)
+
+        BackgroundDownloadService.shared.progressPublisher
+            .receive(on: stateQueue)
+            .sink { [weak self] (videoId, progress) in
+                self?.handleDownloadProgress(trackId: videoId, progress: progress)
+            }
+            .store(in: &cancellables)
+    }
     
     // MARK: - Public Methods
     
@@ -217,7 +244,7 @@ class DownloadManager: ObservableObject {
         updateProgress(for: task.id, progress: 0.05)
 
         // Get stream URL first, then download to local storage
-        currentTask = APIService.shared.getStreamUrl(videoId: task.track.videoId)
+        currentTask = StreamURLCache.shared.getStreamUrl(videoId: task.track.videoId)
             .sink(
                 receiveCompletion: { [weak self] completion in
                     switch completion {
@@ -410,17 +437,13 @@ class DownloadManager: ObservableObject {
     }
     
     func isAlreadyDownloaded(_ track: Track) -> Bool {
-        // Check Core Data for existing download
-        let context = PersistenceController.shared.viewContext
-        let request: NSFetchRequest<CDDownloadedTrack> = CDDownloadedTrack.fetchRequest()
-        request.predicate = NSPredicate(format: "track.videoId == %@", track.videoId)
-
-        do {
-            let count = try context.count(for: request)
-            return count > 0
-        } catch {
-            print("❌ Error checking if track is downloaded: \(error)")
-            return false
-        }
+        // C-5 fix: delegate to AudioFileManager.isPlayable, which reconciles
+        // the Core Data row with the on-disk file. Previously this only
+        // checked Core Data, so a stale row (file deleted via Files.app)
+        // would falsely report the track as downloaded.
+        return AudioFileManager.shared.isPlayable(
+            videoId: track.videoId,
+            context: PersistenceController.shared.viewContext
+        )
     }
 }

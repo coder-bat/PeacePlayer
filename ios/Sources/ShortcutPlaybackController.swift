@@ -152,7 +152,7 @@ final class ShortcutPlaybackController {
             }
 
             group.enter()
-            APIService.shared.getStreamUrl(videoId: track.videoId, quality: "low")
+            StreamURLCache.shared.getStreamUrl(videoId: track.videoId, quality: "low")
                 .sink(
                     receiveCompletion: { completion in
                         if case .failure(let error) = completion {

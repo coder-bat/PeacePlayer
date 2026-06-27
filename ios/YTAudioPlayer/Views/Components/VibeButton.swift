@@ -115,7 +115,7 @@ struct VibeButton: View {
                     return
                 }
                 
-                APIService.shared.getStreamUrl(videoId: first.videoId)
+                StreamURLCache.shared.getStreamUrl(videoId: first.videoId)
                     .sink(receiveCompletion: { completion in
                         isLoading = false
                         if case .failure(let error) = completion {
@@ -132,7 +132,7 @@ struct VibeButton: View {
                         
                         // Add rest to queue
                         for track in tracks.dropFirst() {
-                            APIService.shared.getStreamUrl(videoId: track.videoId)
+                            StreamURLCache.shared.getStreamUrl(videoId: track.videoId)
                                 .sink(receiveCompletion: { _ in }, receiveValue: { streamInfo in
                                     let queueItem = QueueItem(
                                         track: track,

@@ -226,7 +226,7 @@ class PlaybackQueueManager: ObservableObject {
         }
 
         // Otherwise fetch from API
-        APIService.shared.getStreamUrl(videoId: track.videoId, quality: "low")
+        StreamURLCache.shared.getStreamUrl(videoId: track.videoId, quality: "low")
             .sink(
                 receiveCompletion: { result in
                     if case .failure(let error) = result {

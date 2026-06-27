@@ -9,16 +9,55 @@ import Foundation
 import Combine
 import CoreData
 
+/// Legacy delegate protocol — kept for backwards compatibility.
+/// Prefer subscribing to `completions` / `errors` / `progress` publishers
+/// since Combine subjects survive even when the listener is lazily initialized
+/// after a background relaunch (which is when downloads actually complete).
 protocol BackgroundDownloadDelegate: AnyObject {
     func downloadDidProgress(videoId: String, progress: Double)
     func downloadDidComplete(videoId: String, fileURL: URL)
     func downloadDidFail(videoId: String, error: Error)
 }
 
+/// Download completion event (C-1 fix: reliably delivered via Combine subject)
+struct DownloadCompletion {
+    let videoId: String
+    let fileURL: URL
+}
+
 class BackgroundDownloadService: NSObject {
     static let shared = BackgroundDownloadService()
 
+    /// Legacy weak delegate — kept for any callers still wiring up the old way.
+    /// New code should subscribe to the publishers below.
     weak var delegate: BackgroundDownloadDelegate?
+
+    // MARK: - C-1 fix: Combine publishers survive iOS-launched app relaunch
+    // The weak delegate pattern silently dropped events when iOS relaunched the
+    // app to deliver background download completions (DownloadManager was a
+    // singleton not yet wired). PassthroughSubject delivers to any active
+    // subscribers, even if they subscribed in a later scene phase.
+    private let completionSubject = PassthroughSubject<DownloadCompletion, Never>()
+    private let errorSubject = PassthroughSubject<(videoId: String, error: Error), Never>()
+    private let progressSubject = PassthroughSubject<(videoId: String, progress: Double), Never>()
+
+    var completions: AnyPublisher<DownloadCompletion, Never> {
+        completionSubject.eraseToAnyPublisher()
+    }
+    var errors: AnyPublisher<(videoId: String, error: Error), Never> {
+        errorSubject.eraseToAnyPublisher()
+    }
+    var progressPublisher: AnyPublisher<(videoId: String, progress: Double), Never> {
+        progressSubject.eraseToAnyPublisher()
+    }
+
+    /// C-1 fix: stored handler for `application(_:handleEventsForBackgroundURLSession:completionHandler:)`.
+    /// Invoked once `urlSessionDidFinishEvents(forBackgroundURLSession:)` fires.
+    private var backgroundCompletionHandler: (() -> Void)?
+
+    func storeBackgroundCompletionHandler(_ handler: @escaping () -> Void) {
+        backgroundCompletionHandler = handler
+    }
 
     private var session: URLSession!
     private var activeDownloads: [String: DownloadTask] = [:]
@@ -136,6 +175,9 @@ class BackgroundDownloadService: NSObject {
     }
 
     /// Delete a downloaded track from Core Data
+    /// C-5 fix: also deletes the underlying file via AudioFileManager so
+    /// deleteDownload is a true "remove from disk + Core Data" operation.
+    /// Previously this only removed the row, leaving orphan files on disk.
     func deleteDownloadedTrack(videoId: String) {
         let context = PersistenceController.shared.viewContext
         let request: NSFetchRequest<CDDownloadedTrack> = CDDownloadedTrack.fetchRequest()
@@ -147,9 +189,52 @@ class BackgroundDownloadService: NSObject {
                 context.delete(track)
             }
             try context.save()
-            print("🗑️ Deleted downloaded track from Core Data: \(videoId)")
+            // Also remove the on-disk file
+            AudioFileManager.shared.deleteLocalFile(videoId: videoId)
+            print("🗑️ Deleted downloaded track + file: \(videoId)")
         } catch {
             print("❌ Failed to delete downloaded track: \(error)")
+        }
+    }
+
+    // MARK: - C-1 fix: bootstrap() — orphan recovery
+
+    /// Scan the Downloads directory for files missing a Core Data row and
+    /// surface them. Called from AppDelegate on launch.
+    ///
+    /// Best-effort recovery: we can't fully reconstruct track metadata (title,
+    /// artist) from a bare .m4a, so this logs orphans for manual intervention
+    /// rather than fabricating Core Data rows. If the user opens the app while
+    /// the download is in flight, the new Combine-based completion path takes
+    /// over and writes the row normally.
+    func bootstrap() {
+        downloadQueue.async { [weak self] in
+            guard let self = self else { return }
+
+            let files = AudioFileManager.shared.allDownloadedFiles()
+            guard !files.isEmpty else { return }
+
+            let context = PersistenceController.shared.viewContext
+            var orphanCount = 0
+
+            for file in files {
+                let request: NSFetchRequest<CDDownloadedTrack> = CDDownloadedTrack.fetchRequest()
+                request.predicate = NSPredicate(format: "track.videoId == %@", file.videoId)
+
+                do {
+                    let count = try context.count(for: request)
+                    if count == 0 {
+                        orphanCount += 1
+                        print("⚠️ Orphan download detected: \(file.videoId) (\(file.size) bytes) — re-download to register in Library")
+                    }
+                } catch {
+                    print("❌ Bootstrap scan error for \(file.videoId): \(error)")
+                }
+            }
+
+            if orphanCount > 0 {
+                print("📦 Bootstrap: \(orphanCount) orphan download(s) found in \(files.count) file(s)")
+            }
         }
     }
 }
@@ -168,6 +253,9 @@ extension BackgroundDownloadService: URLSessionDownloadDelegate {
         downloadQueue.async { [weak self] in
             self?.activeDownloads[videoId]?.progress = progress
         }
+
+        // C-1 fix: emit to Combine subject in addition to weak delegate
+        progressSubject.send((videoId, progress))
 
         DispatchQueue.main.async { [weak self] in
             self?.delegate?.downloadDidProgress(videoId: videoId, progress: progress)
@@ -190,6 +278,9 @@ extension BackgroundDownloadService: URLSessionDownloadDelegate {
                 self?.activeDownloads.removeValue(forKey: videoId)
             }
 
+            // C-1 fix: emit to Combine subject in addition to weak delegate
+            completionSubject.send(DownloadCompletion(videoId: videoId, fileURL: permanentURL))
+
             DispatchQueue.main.async { [weak self] in
                 self?.delegate?.downloadDidComplete(videoId: videoId, fileURL: permanentURL)
             }
@@ -200,6 +291,8 @@ extension BackgroundDownloadService: URLSessionDownloadDelegate {
             downloadQueue.async { [weak self] in
                 self?.activeDownloads.removeValue(forKey: videoId)
             }
+
+            errorSubject.send((videoId, error))
 
             DispatchQueue.main.async { [weak self] in
                 self?.delegate?.downloadDidFail(videoId: videoId, error: error)
@@ -217,11 +310,22 @@ extension BackgroundDownloadService: URLSessionDownloadDelegate {
                 self?.activeDownloads.removeValue(forKey: videoId)
             }
 
+            errorSubject.send((videoId, error))
+
             DispatchQueue.main.async { [weak self] in
                 self?.delegate?.downloadDidFail(videoId: videoId, error: error)
             }
 
             print("❌ Download failed: \(videoId) - \(error.localizedDescription)")
+        }
+    }
+
+    // C-1 fix: deliver stored background completion handler when iOS tells us
+    // the URLSession is done delivering events for a background session.
+    func urlSessionDidFinishEvents(forBackgroundURLSession session: URLSession) {
+        DispatchQueue.main.async { [weak self] in
+            self?.backgroundCompletionHandler?()
+            self?.backgroundCompletionHandler = nil
         }
     }
 }

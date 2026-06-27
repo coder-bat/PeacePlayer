@@ -8,6 +8,7 @@
 import Foundation
 import UIKit
 import SwiftUI
+import CryptoKit
 import Combine
 
 /// Caches images to memory and disk for better performance
@@ -309,9 +310,15 @@ private extension UIImage {
 }
 
 private extension NSString {
+    // QW-5 fix: was `String(self.hashValue)` — Swift's hashValue is
+    // randomized per process and 64-bit, not collision-resistant. Two
+    // distinct artwork URLs whose hashValue collided would overwrite each
+    // other's cached file (and could even read the wrong image). Use
+    // CryptoKit.Insecure.MD5 for a deterministic 128-bit hash.
     var md5Hash: String {
-        // Simple hash for demo - in production use proper MD5
-        return String(self.hashValue)
+        let data = Data((self as String).utf8)
+        let digest = Insecure.MD5.hash(data: data)
+        return digest.map { String(format: "%02x", $0) }.joined()
     }
 }
 

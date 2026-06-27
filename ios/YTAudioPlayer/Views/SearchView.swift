@@ -132,9 +132,11 @@ struct SearchView: View {
                         viewModel.clearSearch()
                         viewModel.activeFilter = .all
                     }
-                } else {
+                } else if newValue.count >= 2 {
+                    // Debounce: wait 3s after the user stops typing before searching.
+                    // Ignore single-character queries to avoid noisy results.
                     searchDebounceTask = Task {
-                        try? await Task.sleep(nanoseconds: 500_000_000)
+                        try? await Task.sleep(nanoseconds: 3_000_000_000)
                         guard !Task.isCancelled else { return }
                         await MainActor.run {
                             viewModel.search(query: newValue)
@@ -264,6 +266,10 @@ struct SearchView: View {
 
         }
         .listStyle(.insetGrouped)
+        .task(id: viewModel.results.map(\.videoId)) {
+            let ids = viewModel.results.prefix(5).map(\.videoId)
+            StreamURLCache.shared.prefetchBatch(videoIds: ids)
+        }
         .modifier(ScrollDismissesKeyboardModifier())
         .refreshable {
             let query = viewModel.searchText
@@ -1063,7 +1069,7 @@ class SearchViewModel: ObservableObject {
         PlayerState.shared.currentItem = loadingItem
         PlayerState.shared.playbackState = .loading
 
-        APIService.shared.getStreamUrl(videoId: track.videoId)
+        StreamURLCache.shared.getStreamUrl(videoId: track.videoId)
             .handleErrors(with: .shared, retry: { [weak self] in
                 self?.performPlayTrack(track)
             })
@@ -1099,7 +1105,7 @@ class SearchViewModel: ObservableObject {
     }
     
     func addToQueue(_ track: Track) {
-        APIService.shared.getStreamUrl(videoId: track.videoId)
+        StreamURLCache.shared.getStreamUrl(videoId: track.videoId)
             .handleErrors(with: .shared)
             .sink(receiveValue: { streamInfo in
                 let item = QueueItem(
@@ -1115,7 +1121,7 @@ class SearchViewModel: ObservableObject {
     }
     
     func playNext(_ track: Track) {
-        APIService.shared.getStreamUrl(videoId: track.videoId)
+        StreamURLCache.shared.getStreamUrl(videoId: track.videoId)
             .handleErrors(with: .shared)
             .sink(receiveValue: { streamInfo in
                 let item = QueueItem(

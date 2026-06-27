@@ -118,7 +118,7 @@ struct TrendingSection: View {
                             .background(Color.accentColor.opacity(0.15))
                             .foregroundColor(.accentColor)
                             .cornerRadius(12)
-                        
+
                         Button(action: {
                             showGenrePicker = true
                         }) {
@@ -129,10 +129,13 @@ struct TrendingSection: View {
                     }
                     .padding(.horizontal)
                     .padding(.bottom, 8)
-                    
+
                     ForEach(Array(tracks.prefix(5).enumerated()), id: \.element.id) { index, track in
                         TrendingRow(track: track, rank: index + 1)
                     }
+                }
+                .task(id: tracks.map(\.videoId)) {
+                    StreamURLCache.shared.prefetchBatch(videoIds: tracks.prefix(5).map(\.videoId))
                 }
                 .padding(.horizontal)
                 .sheet(isPresented: $showGenrePicker) {
@@ -226,7 +229,7 @@ struct TrendingRow: View {
     }
     
     private func playTrack() {
-        APIService.shared.getStreamUrl(videoId: track.videoId)
+        StreamURLCache.shared.getStreamUrl(videoId: track.videoId)
             .sink(receiveCompletion: { _ in }, receiveValue: { streamInfo in
                 let item = QueueItem(
                     track: track,

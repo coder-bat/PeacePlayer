@@ -129,49 +129,28 @@ class APIService {
     }
 
     func getStreamUrl(videoId: String, preferM4A: Bool = true, quality: String = "low") -> AnyPublisher<StreamInfo, APIError> {
-        // Use proxy-stream endpoint with format preference
-        // preferM4A=true will prioritize m4a (AAC) format which works better on iOS
-        // quality="low" for fast start (70kbps), "high" for best quality (160kbps)
+        // Return the proxy-stream URL immediately without a blocking HEAD request.
+        // The proxy-stream endpoint handles yt-dlp extraction; AVPlayer will surface
+        // errors naturally if the stream fails, and PlayerState already handles them.
         let ext = preferM4A ? "m4a" : "webm"
         guard var urlComponents = URLComponents(string: "\(baseURL)/proxy-stream/\(videoId).\(ext)") else {
             return Fail(error: APIError.invalidURL).eraseToAnyPublisher()
         }
 
-        // Add quality query parameter
         urlComponents.queryItems = [URLQueryItem(name: "quality", value: quality)]
 
         guard let url = urlComponents.url else {
             return Fail(error: APIError.invalidURL).eraseToAnyPublisher()
         }
 
-        // Validate URL with a HEAD request before returning
-        // This ensures the backend is reachable and the stream URL is valid
-        var request = URLRequest(url: url)
-        request.httpMethod = "HEAD"
-        request.timeoutInterval = 10
-
-        return session.dataTaskPublisher(for: request)
-            .mapError { APIError.networkError($0) }
-            .flatMap { data, response -> AnyPublisher<StreamInfo, APIError> in
-                guard let httpResponse = response as? HTTPURLResponse else {
-                    return Fail(error: APIError.invalidResponse).eraseToAnyPublisher()
-                }
-                guard httpResponse.statusCode == 200 else {
-                    return Fail(error: APIError.httpError(statusCode: httpResponse.statusCode, message: "Stream not available")).eraseToAnyPublisher()
-                }
-
-                // Return stream info with appropriate MIME type
-                let mimeType = preferM4A ? "audio/mp4" : "audio/webm"
-                let bitrate = quality == "low" ? 70000 : 160000
-                let streamInfo = StreamInfo(
-                    streamUrl: url.absoluteString,
-                    mimeType: mimeType,
-                    bitrate: bitrate
-                )
-                return Just(streamInfo).setFailureType(to: APIError.self).eraseToAnyPublisher()
-            }
-            .receive(on: DispatchQueue.main)
-            .eraseToAnyPublisher()
+        let mimeType = preferM4A ? "audio/mp4" : "audio/webm"
+        let bitrate = quality == "low" ? 70000 : 160000
+        let streamInfo = StreamInfo(
+            streamUrl: url.absoluteString,
+            mimeType: mimeType,
+            bitrate: bitrate
+        )
+        return Just(streamInfo).setFailureType(to: APIError.self).eraseToAnyPublisher()
     }
     
     func downloadTrack(_ track: Track) -> AnyPublisher<String, APIError> {

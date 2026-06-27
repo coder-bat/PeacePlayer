@@ -407,8 +407,14 @@ struct HomeView: View {
             baseList
                 .scrollContentBackground(.hidden)
                 .scrollDisabled(true)
+                .task(id: tracks.map(\.videoId)) {
+                    StreamURLCache.shared.prefetchBatch(videoIds: tracks.prefix(5).map(\.videoId))
+                }
         } else {
             baseList
+                .task(id: tracks.map(\.videoId)) {
+                    StreamURLCache.shared.prefetchBatch(videoIds: tracks.prefix(5).map(\.videoId))
+                }
         }
     }
 
@@ -999,7 +1005,7 @@ class HomeViewModel: ObservableObject {
         PlayerState.shared.currentItem = loadingItem
         PlayerState.shared.playbackState = .loading
 
-        APIService.shared.getStreamUrl(videoId: track.videoId)
+        StreamURLCache.shared.getStreamUrl(videoId: track.videoId)
             .handleErrors(with: .shared, retry: { [weak self] in
                 self?.playTrack(track)
             })
@@ -1016,7 +1022,7 @@ class HomeViewModel: ObservableObject {
     }
 
     func addToQueue(_ track: Track) {
-        APIService.shared.getStreamUrl(videoId: track.videoId)
+        StreamURLCache.shared.getStreamUrl(videoId: track.videoId)
             .handleErrors(with: .shared)
             .sink(receiveValue: { streamInfo in
                 let item = QueueItem(
@@ -1067,7 +1073,7 @@ class HomeViewModel: ObservableObject {
 
                 self.vibeCancellables.removeAll()
                 for track in tracks.dropFirst() {
-                    APIService.shared.getStreamUrl(videoId: track.videoId)
+                    StreamURLCache.shared.getStreamUrl(videoId: track.videoId)
                         .sink(receiveCompletion: { completion in
                             if case .failure(let error) = completion {
                                 print("⚠️ [HomeView] Stream URL failed: \(error.localizedDescription)")
@@ -1099,7 +1105,7 @@ class HomeViewModel: ObservableObject {
         }
 
         for track in tracks.dropFirst() {
-            APIService.shared.getStreamUrl(videoId: track.videoId)
+            StreamURLCache.shared.getStreamUrl(videoId: track.videoId)
                 .sink(receiveCompletion: { completion in
                     if case .failure(let error) = completion {
                         print("⚠️ [HomeView] Stream URL failed: \(error.localizedDescription)")

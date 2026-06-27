@@ -47,11 +47,27 @@ struct StreamInfo: Codable {
     let streamUrl: String
     let mimeType: String
     let bitrate: Int
-    
+
+    // S3-4: Replay Gain. Backend can populate this with the track gain in dB
+    // extracted from the source's ReplayGain tags (e.g., via yt-dlp's
+    // --print "%(replaygain_track_gain)s"). nil means "no data" — the
+    // player falls back to user volume with no normalization. Negative
+    // values (e.g., -7.5) attenuate; positive values (rare) boost.
+    // Optional so older backend responses without the field still decode.
+    let replayGain: Double?
+
     enum CodingKeys: String, CodingKey {
         case streamUrl
         case mimeType
         case bitrate
+        case replayGain
+    }
+
+    init(streamUrl: String, mimeType: String, bitrate: Int, replayGain: Double? = nil) {
+        self.streamUrl = streamUrl
+        self.mimeType = mimeType
+        self.bitrate = bitrate
+        self.replayGain = replayGain
     }
 }
 

@@ -557,6 +557,40 @@ async def proxy_stream_audio(video_id: str, request: Request, quality: str = "hi
         raise HTTPException(status_code=500, detail=f"Stream failed: {str(e)}")
 
 
+# Prefetch endpoint - fire-and-forget cache warming
+@app.post("/prefetch/{video_id}")
+@limiter.limit("60/minute")
+async def prefetch_stream(video_id: str, background_tasks: BackgroundTasks, request: Request):
+    """
+    Fire-and-forget endpoint to warm the stream URL cache.
+    Returns 202 Accepted immediately; extraction runs in background.
+    """
+    cache = get_cache()
+    if cache.get(video_id):
+        return {"status": "already_cached"}
+
+    background_tasks.add_task(_prefetch_worker, video_id)
+    return {"status": "accepted"}
+
+
+async def _prefetch_worker(video_id: str):
+    """
+    Background worker: run yt-dlp extraction with proper locking.
+    """
+    try:
+        client = get_client()
+        async with ytmusic_lock:
+            stream_data = client.get_stream_url(video_id)
+
+        if stream_data and stream_data.get("audio_formats"):
+            get_cache().set(video_id, stream_data)
+            logger.info(f"Prefetch cached: {video_id}")
+        else:
+            logger.warning(f"Prefetch found no audio formats: {video_id}")
+    except Exception as e:
+        logger.error(f"Prefetch failed: {video_id}: {e}", exc_info=True)
+
+
 # Download endpoint
 @app.post("/download", response_model=DownloadResponse)
 @limiter.limit("15/minute")

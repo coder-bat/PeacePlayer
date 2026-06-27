@@ -27,6 +27,9 @@ struct RecentlyPlayedView: View {
                 }
             }
             .listStyle(.plain)
+            .task(id: dataManager.recentlyPlayed.prefix(5).map(\.videoId)) {
+                StreamURLCache.shared.prefetchBatch(videoIds: dataManager.recentlyPlayed.prefix(5).map(\.videoId))
+            }
             .navigationTitle("Recently Played")
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
@@ -41,7 +44,7 @@ struct RecentlyPlayedView: View {
     }
     
     private func playTrack(_ track: RecentTrack) {
-        APIService.shared.getStreamUrl(videoId: track.videoId)
+        StreamURLCache.shared.getStreamUrl(videoId: track.videoId)
             .handleErrors(with: .shared)
             .sink(receiveValue: { streamInfo in
                 let item = QueueItem(

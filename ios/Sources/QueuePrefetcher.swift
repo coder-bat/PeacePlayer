@@ -197,7 +197,7 @@ class QueuePrefetcher: ObservableObject {
         
         for track in newTracks {
             group.enter()
-            APIService.shared.getStreamUrl(videoId: track.videoId)
+            StreamURLCache.shared.getStreamUrl(videoId: track.videoId)
                 .sink(
                     receiveCompletion: { _ in group.leave() },
                     receiveValue: { streamInfo in

@@ -57,6 +57,9 @@ struct RecentlyPlayedSection: View {
                 }
             }
         }
+        .task(id: tracks.map(\.videoId)) {
+            StreamURLCache.shared.prefetchBatch(videoIds: tracks.prefix(5).map(\.videoId))
+        }
         .task {
             tracks = DataManager.shared.recentlyPlayed.map { $0.toTrack }
         }
@@ -124,7 +127,7 @@ struct DiscoverRecentlyPlayedCard: View {
 
         for queueTrack in queueTracks {
             group.enter()
-            APIService.shared.getStreamUrl(videoId: queueTrack.videoId)
+            StreamURLCache.shared.getStreamUrl(videoId: queueTrack.videoId)
                 .sink(
                     receiveCompletion: { _ in group.leave() },
                     receiveValue: { streamInfo in
@@ -165,7 +168,7 @@ struct DiscoverRecentlyPlayedCard: View {
     }
 
     private func playSingleTrack(_ track: Track) {
-        APIService.shared.getStreamUrl(videoId: track.videoId)
+        StreamURLCache.shared.getStreamUrl(videoId: track.videoId)
             .sink(receiveCompletion: { completion in
                 if case .failure(let error) = completion {
                     ErrorHandler.shared.handleAPIError(error)
@@ -257,7 +260,7 @@ struct SimpleTrackRow: View {
     }
     
     private func playTrack() {
-        APIService.shared.getStreamUrl(videoId: track.videoId)
+        StreamURLCache.shared.getStreamUrl(videoId: track.videoId)
             .sink(receiveCompletion: { completion in
                 if case .failure(let error) = completion {
                     ErrorHandler.shared.handleAPIError(error)

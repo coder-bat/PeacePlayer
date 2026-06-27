@@ -157,6 +157,9 @@ struct HistoryView: View {
             }
         }
         .listStyle(.plain)
+        .task(id: viewModel.historyItems.prefix(5).map(\.track.videoId)) {
+            StreamURLCache.shared.prefetchBatch(videoIds: viewModel.historyItems.prefix(5).map(\.track.videoId))
+        }
         .refreshable {
             viewModel.loadHistory()
         }
@@ -595,7 +598,7 @@ class HistoryViewModel: ObservableObject {
             let queueItem = QueueItem(track: track, streamUrl: localURL.absoluteString, source: .local(path: localURL.path))
             PlayerState.shared.addToQueueNext(queueItem)
         } else {
-            APIService.shared.getStreamUrl(videoId: track.videoId)
+            StreamURLCache.shared.getStreamUrl(videoId: track.videoId)
                 .sink(receiveCompletion: { _ in }, receiveValue: { streamInfo in
                     let queueItem = QueueItem(track: track, streamUrl: streamInfo.streamUrl, source: .stream)
                     PlayerState.shared.addToQueueNext(queueItem)
@@ -611,7 +614,7 @@ class HistoryViewModel: ObservableObject {
             let queueItem = QueueItem(track: track, streamUrl: localURL.absoluteString, source: .local(path: localURL.path))
             PlayerState.shared.addToQueue(queueItem)
         } else {
-            APIService.shared.getStreamUrl(videoId: track.videoId)
+            StreamURLCache.shared.getStreamUrl(videoId: track.videoId)
                 .sink(receiveCompletion: { _ in }, receiveValue: { streamInfo in
                     let queueItem = QueueItem(track: track, streamUrl: streamInfo.streamUrl, source: .stream)
                     PlayerState.shared.addToQueue(queueItem)
@@ -657,7 +660,7 @@ class HistoryViewModel: ObservableObject {
 
         for track in tracksToPlay {
             group.enter()
-            APIService.shared.getStreamUrl(videoId: track.videoId)
+            StreamURLCache.shared.getStreamUrl(videoId: track.videoId)
                 .sink(receiveCompletion: { _ in
                     group.leave()
                 }, receiveValue: { streamInfo in

@@ -95,24 +95,29 @@ struct QueueItem: Identifiable, Equatable {
     let source: TrackSource
     let contentSource: ContentSource
     let createdAt: Date
+    /// S3-4: Replay Gain in dB, captured from the backend's StreamInfo at
+    /// queue-construction time. Persists across seamless quality switches
+    /// so the gain doesn't have to be re-fetched.
+    let replayGain: Double?
 
     enum TrackSource: Equatable {
         case stream
         case local(path: String)
     }
 
-    init(track: Track, streamUrl: String, source: TrackSource, contentSource: ContentSource = .youtube, createdAt: Date = Date()) {
+    init(track: Track, streamUrl: String, source: TrackSource, contentSource: ContentSource = .youtube, createdAt: Date = Date(), replayGain: Double? = nil) {
         self.track = track
         self.streamUrl = streamUrl
         self.source = source
         self.contentSource = contentSource
         self.createdAt = createdAt
+        self.replayGain = replayGain
     }
-    
+
     static func == (lhs: QueueItem, rhs: QueueItem) -> Bool {
         lhs.id == rhs.id && lhs.track.videoId == rhs.track.videoId
     }
-    
+
     /// Returns true if the stream URL is likely expired (older than 4 hours)
     var isStreamUrlExpired: Bool {
         Date().timeIntervalSince(createdAt) > 4 * 60 * 60 // 4 hours
@@ -136,12 +141,28 @@ class PlayerState: ObservableObject {
     
     /// Current time in seconds
     @Published var currentTime: Double = 0.0
-    
+
     /// Total duration in seconds (from AVPlayer, may be inaccurate for some streams)
     @Published var duration: Double = 0.0
 
     /// Expected duration from track metadata (more reliable)
     private var expectedDuration: Double = 0.0
+
+    /// Sprint 2 / C-4 helper: every place that sets expectedDuration
+    /// should also call this so PlaybackClock's published value stays
+    /// in sync with PlayerState's private mirror.
+    private func updateExpectedDuration(_ value: Double) {
+        expectedDuration = value
+        playbackClock.setExpectedDuration(value)
+    }
+
+    /// Sprint 2 / C-4 fix: focused observable for the 0.5s time/progress
+    /// updates. PlayerState retains @Published currentTime/duration for
+    /// backwards compat (consumers like NowPlayingService, QueueView,
+    /// MiniPlayer still read these), but views that update 2x/sec (the
+    /// scrubber and time labels in FullPlayer) should observe only
+    /// `playbackClock` to scope re-renders to that subtree.
+    let playbackClock = PlaybackClock()
 
     /// Flag to prevent multiple completion triggers
     private var isHandlingCompletion = false
@@ -177,9 +198,66 @@ class PlayerState: ObservableObject {
     @Published var currentChapters: [AudiobookChapter] = []
     @Published var currentChapterIndex: Int = 0
     @Published var currentBookId: String = ""
+
+    // MARK: - Phase 2 / ios-qa: @Snapshotable marked properties
+    // The ios-qa StateServer reads these via reflection. Marking a property
+    // tells the codegen tool to emit a register/read/write accessor for
+    // it, which the simulator-side test agent uses to assert on playback
+    // state (e.g., "did the user see a 'playback error' toast?" or
+    // "is the currentItem.source == .stream after tapping a YouTube
+    // track?"). We only mark the properties the test plan needs to
+    // assert on — everything else stays private to keep the StateServer
+    // schema tight. The mirror properties (`snapshotX`) avoid name
+    // collision with the @Published originals while letting the
+    // StateServer's accessor point at the same logical state.
+    #if DEBUG
+    @Snapshotable var snapshotPlaybackState: PlaybackState = .idle
+    @Snapshotable var snapshotContentType: PlaybackContentType = .track
+    @Snapshotable var snapshotIsShuffled: Bool = false
+    @Snapshotable var snapshotRepeatMode: RepeatMode = .none
+    @Snapshotable var snapshotVolume: Double = 1.0
+    @Snapshotable var snapshotPlaybackRate: Float = 1.0
+    @Snapshotable var snapshotCurrentIndex: Int = 0
+    #endif
+
+    // MARK: - S3-4: Replay Gain
+    /// User-facing setting. When true (default), track gain from the
+    /// backend's ReplayGain metadata is applied as a pre-gain multiplier
+    /// on `player.volume`. When false, player.volume is the user volume
+    /// unchanged. Picked up live by `applyVolume()` so toggling the
+    /// setting takes effect immediately.
+    static let replayGainEnabledKey = "playback.replayGainEnabled"
+    static var replayGainEnabled: Bool {
+        get {
+            // Default to true; users can disable in settings.
+            UserDefaults.standard.object(forKey: replayGainEnabledKey) as? Bool ?? true
+        }
+        set {
+            UserDefaults.standard.set(newValue, forKey: replayGainEnabledKey)
+        }
+    }
+
+    /// Effective gain to apply for the current item, in linear amplitude
+    /// (not dB). Returns 1.0 when:
+    ///  - Replay Gain is disabled in settings
+    ///  - the current item has no `replayGain` (backend didn't provide one)
+    ///  - the value is exactly 0 dB (no change needed)
+    private var currentReplayGainLinear: Float {
+        guard PlayerState.replayGainEnabled,
+              let db = currentItem?.replayGain,
+              db.isFinite else { return 1.0 }
+        // 10^(dB/20) — standard amplitude-from-dB conversion
+        return Float(pow(10.0, db / 20.0))
+    }
     
     // MARK: - Private Properties
-    
+
+    // S3-5: When gapless playback is on, this is an AVQueuePlayer that
+    // pre-queues upcoming items. AVQueuePlayer auto-advances on item end
+    // for a truly seamless transition (no gap, no overlap). When off,
+    // it's a regular AVPlayer and we use the two-player crossfade path.
+    // The type stays as `AVPlayer?` because AVQueuePlayer IS-A AVPlayer;
+    // only construction and item-management differ.
     private var player: AVPlayer?
     private var timeObserver: Any?
     private var cancellables = Set<AnyCancellable>()
@@ -189,6 +267,22 @@ class PlayerState: ObservableObject {
     private var dataManager = DataManager.shared
     private var accumulatedListeningTime: TimeInterval = 0
     private var lastProgressUpdate: Date = Date()
+
+    // C-2 fix: token-based observer tracking. The previous code used
+    // `NotificationCenter.default.removeObserver(self)` in the
+    // playRadioStation / playPodcastEpisode / playAudiobookChapter entry
+    // points and in removeTimeObserver, which stripped ALL observers
+    // (including the audio session interruption / route change / media
+    // services reset observers) for the rest of the app's lifetime. After
+    // playing a podcast and receiving a phone call, playback would no
+    // longer pause. We now track observers by token and only remove the
+    // ones scoped to the current AVPlayerItem.
+    //
+    // We use arrays (not Sets) because NSObjectProtocol is not Hashable.
+    // Cardinality is small (3 + 3 + 1) so linear scans are fine.
+    private var audioSessionObserverTokens: [NSObjectProtocol] = []
+    private var playerItemObserverTokens: [NSObjectProtocol] = []
+    private var memoryWarningToken: NSObjectProtocol?
 
     // Adaptive quality switching
     private var qualityUpgradeTimer: Timer?
@@ -270,18 +364,64 @@ class PlayerState: ObservableObject {
         setupAudioSessionObservers()
         restoreQueue()
 
-        // Register for memory warnings
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(handleMemoryWarning),
-            name: UIApplication.didReceiveMemoryWarningNotification,
-            object: nil
-        )
+        // C-2 fix: register memory warning via token (so we can clean up
+        // consistently if needed; previously this used the selector-based
+        // overload that can be stripped by `removeObserver(self)`)
+        memoryWarningToken = NotificationCenter.default.addObserver(
+            forName: UIApplication.didReceiveMemoryWarningNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.handleMemoryWarning()
+        }
 
         // Periodic cleanup every 5 minutes
         cleanupTimer = Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { [weak self] _ in
             self?.cleanupOldItems()
         }
+
+        // Phase 2 / ios-qa: keep the @Snapshotable mirror properties in
+        // sync with their @Published counterparts. The StateServer reads
+        // the mirror values; the rest of the app reads the @Published
+        // originals. We do this in one place rather than at every
+        // assignment site to avoid scattering DEBUG-gated code through
+        // the file. We subscribe to the projected `$` publishers (not
+        // `objectWillChange`) so we get the new value, not the old one.
+        //
+        // Publishers.MergeMany requires homogeneous types so we map each
+        // to `AnyPublisher<Void, Never>` first; the handler reads the
+        // up-to-date values directly from `self`.
+        #if DEBUG
+        let triggers: [AnyPublisher<Void, Never>] = [
+            self.$playbackState.map { _ in () }.eraseToAnyPublisher(),
+            self.$contentType.map { _ in () }.eraseToAnyPublisher(),
+            self.$isShuffled.map { _ in () }.eraseToAnyPublisher(),
+            self.$repeatMode.map { _ in () }.eraseToAnyPublisher(),
+            self.$volume.map { _ in () }.eraseToAnyPublisher(),
+            self.$playbackRate.map { _ in () }.eraseToAnyPublisher(),
+            self.$currentIndex.map { _ in () }.eraseToAnyPublisher(),
+        ]
+        Publishers.MergeMany(triggers)
+            .sink { [weak self] _ in
+                guard let self = self else { return }
+                self.snapshotPlaybackState = self.playbackState
+                self.snapshotContentType = self.contentType
+                self.snapshotIsShuffled = self.isShuffled
+                self.snapshotRepeatMode = self.repeatMode
+                self.snapshotVolume = self.volume
+                self.snapshotPlaybackRate = self.playbackRate
+                self.snapshotCurrentIndex = self.currentIndex
+            }
+            .store(in: &cancellables)
+
+        // Phase 2 / ios-qa: register the @Snapshotable mirrors with the
+        // embedded StateServer. This must happen AFTER `self` is fully
+        // initialized (all stored properties have their defaults) so the
+        // read closures return real values from the first snapshot. The
+        // registration is idempotent — re-calling replaces — so it's safe
+        // to call on every init.
+        PlayerStateAccessor.register(self)
+        #endif
     }
     
     @objc private func handleMemoryWarning() {
@@ -321,7 +461,7 @@ class PlayerState: ObservableObject {
                 if self.currentIndex >= 0 && self.currentIndex < items.count {
                     let currentItem = items[self.currentIndex]
                     self.currentItem = currentItem
-                    self.expectedDuration = Double(currentItem.track.durationSeconds)
+                    self.updateExpectedDuration(Double(currentItem.track.durationSeconds))
                 }
             }
         }
@@ -353,27 +493,41 @@ class PlayerState: ObservableObject {
     }
 
     private func setupAudioSessionObservers() {
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(handleAudioSessionInterruption),
-            name: AVAudioSession.interruptionNotification,
-            object: AVAudioSession.sharedInstance()
+        // C-2 fix: token-based observer registration. These observers must
+        // remain active for the lifetime of the PlayerState singleton — the
+        // previous selector-based overloads were being stripped by the
+        // `removeObserver(self)` call in playRadioStation / playPodcastEpisode
+        // / playAudiobookChapter / removeTimeObserver.
+        audioSessionObserverTokens.append(
+            NotificationCenter.default.addObserver(
+                forName: AVAudioSession.interruptionNotification,
+                object: AVAudioSession.sharedInstance(),
+                queue: .main
+            ) { [weak self] notification in
+                self?.handleAudioSessionInterruption(notification)
+            }
         )
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(handleAudioSessionRouteChange),
-            name: AVAudioSession.routeChangeNotification,
-            object: AVAudioSession.sharedInstance()
+        audioSessionObserverTokens.append(
+            NotificationCenter.default.addObserver(
+                forName: AVAudioSession.routeChangeNotification,
+                object: AVAudioSession.sharedInstance(),
+                queue: .main
+            ) { [weak self] notification in
+                self?.handleAudioSessionRouteChange(notification)
+            }
         )
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(handleMediaServicesReset),
-            name: AVAudioSession.mediaServicesWereResetNotification,
-            object: nil
+        audioSessionObserverTokens.append(
+            NotificationCenter.default.addObserver(
+                forName: AVAudioSession.mediaServicesWereResetNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] notification in
+                self?.handleMediaServicesReset(notification)
+            }
         )
     }
 
-    @objc private func handleAudioSessionInterruption(_ notification: Notification) {
+    private func handleAudioSessionInterruption(_ notification: Notification) {
         guard let userInfo = notification.userInfo,
               let typeValue = userInfo[AVAudioSessionInterruptionTypeKey] as? UInt,
               let type = AVAudioSession.InterruptionType(rawValue: typeValue) else { return }
@@ -405,7 +559,7 @@ class PlayerState: ObservableObject {
         }
     }
 
-    @objc private func handleAudioSessionRouteChange(_ notification: Notification) {
+    private func handleAudioSessionRouteChange(_ notification: Notification) {
         guard let userInfo = notification.userInfo,
               let reasonValue = userInfo[AVAudioSessionRouteChangeReasonKey] as? UInt,
               let reason = AVAudioSession.RouteChangeReason(rawValue: reasonValue) else { return }
@@ -423,7 +577,7 @@ class PlayerState: ObservableObject {
         }
     }
 
-    @objc private func handleMediaServicesReset(_ notification: Notification) {
+    private func handleMediaServicesReset(_ notification: Notification) {
         print("🔄 Media services were reset, rebuilding audio session and player")
         setupAudioSession()
         if let current = currentItem {
@@ -456,20 +610,30 @@ class PlayerState: ObservableObject {
 
     /// Play a track with local file check (plays local file if available, otherwise streams)
     func play(track: Track) {
-        // Check if we have a local file for this track
+        // C-5 fix: use the reconciliation helper instead of raw FileManager.fileExists.
+        // This handles the case where CDDownloadedTrack has a stale row but the
+        // file is missing on disk (user deleted via Files.app, etc.).
+        let isPlayable = AudioFileManager.shared.isPlayable(
+            videoId: track.videoId,
+            context: PersistenceController.shared.viewContext
+        )
         let localURL = AudioFileManager.shared.localFileURL(for: track.videoId)
 
-        if FileManager.default.fileExists(atPath: localURL.path) {
+        if isPlayable {
             // Play from local file
+            // C-5 fix: pass `contentSource: .local` explicitly. The default is
+            // `.youtube` which caused the red YouTube chip to render on
+            // downloaded tracks in FullPlayer.
             let item = QueueItem(
                 track: track,
                 streamUrl: localURL.absoluteString,
-                source: .local(path: localURL.path)
+                source: .local(path: localURL.path),
+                contentSource: .local
             )
             play(item: item)
         } else {
             // Stream from backend - fetch stream URL first
-            APIService.shared.getStreamUrl(videoId: track.videoId, quality: "low")
+            StreamURLCache.shared.getStreamUrl(videoId: track.videoId, quality: "low")
                 .sink(
                     receiveCompletion: { result in
                         if case .failure(let error) = result {
@@ -477,10 +641,14 @@ class PlayerState: ObservableObject {
                         }
                     },
                     receiveValue: { [weak self] streamInfo in
+                        // S3-4: pass replayGain through to the queue item
+                        // so the gain is preserved across quality switches
+                        // and re-applied on every play.
                         let item = QueueItem(
                             track: track,
                             streamUrl: streamInfo.streamUrl,
-                            source: .stream
+                            source: .stream,
+                            replayGain: streamInfo.replayGain
                         )
                         self?.play(item: item)
                     }
@@ -500,7 +668,7 @@ class PlayerState: ObservableObject {
 
         currentItem = item
         // Store expected duration from track metadata
-        expectedDuration = Double(item.track.durationSeconds)
+        updateExpectedDuration(Double(item.track.durationSeconds))
         print("🎵 CRITICAL: Set expectedDuration = \(expectedDuration) from track.durationSeconds = \(item.track.durationSeconds)")
         playbackState = .loading
         
@@ -522,7 +690,11 @@ class PlayerState: ObservableObject {
         print("🔊 Creating URL from streamUrl...")
         guard let url = URL(string: item.streamUrl) else {
             print("❌ Failed to create URL from: \(item.streamUrl.prefix(50))...")
+            // C-3 fix: surface the error to the user. Previously this
+            // returned silently and the play button just sat in loading
+            // state with no feedback.
             playbackState = .error("Invalid URL")
+            ErrorHandler.shared.show(.playbackFailed("Invalid URL"))
             return
         }
         print("✅ URL created: \(url.absoluteString.prefix(80))...")
@@ -541,16 +713,33 @@ class PlayerState: ObservableObject {
         playerItem.canUseNetworkResourcesForLiveStreamingWhilePaused = false
         
         print("🔊 Creating AVPlayer...")
-        player = AVPlayer(playerItem: playerItem)
-        player?.volume = Float(volume)
+        // S3-5: Use AVQueuePlayer when gapless is enabled so AVFoundation
+        // can chain upcoming items seamlessly (no gap, no overlap). When
+        // gapless is off, fall back to a regular AVPlayer + the two-player
+        // crossfade path in CrossfadeManager.
+        if CrossfadeManager.shared.gaplessEnabled {
+            player = AVQueuePlayer(playerItem: playerItem)
+            print("🔊 AVQueuePlayer created (gapless mode)")
+        } else {
+            player = AVPlayer(playerItem: playerItem)
+            print("🔊 AVPlayer created (crossfade mode)")
+        }
+        applyVolume()
         // Ensure background playback continues on iOS 16+
         player?.audiovisualBackgroundPlaybackPolicy = .continuesIfPossible
         // Don't wait to minimize stalling - start immediately and let it buffer as it plays
         player?.automaticallyWaitsToMinimizeStalling = false
-        print("✅ AVPlayer created with fast-start config")
-        
+
         // Set current player in crossfade manager
+        // For gapless mode, we still call setCurrentPlayer so observers fire
+        // uniformly; CrossfadeManager just won't pre-prepare a next player.
         CrossfadeManager.shared.setCurrentPlayer(player)
+
+        // S3-5: Pre-queue upcoming items in the AVQueuePlayer so the
+        // auto-advance to next track is gapless.
+        if CrossfadeManager.shared.gaplessEnabled {
+            enqueueUpcomingItemsForGapless()
+        }
 
         // Attach audio visualizer tap to this player item
         AudioVisualizerEngine.shared.installTap(on: playerItem)
@@ -561,11 +750,12 @@ class PlayerState: ObservableObject {
         print("✅ Observers set up")
         
         // Start playback immediately for fast start - don't wait for readyToPlay
-        // AVPlayer will handle buffering as it plays
+        // AVPlayer will handle buffering as it plays. Keep playbackState as .loading
+        // until the item reports .readyToPlay so the UI shows accurate feedback.
         print("🔊 Starting playback immediately (fast-start mode)...")
         player?.play()
         player?.rate = playbackRate
-        playbackState = .playing
+        // playbackState stays .loading; observer will flip to .playing when ready.
 
         print("🔊 Auto-populating queue...")
         QueuePrefetcher.shared.autoPopulateQueue(startingFrom: item.track)
@@ -611,7 +801,7 @@ class PlayerState: ObservableObject {
 
         print("🔊 Upgrading to high quality stream for: \(item.track.title)")
 
-        APIService.shared.getStreamUrl(videoId: item.track.videoId, quality: "high")
+        StreamURLCache.shared.getStreamUrl(videoId: item.track.videoId, quality: "high")
             .sink(
                 receiveCompletion: { [weak self] result in
                     if case .failure(let error) = result {
@@ -658,7 +848,12 @@ class PlayerState: ObservableObject {
         player.replaceCurrentItem(with: newPlayerItem)
 
         // Seek to previous position
-        player.seek(to: currentTime, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] _ in
+        // QW-11 fix: use 0.5s tolerance instead of `.zero`. The exact seek
+        // was stalling 1-5s on slow networks during quality upgrade because
+        // AVPlayer has to download the exact keyframe. A 0.5s tolerance is
+        // imperceptible to the ear and completes near-instantly.
+        let tolerance = CMTime(seconds: 0.5, preferredTimescale: 1000)
+        player.seek(to: currentTime, toleranceBefore: tolerance, toleranceAfter: tolerance) { [weak self] _ in
             guard let self = self else { return }
 
             // Restore playback state
@@ -668,16 +863,30 @@ class PlayerState: ObservableObject {
             }
 
             // Update current item with new URL
+            // S3-4: preserve replayGain across the quality switch
             let upgradedItem = QueueItem(
                 track: originalItem.track,
                 streamUrl: newUrl,
-                source: .stream
+                source: .stream,
+                replayGain: originalItem.replayGain
             )
             self.currentItem = upgradedItem
 
             // Update queue
             if self.currentIndex < self.queue.count {
                 self.queue[self.currentIndex] = upgradedItem
+            }
+
+            // S3-4: re-apply the gain on the (possibly new) player
+            applyVolume()
+
+            // QW-13 fix: re-install the visualizer tap on the new
+            // (high-quality) player item. installTap is only called in
+            // play(item:), so after a seamless quality switch the
+            // visualizer + haptic symphony engine would read silent buffers
+            // for the remainder of the track.
+            if let newItem = player.currentItem {
+                AudioVisualizerEngine.shared.installTap(on: newItem)
             }
 
             print("✅ Quality upgraded to high - seamless switch complete")
@@ -712,7 +921,7 @@ class PlayerState: ObservableObject {
             refreshAndPlay(item: item, at: index)
         } else {
             // CRITICAL FIX: Set expectedDuration from track metadata before playing
-            expectedDuration = Double(item.track.durationSeconds)
+            updateExpectedDuration(Double(item.track.durationSeconds))
             print("🎵 playQueue: Set expectedDuration = \(expectedDuration)")
             currentIndex = index
             play(item: item, addToQueue: false)
@@ -721,12 +930,16 @@ class PlayerState: ObservableObject {
     }
     
     private func refreshAndPlay(item: QueueItem, at index: Int) {
-        APIService.shared.getStreamUrl(videoId: item.track.videoId)
+        StreamURLCache.shared.getStreamUrl(videoId: item.track.videoId)
             .sink(
                 receiveCompletion: { [weak self] result in
                     if case .failure(let error) = result {
                         print("❌ Failed to refresh stream URL: \(error)")
+                        // C-3 fix: surface to user. Previously this
+                        // surfaced only in console; user saw a silent
+                        // loading state.
                         self?.playbackState = .error("Failed to load audio")
+                        ErrorHandler.shared.show(.playbackFailed("Could not load this track. Check your connection and try again."))
                         self?.endTrackTransitionBackgroundTask()
                     }
                 },
@@ -755,13 +968,22 @@ class PlayerState: ObservableObject {
     private func refreshAndPlayCurrentItem() {
         guard let item = currentItem else { return }
         print("🔄 Refreshing current item: \(item.track.title)")
-        
-        APIService.shared.getStreamUrl(videoId: item.track.videoId)
+
+        StreamURLCache.shared.getStreamUrl(videoId: item.track.videoId)
             .sink(
                 receiveCompletion: { [weak self] result in
                     if case .failure(let error) = result {
                         print("❌ Failed to refresh stream URL: \(error)")
+                        // C-3 fix: surface to user with retry. The retry
+                        // closure re-invokes refreshAndPlayCurrentItem so
+                        // they can attempt again without leaving the player.
                         self?.playbackState = .error("Failed to load audio")
+                        ErrorHandler.shared.show(
+                            .playbackFailed("Could not load this track. Try again."),
+                            retry: { [weak self] in
+                                self?.refreshAndPlayCurrentItem()
+                            }
+                        )
                     }
                 },
                 receiveValue: { [weak self] streamInfo in
@@ -818,6 +1040,9 @@ class PlayerState: ObservableObject {
         guard rate >= 0.5 && rate <= 3.0 else { return }
 
         playbackRate = rate
+        // Sprint 2 / C-4 fix: also push to the focused clock so the
+        // scrubber's @ObservedObject view picks up the new rate.
+        playbackClock.setRate(rate)
         player?.rate = rate
 
         // Update Now Playing info with new rate
@@ -851,7 +1076,10 @@ class PlayerState: ObservableObject {
         progress = 0.0
         currentTime = 0.0
         duration = 0.0
-        expectedDuration = 0.0
+        updateExpectedDuration(0.0)
+        // Sprint 2 / C-4 fix: reset the focused clock so the scrubber
+        // stops re-rendering on its tick.
+        playbackClock.reset()
         contentType = .track
 
         // Re-register audio session observers after cleanup for next playback
@@ -894,7 +1122,9 @@ class PlayerState: ObservableObject {
         removeTimeObserver()
         cancelQualityUpgrade()
         cancellables.removeAll()
-        NotificationCenter.default.removeObserver(self)
+        // C-2 fix: removed `NotificationCenter.default.removeObserver(self)` —
+        // it was stripping audio session observers (interruption / route
+        // change / media services reset) for the rest of the app's lifetime.
 
         player?.pause()
         contentType = .liveRadio
@@ -912,13 +1142,16 @@ class PlayerState: ObservableObject {
 
         let item = QueueItem(track: radioTrack, streamUrl: station.urlResolved, source: .stream)
         currentItem = item
-        expectedDuration = 0
+        updateExpectedDuration(0)
 
         let playerItem = AVPlayerItem(url: url)
         player = AVPlayer(playerItem: playerItem)
-        player?.volume = Float(volume)
+        applyVolume()
         player?.play()
         playbackState = .playing
+        // QW-13 fix: install the visualizer tap on the new player item
+        // (was previously only called in play(item:), missing radio/podcast/audiobook)
+        AudioVisualizerEngine.shared.installTap(on: playerItem)
         setupPlayerObservers()
     }
 
@@ -930,7 +1163,9 @@ class PlayerState: ObservableObject {
         removeTimeObserver()
         cancelQualityUpgrade()
         cancellables.removeAll()
-        NotificationCenter.default.removeObserver(self)
+        // C-2 fix: removed `NotificationCenter.default.removeObserver(self)` —
+        // it was stripping audio session observers for the rest of the app's
+        // lifetime. See C-2 in project-playback-gap-analysis-2026-06-16.md.
 
         player?.pause()
         contentType = .podcastEpisode
@@ -948,13 +1183,15 @@ class PlayerState: ObservableObject {
 
         let item = QueueItem(track: podcastTrack, streamUrl: episode.audioUrl, source: .stream)
         currentItem = item
-        expectedDuration = Double(episode.durationSeconds)
+        updateExpectedDuration(Double(episode.durationSeconds))
 
         let playerItem = AVPlayerItem(url: url)
         player = AVPlayer(playerItem: playerItem)
-        player?.volume = Float(volume)
+        applyVolume()
         player?.play()
         playbackState = .playing
+        // QW-13 fix: install the visualizer tap on the new player item
+        AudioVisualizerEngine.shared.installTap(on: playerItem)
         setupPlayerObservers()
 
         // Resume from saved position
@@ -984,7 +1221,8 @@ class PlayerState: ObservableObject {
         removeTimeObserver()
         cancelQualityUpgrade()
         cancellables.removeAll()
-        NotificationCenter.default.removeObserver(self)
+        // C-2 fix: removed `NotificationCenter.default.removeObserver(self)` —
+        // see project-playback-gap-analysis-2026-06-16.md.
 
         player?.pause()
         contentType = .audiobook
@@ -1006,13 +1244,15 @@ class PlayerState: ObservableObject {
 
         let item = QueueItem(track: audiobookTrack, streamUrl: chapter.audioUrl, source: .stream)
         currentItem = item
-        expectedDuration = Double(chapter.durationSeconds)
+        updateExpectedDuration(Double(chapter.durationSeconds))
 
         let playerItem = AVPlayerItem(url: url)
         player = AVPlayer(playerItem: playerItem)
-        player?.volume = Float(volume)
+        applyVolume()
         player?.play()
         playbackState = .playing
+        // QW-13 fix: install the visualizer tap on the new player item
+        AudioVisualizerEngine.shared.installTap(on: playerItem)
         setupPlayerObservers()
 
         // Resume from saved position
@@ -1195,6 +1435,34 @@ class PlayerState: ObservableObject {
             return
         }
 
+        // S3-5: Gapless mode path. If the player is an AVQueuePlayer, the
+        // next item is already in the queue. Just call advanceToNextItem
+        // and let AVFoundation do the rest. We still update currentIndex
+        // / currentItem synchronously for the UI.
+        if CrossfadeManager.shared.gaplessEnabled, let queuePlayer = player as? AVQueuePlayer {
+            let nextIndex = currentIndex + 1
+            if nextIndex < queue.count {
+                print("⏭️ Gapless: advancing AVQueuePlayer to next track")
+                currentIndex = nextIndex
+                currentItem = queue[nextIndex]
+                expectedDuration = Double(queue[nextIndex].track.durationSeconds)
+                dataManager.addToRecentlyPlayed(queue[nextIndex].track)
+                NotificationCenter.default.post(name: .trackPlayed, object: nil)
+                queuePlayer.advanceToNextItem()
+                // Re-enqueue to refill the queue player
+                enqueueUpcomingItemsForGapless()
+                endTrackTransitionBackgroundTask()
+                return
+            } else if repeatMode == .all {
+                // Loop — fall through to playQueue(at: 0) below
+                print("⏭️ Gapless: looping to beginning")
+            } else {
+                print("⏭️ End of queue reached (gapless)")
+                endTrackTransitionBackgroundTask()
+                return
+            }
+        }
+
         let nextIndex = currentIndex + 1
         print("⏭️ Next index: \(nextIndex), queue.count: \(queue.count)")
 
@@ -1222,7 +1490,7 @@ class PlayerState: ObservableObject {
         print("🔊 Performing crossfade to: \(item.track.title)")
 
         // CRITICAL FIX: Set expectedDuration BEFORE updating UI so progress calculations use correct duration
-        expectedDuration = Double(item.track.durationSeconds)
+        updateExpectedDuration(Double(item.track.durationSeconds))
         print("🎵 Crossfade: Set expectedDuration = \(expectedDuration) from track.durationSeconds = \(item.track.durationSeconds)")
         
         // CRITICAL FIX: Check if crossfade is possible BEFORE updating UI
@@ -1241,10 +1509,10 @@ class PlayerState: ObservableObject {
         // Perform crossfade
         CrossfadeManager.shared.crossfadeToNext { [weak self] in
             guard let self = self else { return }
-            
+
             // Crossfade complete, update player reference
             self.player = CrossfadeManager.shared.takeNextPlayer()
-            
+
             // CRITICAL FIX: Only proceed if we got a valid player
             guard self.player != nil else {
                 print("❌ Crossfade completed but player is nil - forcing fallback")
@@ -1252,7 +1520,14 @@ class PlayerState: ObservableObject {
                 self.endTrackTransitionBackgroundTask()
                 return
             }
-            
+
+            // QW-13 fix: re-install the visualizer tap on the new player
+            // item. installTap is only called in play(item:), so after a
+            // crossfade the visualizer + haptic symphony engine would read
+            // silent buffers for the new track.
+            if let newItem = self.player?.currentItem {
+                AudioVisualizerEngine.shared.installTap(on: newItem)
+            } 
             // Setup observers on new player
             self.setupPlayerObservers()
 
@@ -1275,6 +1550,71 @@ class PlayerState: ObservableObject {
     }
     
     private var isPreparingNextTrack = false
+
+    /// S3-5: Append upcoming tracks to the AVQueuePlayer so it can chain
+    /// them seamlessly. We append from currentIndex+1 forward, but stop
+    /// early if the user has `repeatMode == .one` (in which case the same
+    /// item would loop — no need to queue anything).
+    private func enqueueUpcomingItemsForGapless() {
+        guard let queuePlayer = player as? AVQueuePlayer else { return }
+        guard repeatMode != .one else {
+            print("🔊 Gapless: repeat-one, not enqueueing more items")
+            return
+        }
+
+        // Walk forward from the next index, taking into account repeat-all
+        // (which wraps the queue back to the start).
+        let queueCount = queue.count
+        guard queueCount > 1 else { return }
+
+        let lookAhead = min(3, queueCount - 1)  // Pre-queue up to 3 tracks to limit memory
+        for offset in 1...lookAhead {
+            let nextIdx: Int
+            if repeatMode == .all {
+                nextIdx = (currentIndex + offset) % queueCount
+            } else {
+                nextIdx = currentIndex + offset
+                if nextIdx >= queueCount { break }
+            }
+
+            let nextItem = queue[nextIdx]
+            guard let url = URL(string: nextItem.streamUrl) else { continue }
+
+            let nextPlayerItem = AVPlayerItem(url: url)
+            nextPlayerItem.preferredForwardBufferDuration = 5
+            nextPlayerItem.canUseNetworkResourcesForLiveStreamingWhilePaused = false
+            queuePlayer.insert(nextPlayerItem, after: queuePlayer.items().last)
+            print("🔊 Gapless: pre-queued [\(nextIdx)] \(nextItem.track.title)")
+        }
+    }
+
+    /// S3-5: After AVQueuePlayer auto-advances to the next item, sync
+    /// PlayerState's currentIndex/currentItem with the new current item.
+    /// Called from the .AVPlayerItemDidPlayToEndTime notification handler
+    /// when gapless mode is on.
+    private func advanceGaplessState() {
+        guard let queuePlayer = player as? AVQueuePlayer else { return }
+        guard let nowPlaying = queuePlayer.currentItem,
+              let matchIdx = queue.firstIndex(where: { $0.track.videoId == trackIdentifier(for: nowPlaying) }) else {
+            return
+        }
+        currentIndex = matchIdx
+        if matchIdx < queue.count {
+            currentItem = queue[matchIdx]
+            dataManager.addToRecentlyPlayed(currentItem!.track)
+            NotificationCenter.default.post(name: .trackPlayed, object: nil)
+        }
+        // Re-enqueue so we always have a few items in the queue player.
+        enqueueUpcomingItemsForGapless()
+    }
+
+    /// Best-effort: match an AVPlayerItem back to a videoId by inspecting
+    /// the URL path (we used AVPlayerItem(url:) so the videoId is encoded
+    /// in the URL — for streams, it's the path component after /proxy-stream/).
+    private func trackIdentifier(for playerItem: AVPlayerItem) -> String? {
+        guard let asset = playerItem.asset as? AVURLAsset else { return nil }
+        return asset.url.lastPathComponent.replacingOccurrences(of: ".m4a", with: "")
+    }
 
     private func prepareNextTrackForCrossfade() {
         guard CrossfadeManager.shared.isEnabled else { return }
@@ -1332,12 +1672,25 @@ class PlayerState: ObservableObject {
         if isShuffled {
             // Save original queue
             originalQueue = queue
-            // Shuffle remaining items after current (if any)
+            // Sprint 3 / S3-1 fix: smart shuffle — avoid tracks played in the
+            // last 50 plays. Pull the recent videoIds from DataManager's
+            // recentlyPlayed list (UserDefaults-backed, kept in sync with
+            // CDPlayHistory for stats). Tracks that have been played recently
+            // are pushed to the end of the shuffled order rather than
+            // appearing early. Without this, shuffle feels like a random
+            // rewind of "stuff you just heard".
+            let recentVideoIds: Set<String> = Set(
+                dataManager.recentlyPlayed.prefix(50).map { $0.videoId }
+            )
+
             if currentIndex < queue.count - 1 {
                 let current = queue[currentIndex]
                 var remaining = Array(queue[(currentIndex + 1)...])
-                remaining.shuffle()
-                queue = Array(queue[...currentIndex]) + remaining
+                // Partition: fresh first, recent last
+                let fresh = remaining.filter { !recentVideoIds.contains($0.track.videoId) }
+                let recent = remaining.filter { recentVideoIds.contains($0.track.videoId) }
+                print("🔀 Smart shuffle: \(fresh.count) fresh + \(recent.count) recent (last 50 played)")
+                queue = Array(queue[...currentIndex]) + fresh.shuffled() + recent.shuffled()
             }
         } else {
             // Restore original order
@@ -1353,10 +1706,19 @@ class PlayerState: ObservableObject {
     }
     
     // MARK: - Volume
-    
+
     func setVolume(_ newVolume: Double) {
         volume = max(0.0, min(1.0, newVolume))
-        player?.volume = Float(volume)
+        // S3-4: apply Replay Gain multiplier on top of user volume
+        applyVolume()
+    }
+
+    /// S3-4: Apply user volume × Replay Gain linear multiplier to the player.
+    /// Centralized so every place that touches player.volume uses the
+    /// same gain model and Replay Gain can be toggled at runtime without
+    /// a code change at each call site.
+    private func applyVolume() {
+        player?.volume = Float(volume) * currentReplayGainLinear
     }
     
     // MARK: - Private Methods
@@ -1375,6 +1737,10 @@ class PlayerState: ObservableObject {
                 case .readyToPlay:
                     print("✅ Player item ready to play")
                     self?.retryCount = 0  // Reset retry count on success
+                    // Defer showing .playing until audio is actually ready.
+                    if self?.playbackState == .loading {
+                        self?.playbackState = .playing
+                    }
                 case .failed:
                     if let error = self?.player?.currentItem?.error as NSError? {
                         print("❌ Player item failed: \(error)")
@@ -1390,8 +1756,19 @@ class PlayerState: ObservableObject {
                         } else {
                             // CRITICAL FIX: After max retries, skip to next track instead of staying in error
                             print("❌ Max retries reached, skipping to next track")
+                            // C-3 fix: surface the error to the user with a
+                            // longer pause before auto-skip so they have a
+                            // chance to read the message and tap retry. The
+                            // original 1.0s skip was too short to even see
+                            // the error in the previous silent flow.
                             self?.playbackState = .error("Playback failed, skipping...")
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+                            ErrorHandler.shared.show(
+                                .playbackFailed("Couldn't play this track after multiple attempts. Skipping to the next one."),
+                                retry: { [weak self] in
+                                    self?.refreshAndPlayCurrentItem()
+                                }
+                            )
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
                                 self?.nextTrack()
                             }
                         }
@@ -1425,28 +1802,41 @@ class PlayerState: ObservableObject {
             .store(in: &cancellables)
         
         // Observe playback end
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(playerDidFinishPlaying),
-            name: .AVPlayerItemDidPlayToEndTime,
-            object: player.currentItem
-        )
+        // C-2 fix: token-based observer. We scope to the specific item so
+        // old observers don't fire on a new player after a track change.
+        if let item = player.currentItem {
+            playerItemObserverTokens.append(
+                NotificationCenter.default.addObserver(
+                    forName: .AVPlayerItemDidPlayToEndTime,
+                    object: item,
+                    queue: .main
+                ) { [weak self] _ in
+                    self?.playerDidFinishPlaying()
+                }
+            )
 
-        // Observe playback failure mid-track
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(playerFailedToPlayToEndTime),
-            name: .AVPlayerItemFailedToPlayToEndTime,
-            object: player.currentItem
-        )
+            // Observe playback failure mid-track
+            playerItemObserverTokens.append(
+                NotificationCenter.default.addObserver(
+                    forName: .AVPlayerItemFailedToPlayToEndTime,
+                    object: item,
+                    queue: .main
+                ) { [weak self] notification in
+                    self?.playerFailedToPlayToEndTime(notification)
+                }
+            )
 
-        // Observe playback stall
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(playerPlaybackStalled),
-            name: .AVPlayerItemPlaybackStalled,
-            object: player.currentItem
-        )
+            // Observe playback stall
+            playerItemObserverTokens.append(
+                NotificationCenter.default.addObserver(
+                    forName: .AVPlayerItemPlaybackStalled,
+                    object: item,
+                    queue: .main
+                ) { [weak self] notification in
+                    self?.playerPlaybackStalled(notification)
+                }
+            )
+        }
 
         // Observe buffering / stall recovery
         player.currentItem?.publisher(for: \.isPlaybackLikelyToKeepUp)
@@ -1463,6 +1853,8 @@ class PlayerState: ObservableObject {
                         self.playbackState = .playing
                     } else if self.playbackState == .buffering {
                         self.playbackState = .playing
+                    } else if self.playbackState == .loading {
+                        self.playbackState = .playing
                     }
                 }
             }
@@ -1476,24 +1868,38 @@ class PlayerState: ObservableObject {
             player?.removeTimeObserver(observer)
             timeObserver = nil
         }
-        NotificationCenter.default.removeObserver(self)
+        // C-2 fix: only remove the player-item-scoped observers, not all
+        // observers. Audio session observers (interruption / route change /
+        // media services reset) must remain registered for the lifetime of
+        // the PlayerState singleton, otherwise phone calls / AirPods
+        // disconnect / Siri would stop pausing playback after a content-type
+        // switch.
+        playerItemObserverTokens.forEach { NotificationCenter.default.removeObserver($0) }
+        playerItemObserverTokens.removeAll()
     }
     
     private var progressLogCounter = 0
     
     private func updateProgress() {
         guard let player = player else { return }
-        
+
         let current = player.currentTime().seconds
         let total = player.currentItem?.duration.seconds ?? 0
-        
+
         // Log every 10th call (every 5 seconds) to avoid spam
         progressLogCounter += 1
         if progressLogCounter >= 10 {
             progressLogCounter = 0
             print("⏱️ Progress: \(String(format: "%.1f", current))s / \(String(format: "%.1f", total))s, state: \(playbackState)")
         }
-        
+
+        // Sprint 2 / C-4 fix: write to PlaybackClock first (the focused
+        // observable that the scrubber observes). Then mirror to the
+        // legacy @Published properties on PlayerState for backwards
+        // compat with NowPlayingService, MiniPlayer, etc.
+        let effectiveTotal = effectiveDuration > 0 ? effectiveDuration : total
+        _ = playbackClock.tick(currentSeconds: current, totalSeconds: total, effectiveDuration: effectiveTotal)
+
         currentTime = current
         // Debug: Log duration changes
         if abs(duration - total) > 0.1 {
@@ -1511,20 +1917,18 @@ class PlayerState: ObservableObject {
         }
 
         // Use effective duration (from track metadata) for progress calculation
-        let effectiveTotal = effectiveDuration > 0 ? effectiveDuration : total
         if progressLogCounter == 0 {  // Log every 5 seconds
             print("🎵 updateProgress: current=\(current), total=\(total), expectedDuration=\(expectedDuration), effectiveTotal=\(effectiveTotal)")
         }
         if effectiveTotal > 0 {
             let newProgress = current / effectiveTotal
             progress = min(newProgress, 1.0)  // Cap at 1.0 to prevent overflow
-            
+
             // Prepare next track for crossfade when near the end (use effective duration)
             let timeRemaining = effectiveTotal - current
             if timeRemaining <= CrossfadeManager.shared.duration && timeRemaining > CrossfadeManager.shared.duration - 1 {
                 prepareNextTrackForCrossfade()
-            }
-            
+            } 
             // Track listening time (only count when playing and progress is moving forward)
             let now = Date()
             let timeDelta = now.timeIntervalSince(lastProgressUpdate)
@@ -1650,7 +2054,16 @@ class PlayerState: ObservableObject {
                 self.refreshAndPlayCurrentItem()
             } else {
                 print("❌ Max retries reached after failure, skipping to next track")
-                self.nextTrack()
+                // C-3 fix: surface mid-track playback failure to the user.
+                ErrorHandler.shared.show(
+                    .playbackFailed("This track stopped playing. Skipping to the next one."),
+                    retry: { [weak self] in
+                        self?.refreshAndPlayCurrentItem()
+                    }
+                )
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
+                    self?.nextTrack()
+                }
             }
         }
     }
@@ -1708,6 +2121,21 @@ class PlayerState: ObservableObject {
         // Anti-Algorithm: track completed
         if let currentVideoId = currentItem?.track.videoId {
             AntiAlgorithmEngine.shared.trackCompleted(videoId: currentVideoId)
+        }
+
+        // S3-5: Gapless mode short-circuit. When the player is an
+        // AVQueuePlayer, AVFoundation has ALREADY auto-advanced to the
+        // next item by the time we get here. We just need to sync
+        // PlayerState's currentIndex / currentItem and re-enqueue
+        // upcoming items. Going through nextTrack() would re-create a
+        // player, which is the opposite of what we want.
+        if CrossfadeManager.shared.gaplessEnabled, player is AVQueuePlayer {
+            print("🔊 Gapless: AVQueuePlayer auto-advanced; syncing state")
+            DispatchQueue.main.async { [weak self] in
+                self?.advanceGaplessState()
+                self?.endTrackTransitionBackgroundTask()
+            }
+            return
         }
 
         // Move to next track on main thread

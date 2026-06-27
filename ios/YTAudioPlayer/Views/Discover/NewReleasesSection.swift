@@ -118,6 +118,9 @@ struct NewReleasesSection: View {
                         .padding(.horizontal)
                     }
                 }
+                .task(id: tracks.map(\.videoId)) {
+                    StreamURLCache.shared.prefetchBatch(videoIds: tracks.prefix(5).map(\.videoId))
+                }
                 .sheet(isPresented: $showGenrePicker) {
                     GenrePickerSheet(
                         genres: genres,
@@ -200,7 +203,7 @@ struct NewReleaseCard: View {
     
     private func playTrack() {
         HapticManager.medium()
-        APIService.shared.getStreamUrl(videoId: track.videoId)
+        StreamURLCache.shared.getStreamUrl(videoId: track.videoId)
             .sink(receiveCompletion: { completion in
                 if case .failure(let error) = completion {
                     ErrorHandler.shared.handleAPIError(error)

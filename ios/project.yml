@@ -9,6 +9,8 @@ schemes:
       config: Debug
     test:
       config: Debug
+      targets:
+        - YTAudioPlayerTests
     profile:
       config: Release
     analyze:
@@ -92,3 +94,24 @@ targets:
         CFBundleName: PeacePlayer
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
+
+  # XCTest target — focused unit tests for the bug-prone pure-Swift
+  # logic in Sprint 1+2+3. Tests run in seconds, no device required.
+  # See ios/YTAudioPlayerTests/ for the actual test cases.
+  YTAudioPlayerTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "15.0"
+    sources:
+      - path: YTAudioPlayerTests
+    dependencies:
+      - target: YTAudioPlayer
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.ytaudioplayer.app.tests
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: 4Y85577Z4G
+        SWIFT_VERSION: "5.9"
+        GENERATE_INFOPLIST_FILE: YES
+        BUNDLE_LOADER: "$(TEST_HOST)"
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/PeacePlayer.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/PeacePlayer"

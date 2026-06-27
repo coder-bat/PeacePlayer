@@ -14,6 +14,10 @@ import CoreHaptics
 
 struct FullPlayer: View {
     @StateObject private var playerState = PlayerState.shared
+    // Sprint 2 / C-4 fix: the focused PlaybackClock. progressSection
+    // observes this (via the helper view below) so its 0.5s re-renders
+    // don't cascade into the rest of FullPlayer.
+    @StateObject private var playbackClock = PlayerState.shared.playbackClock
     @StateObject private var playlistManager = PlaylistManager.shared
     @StateObject private var songMemoryManager = SongMemoryManager.shared
     @Binding var isPresented: Bool
@@ -283,7 +287,7 @@ struct FullPlayer: View {
                             ProgressView()
                                 .scaleEffect(1.5)
                                 .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                            Text("Loading...")
+                            Text("Warming track...")
                                 .font(.subheadline)
                                 .foregroundColor(.white)
                         }
@@ -544,36 +548,77 @@ struct FullPlayer: View {
     }
     
     // MARK: - Progress Section
+    // Sprint 2 / C-4 fix: extracted to a dedicated view that observes
+    // only `playbackClock`. Previously this was inlined as a computed
+    // property and re-rendered the entire FullPlayer body every 0.5s
+    // because it read playerState.currentTime / playerState.progress.
     private var progressSection: some View {
+        ProgressSection(
+            clock: playbackClock,
+            onSeek: { [weak playerState] newProgress in
+                playerState?.seek(to: newProgress)
+                withAnimation(reduceMotion ? .none : .easeIn(duration: 0.15)) { showScrubberThumb = true }
+                scrubberHideTask?.cancel()
+                scrubberHideTask = Task {
+                    try? await Task.sleep(nanoseconds: 2_000_000_000)
+                    guard !Task.isCancelled else { return }
+                    await MainActor.run {
+                        withAnimation(reduceMotion ? .none : .easeOut(duration: 0.2)) { showScrubberThumb = false }
+                    }
+                }
+            },
+            onScrubberDragChange: { isDragging in
+                withAnimation(self.reduceMotion ? .none : .easeInOut(duration: 0.15)) { self.showScrubberThumb = isDragging }
+            },
+            onScrubberDragEnded: {
+                HapticManager.light()
+                self.scrubberHideTask?.cancel()
+                self.scrubberHideTask = Task {
+                    try? await Task.sleep(nanoseconds: 2_000_000_000)
+                    guard !Task.isCancelled else { return }
+                    await MainActor.run {
+                        withAnimation(self.reduceMotion ? .none : .easeOut(duration: 0.2)) { self.showScrubberThumb = false }
+                    }
+                }
+            }
+        )
+        .task(id: currentTrack?.videoId) {
+            self.waveformPeaks = nil
+            guard let videoId = self.currentTrack?.videoId else { return }
+            let peaks = await WaveformService.shared.waveform(for: videoId)
+            withAnimation(self.reduceMotion ? .none : .easeIn(duration: 0.3)) {
+                self.waveformPeaks = peaks
+            }
+        }
+    }
+
+/// Sprint 2 / C-4 helper: progress + scrubber subtree. Observes only
+/// PlaybackClock so the 0.5s tick re-renders THIS view, not the parent
+/// FullPlayer body. This is the primary performance win from the
+/// PlaybackClock extraction.
+private struct ProgressSection: View {
+    @ObservedObject var clock: PlaybackClock
+    @State private var waveformPeaks: [Float]?
+    let onSeek: (Double) -> Void
+    let onScrubberDragChange: (Bool) -> Void
+    let onScrubberDragEnded: () -> Void
+
+    var body: some View {
         VStack(spacing: 4) {
             if let peaks = waveformPeaks {
-                // WAVEFORM_SEEK: SoundCloud-style symmetric waveform scrubber
                 WaveformSeekBar(
                     peaks: peaks,
                     progress: Binding(
-                        get: { playerState.progress },
+                        get: { clock.progress },
                         set: { _ in }
                     ),
-                    onSeek: { newProgress in
-                        playerState.seek(to: newProgress)
-                        withAnimation(reduceMotion ? .none : .easeIn(duration: 0.15)) { showScrubberThumb = true }
-                        scrubberHideTask?.cancel()
-                        scrubberHideTask = Task {
-                            try? await Task.sleep(nanoseconds: 2_000_000_000)
-                            guard !Task.isCancelled else { return }
-                            await MainActor.run {
-                                withAnimation(reduceMotion ? .none : .easeOut(duration: 0.2)) { showScrubberThumb = false }
-                            }
-                        }
-                    },
-                    onDragChange: { isDragging in
-                        withAnimation(reduceMotion ? .none : .easeInOut(duration: 0.15)) { showScrubberThumb = isDragging }
-                    }
+                    onSeek: onSeek,
+                    onDragChange: onScrubberDragChange
                 )
                 .frame(height: 48)
                 .transition(.opacity)
             } else {
-                // Fallback flat bar while waveform loads
+                // Fallback flat bar while waveform loads — reads clock directly
                 GeometryReader { geometry in
                     ZStack(alignment: .leading) {
                         RoundedRectangle(cornerRadius: CornerRadius.xxs)
@@ -582,63 +627,53 @@ struct FullPlayer: View {
 
                         RoundedRectangle(cornerRadius: CornerRadius.xxs)
                             .fill(Color.white)
-                            .frame(width: max(0, geometry.size.width * CGFloat(playerState.progress)), height: 4)
+                            .frame(width: max(0, geometry.size.width * CGFloat(clock.progress)), height: 4)
 
                         Circle()
                             .fill(Color.white)
                             .frame(width: 14, height: 14)
                             .shadow(radius: 4)
-                            .offset(x: max(0, geometry.size.width * CGFloat(playerState.progress)) - 7)
-                            .opacity(showScrubberThumb ? 1 : 0)
-                            .animation(reduceMotion ? .none : .easeInOut(duration: 0.15), value: showScrubberThumb)
+                            .offset(x: max(0, geometry.size.width * CGFloat(clock.progress)) - 7)
                     }
                     .contentShape(Rectangle())
                     .gesture(
                         DragGesture(minimumDistance: 0)
                             .onChanged { value in
                                 let newProgress = min(max(0, Double(value.location.x / geometry.size.width)), 1)
-                                playerState.seek(to: newProgress)
-                                withAnimation(reduceMotion ? .none : .easeIn(duration: 0.15)) { showScrubberThumb = true }
-                                scrubberHideTask?.cancel()
+                                onSeek(newProgress)
                             }
                             .onEnded { _ in
-                                HapticManager.light()
-                                scrubberHideTask?.cancel()
-                                scrubberHideTask = Task {
-                                    try? await Task.sleep(nanoseconds: 2_000_000_000)
-                                    guard !Task.isCancelled else { return }
-                                    await MainActor.run {
-                                        withAnimation(reduceMotion ? .none : .easeOut(duration: 0.2)) { showScrubberThumb = false }
-                                    }
-                                }
+                                onScrubberDragEnded()
                             }
                     )
                 }
                 .frame(height: 20)
             }
 
-            // Time labels
+            // Time labels — read clock directly so they don't trigger
+            // parent re-renders either
             HStack {
-                Text(playerState.currentTimeFormatted)
+                Text(formatTime(clock.currentTime))
                     .font(.system(size: 12, weight: .medium, design: .monospaced))
                     .foregroundColor(.cyberDim)
 
                 Spacer()
 
-                Text(playerState.durationFormatted)
+                Text(formatTime(clock.expectedDuration > 0 ? clock.expectedDuration : clock.duration))
                     .font(.system(size: 12, weight: .medium, design: .monospaced))
                     .foregroundColor(.cyberDim)
             }
         }
-        .task(id: currentTrack?.videoId) {
-            waveformPeaks = nil
-            guard let videoId = currentTrack?.videoId else { return }
-            let peaks = await WaveformService.shared.waveform(for: videoId)
-            withAnimation(reduceMotion ? .none : .easeIn(duration: 0.3)) {
-                waveformPeaks = peaks
-            }
-        }
     }
+
+    private func formatTime(_ seconds: Double) -> String {
+        guard seconds.isFinite, seconds >= 0 else { return "0:00" }
+        let total = Int(seconds)
+        let mins = total / 60
+        let secs = total % 60
+        return String(format: "%d:%02d", mins, secs)
+    }
+}
 
     private var playbackControlsSection: some View {
         VStack(spacing: 8) {
@@ -951,9 +986,15 @@ private struct FullPlayerScrollOffsetKey: PreferenceKey {
 }
 
 // MARK: - Volume Slider
+/// S3-3 fix (H-6/H-8 from gap analysis): replaced the custom SwiftUI slider
+/// + undocumented `MPVolumeView.subviews.first(where:)` hack with a direct
+/// `UIViewRepresentable` wrapping `MPVolumeView`. The system volume view
+/// automatically reflects hardware / AirPlay / CarPlay / Control Center
+/// changes; setting the slider on the embedded MPVolumeView writes through
+/// to the system volume via the public API (no private subview traversal).
 struct VolumeSlider: View {
-    @State private var volume: Double = Double(AVAudioSession.sharedInstance().outputVolume)
-    @State private var isDragging = false
+    @State private var outputVolume: Double = Double(AVAudioSession.sharedInstance().outputVolume)
+    @State private var volumeObserver: NSKeyValueObservation?
 
     var body: some View {
         HStack(spacing: 12) {
@@ -962,43 +1003,13 @@ struct VolumeSlider: View {
                 .foregroundColor(Theme.tertiaryText)
                 .accessibilityHidden(true)
 
-            GeometryReader { geometry in
-                ZStack(alignment: .leading) {
-                    // Track
-                    RoundedRectangle(cornerRadius: CornerRadius.xxs)
-                        .fill(Color.white.opacity(0.2))
-                        .frame(height: 4)
-
-                    // Fill
-                    RoundedRectangle(cornerRadius: CornerRadius.xxs)
-                        .fill(Color.white)
-                        .frame(width: max(0, geometry.size.width * CGFloat(volume)), height: 4)
-
-                    // Draggable knob
-                    Circle()
-                        .fill(Color.white)
-                        .frame(width: isDragging ? 14 : 10, height: isDragging ? 14 : 10)
-                        .shadow(radius: isDragging ? 6 : 3)
-                        .offset(x: max(0, geometry.size.width * CGFloat(volume)) - (isDragging ? 7 : 5))
-                        .animation(.easeInOut(duration: 0.1), value: isDragging)
-                }
-                .frame(maxHeight: .infinity, alignment: .center)
-                .contentShape(Rectangle())
-                .gesture(
-                    DragGesture(minimumDistance: 0)
-                        .onChanged { value in
-                            isDragging = true
-                            let newVolume = min(max(0, Double(value.location.x / geometry.size.width)), 1)
-                            volume = newVolume
-                            // Set system volume
-                            MPVolumeView.setVolume(Float(newVolume))
-                        }
-                        .onEnded { _ in
-                            isDragging = false
-                        }
-                )
-            }
-            .frame(height: 44)
+            // Embedded MPVolumeView — the system volume control.
+            // It syncs automatically with the iOS system volume, so changes
+            // from hardware buttons / AirPlay / CarPlay / Control Center
+            // are reflected here. Setting its value writes back to the
+            // system volume via the public `MPVolumeView` API.
+            SystemVolumeView()
+                .frame(height: 24)
 
             Image(systemName: "speaker.wave.3.fill")
                 .font(.system(size: 14))
@@ -1010,23 +1021,47 @@ struct VolumeSlider: View {
         .background(Color.white.opacity(0.05))
         .cornerRadius(CornerRadius.sm)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Volume \(Int(volume * 100)) percent")
-        .accessibilityValue("\(Int(volume * 100))%")
+        .accessibilityLabel("Volume \(Int(outputVolume * 100)) percent")
+        .accessibilityValue("\(Int(outputVolume * 100))%")
         .onAppear {
-            volume = Double(AVAudioSession.sharedInstance().outputVolume)
+            // Observe system volume changes (KVO on AVAudioSession)
+            // so accessibility / on-screen indicator stays in sync when
+            // the user changes volume via hardware buttons or Control
+            // Center while the slider is visible.
+            outputVolume = Double(AVAudioSession.sharedInstance().outputVolume)
+            volumeObserver = AVAudioSession.sharedInstance().observe(
+                \.outputVolume,
+                options: [.new]
+            ) { session, _ in
+                DispatchQueue.main.async {
+                    outputVolume = Double(session.outputVolume)
+                }
+            }
+        }
+        .onDisappear {
+            volumeObserver?.invalidate()
+            volumeObserver = nil
         }
     }
 }
 
-// MARK: - MPVolumeView Extension
-extension MPVolumeView {
-    static func setVolume(_ volume: Float) {
-        let volumeView = MPVolumeView()
-        if let slider = volumeView.subviews.first(where: { $0 is UISlider }) as? UISlider {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) {
-                slider.value = volume
-            }
-        }
+/// UIViewRepresentable wrapping the system MPVolumeView. Hides the
+/// system volume HUD on interaction (set showsVolumeSlider = true but
+/// `showsRouteButton = false` because we don't want the AirPlay button
+/// here) and uses the public UISlider subview (the same one the OS
+/// itself uses) to read the current value.
+private struct SystemVolumeView: UIViewRepresentable {
+    func makeUIView(context: Context) -> MPVolumeView {
+        let view = MPVolumeView(frame: .zero)
+        view.showsRouteButton = false
+        view.showsVolumeSlider = true
+        view.backgroundColor = .clear
+        view.tintColor = .white
+        return view
+    }
+
+    func updateUIView(_ uiView: MPVolumeView, context: Context) {
+        // No updates needed — MPVolumeView is self-managing.
     }
 }
 

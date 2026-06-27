@@ -109,7 +109,7 @@ struct PlaylistPreviewView: View {
         for track in tracksToFetch {
             group.enter()
             
-            APIService.shared.getStreamUrl(videoId: track.videoId)
+            StreamURLCache.shared.getStreamUrl(videoId: track.videoId)
                 .sink(receiveCompletion: { _ in
                     group.leave()
                 }, receiveValue: { streamInfo in
@@ -250,6 +250,9 @@ struct PlaylistContentView: View {
             }
         }
         .listStyle(.insetGrouped)
+        .task(id: details.tracks.map(\.videoId)) {
+            StreamURLCache.shared.prefetchBatch(videoIds: details.tracks.prefix(5).map(\.videoId))
+        }
         .sheet(isPresented: $showAddToPlaylist) {
             if let track = selectedTrack {
                 AddToPlaylistSheet(track: track)
@@ -258,7 +261,7 @@ struct PlaylistContentView: View {
     }
     
     private func playTrack(_ track: Track) {
-        APIService.shared.getStreamUrl(videoId: track.videoId)
+        StreamURLCache.shared.getStreamUrl(videoId: track.videoId)
             .handleErrors(with: .shared)
             .sink(receiveValue: { streamInfo in
                 let item = QueueItem(
@@ -272,7 +275,7 @@ struct PlaylistContentView: View {
     }
     
     private func addToQueue(_ track: Track) {
-        APIService.shared.getStreamUrl(videoId: track.videoId)
+        StreamURLCache.shared.getStreamUrl(videoId: track.videoId)
             .handleErrors(with: .shared)
             .sink(receiveValue: { streamInfo in
                 let item = QueueItem(
@@ -287,7 +290,7 @@ struct PlaylistContentView: View {
     }
     
     private func playNext(_ track: Track) {
-        APIService.shared.getStreamUrl(videoId: track.videoId)
+        StreamURLCache.shared.getStreamUrl(videoId: track.videoId)
             .handleErrors(with: .shared)
             .sink(receiveValue: { streamInfo in
                 let item = QueueItem(

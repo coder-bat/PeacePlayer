@@ -20,6 +20,16 @@ struct YTAudioPlayerApp: App {
         DataMigrationService.shared.performMigrationIfNeeded()
         // Sync library data immediately so widgets show correct state on launch
         WidgetSyncService.shared.syncLibraryData()
+
+        // Phase 2 / ios-qa: spin up the embedded StateServer so the
+        // simulator-side test agent can hit the app at `http://127.0.0.1:9999`
+        // to take screenshots, read state, drive the UI, etc. The server
+        // binds loopback only (and the CoreDevice IPv6 tunnel range) so
+        // it can't be reached from the public internet. The whole stack
+        // is #if DEBUG-gated so release builds carry zero overhead.
+        #if DEBUG
+        StateServer.shared.start()
+        #endif
     }
 
     var body: some Scene {

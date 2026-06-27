@@ -323,7 +323,7 @@ class PlaylistManager: ObservableObject {
         streamCancellables.removeAll()
         for track in tracks.prefix(20) {
             group.enter()
-            APIService.shared.getStreamUrl(videoId: track.videoId)
+            StreamURLCache.shared.getStreamUrl(videoId: track.videoId)
                 .sink(receiveCompletion: { completion in
                     if case .failure(let error) = completion {
                         print("⚠️ Stream URL fetch failed: \(error.localizedDescription)")
@@ -375,7 +375,7 @@ class PlaylistManager: ObservableObject {
         
         streamCancellables.removeAll()
         for track in tracks.prefix(20) {
-            APIService.shared.getStreamUrl(videoId: track.videoId)
+            StreamURLCache.shared.getStreamUrl(videoId: track.videoId)
                 .sink(receiveCompletion: { completion in
                     if case .failure(let error) = completion {
                         print("[PlaylistManager] Stream URL failed for \(track.videoId): \(error)")
@@ -455,7 +455,7 @@ class PlaylistManager: ObservableObject {
         streamCancellables.removeAll()
         for track in tracks.prefix(20) {
             group.enter()
-            APIService.shared.getStreamUrl(videoId: track.videoId)
+            StreamURLCache.shared.getStreamUrl(videoId: track.videoId)
                 .sink(receiveCompletion: { completion in
                     if case .failure(let error) = completion {
                         print("⚠️ Stream URL fetch failed: \(error.localizedDescription)")
@@ -503,7 +503,7 @@ class PlaylistManager: ObservableObject {
         
         streamCancellables.removeAll()
         for track in tracks.prefix(20) {
-            APIService.shared.getStreamUrl(videoId: track.videoId)
+            StreamURLCache.shared.getStreamUrl(videoId: track.videoId)
                 .sink(receiveCompletion: { completion in
                     if case .failure(let error) = completion {
                         print("[PlaylistManager] Stream URL failed for \(track.videoId): \(error)")

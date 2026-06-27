@@ -189,6 +189,9 @@ struct DiscoverView: View {
                     }
                     .padding(.horizontal, 20)
                 }
+                .task(id: viewModel.trendingTracks.map(\.videoId)) {
+                    StreamURLCache.shared.prefetchBatch(videoIds: viewModel.trendingTracks.prefix(5).map(\.videoId))
+                }
                 .transition(.opacity)
             }
         }
@@ -238,6 +241,9 @@ struct DiscoverView: View {
                     }
                     .padding(.horizontal, 20)
                 }
+                .task(id: viewModel.newReleases.map(\.videoId)) {
+                    StreamURLCache.shared.prefetchBatch(videoIds: viewModel.newReleases.prefix(5).map(\.videoId))
+                }
                 .transition(.opacity)
             }
         }
@@ -245,7 +251,7 @@ struct DiscoverView: View {
 
     // MARK: - Actions
     private func playTrack(_ track: Track) {
-        APIService.shared.getStreamUrl(videoId: track.videoId)
+        StreamURLCache.shared.getStreamUrl(videoId: track.videoId)
             .sink(receiveCompletion: { completion in
                 if case .failure(let error) = completion {
                     print("⚠️ [DiscoverView] Stream URL failed: \(error.localizedDescription)")
@@ -269,7 +275,7 @@ struct DiscoverView: View {
 
         // Add rest to queue
         for track in tracks.dropFirst() {
-            APIService.shared.getStreamUrl(videoId: track.videoId)
+            StreamURLCache.shared.getStreamUrl(videoId: track.videoId)
                 .sink(receiveCompletion: { completion in
                     if case .failure(let error) = completion {
                         print("⚠️ [DiscoverView] Stream URL failed: \(error.localizedDescription)")
@@ -293,7 +299,7 @@ struct DiscoverView: View {
     }
 
     private func addToQueue(_ track: Track) {
-        APIService.shared.getStreamUrl(videoId: track.videoId)
+        StreamURLCache.shared.getStreamUrl(videoId: track.videoId)
             .sink(receiveCompletion: { completion in
                 if case .failure(let error) = completion {
                     print("⚠️ [DiscoverView] Stream URL failed: \(error.localizedDescription)")

@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import CoreData
 
 class AudioFileManager {
     static let shared = AudioFileManager()
@@ -45,6 +46,40 @@ class AudioFileManager {
     func fileExists(for videoId: String, extension ext: String = "m4a") -> Bool {
         let url = localFileURL(for: videoId, extension: ext)
         return fileManager.fileExists(atPath: url.path)
+    }
+
+    // MARK: - C-5 fix: single source-of-truth "is this playable locally?"
+    /// Reconciles the on-disk file state with the Core Data CDDownloadedTrack
+    /// row. Use this in place of `fileExists` when the caller needs to know
+    /// "is this track truly playable as a local download, including any
+    /// reconciliation work needed?"
+    ///
+    /// Reconciliation rules (best-effort, cheap):
+    ///  - If a CDDownloadedTrack row exists but the file is missing on disk,
+    ///    the row is deleted (stale).
+    ///  - If a file exists on disk but no CDDownloadedTrack row, we return
+    ///    `true` (file is playable) but leave Core Data alone — the orphan
+    ///    will be surfaced by `BackgroundDownloadService.bootstrap()`.
+    @discardableResult
+    func isPlayable(videoId: String, context: NSManagedObjectContext) -> Bool {
+        let request: NSFetchRequest<CDDownloadedTrack> = CDDownloadedTrack.fetchRequest()
+        request.predicate = NSPredicate(format: "track.videoId == %@", videoId)
+        request.fetchLimit = 1
+
+        let rowExists = (try? context.count(for: request)) ?? 0 > 0
+        let fileExists = self.fileExists(for: videoId)
+
+        if rowExists && !fileExists {
+            // Stale row — file is gone (user deleted via Files.app, etc.)
+            if let staleRows = try? context.fetch(request) {
+                for row in staleRows { context.delete(row) }
+                try? context.save()
+                print("🧹 C-5 fix: removed stale CDDownloadedTrack for \(videoId) (file missing)")
+            }
+            return false
+        }
+
+        return fileExists
     }
 
     func fileSize(for videoId: String, extension ext: String = "m4a") -> Int64 {

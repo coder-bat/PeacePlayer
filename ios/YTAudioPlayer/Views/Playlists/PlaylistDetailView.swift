@@ -141,6 +141,9 @@ struct PlaylistDetailView: View {
                                             trackRowContent(track: track, index: index)
                                         }
                                     }
+                                    .task(id: tracks.map(\.videoId)) {
+                                        StreamURLCache.shared.prefetchBatch(videoIds: tracks.prefix(5).map(\.videoId))
+                                    }
                                     .padding(.horizontal, 16)
                                 }
                             }
@@ -370,7 +373,7 @@ struct PlaylistDetailView: View {
         playerState.currentItem = loadingItem
         playerState.playbackState = .loading
 
-        APIService.shared.getStreamUrl(videoId: track.videoId)
+        StreamURLCache.shared.getStreamUrl(videoId: track.videoId)
             .handleErrors(with: .shared)
             .sink(receiveValue: { streamInfo in
                 let item = QueueItem(
@@ -386,7 +389,7 @@ struct PlaylistDetailView: View {
 
     private func addTrackToQueue(_ track: Track) {
         HapticManager.light()
-        APIService.shared.getStreamUrl(videoId: track.videoId)
+        StreamURLCache.shared.getStreamUrl(videoId: track.videoId)
             .handleErrors(with: .shared)
             .sink(receiveValue: { streamInfo in
                 let item = QueueItem(
@@ -401,7 +404,7 @@ struct PlaylistDetailView: View {
 
     private func playTrackNext(_ track: Track) {
         HapticManager.light()
-        APIService.shared.getStreamUrl(videoId: track.videoId)
+        StreamURLCache.shared.getStreamUrl(videoId: track.videoId)
             .handleErrors(with: .shared)
             .sink(receiveValue: { streamInfo in
                 let item = QueueItem(

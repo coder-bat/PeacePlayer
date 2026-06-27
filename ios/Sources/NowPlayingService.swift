@@ -28,9 +28,57 @@ class NowPlayingService {
     // Supported playback rates for Control Center
     let supportedPlaybackRates: [NSNumber] = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0]
 
+    // S3-2: configurable skip interval (QW-12 from gap analysis)
+    // Options: 5 / 10 / 15 / 30 / 45 / 60 seconds. Default 15s preserves
+    // existing behavior. Read live on each remote command invocation so
+    // settings changes apply immediately.
+    static let skipIntervalKey = "nowPlaying.skipInterval"
+    static let skipIntervalOptions: [Int] = [5, 10, 15, 30, 45, 60]
+    static var skipInterval: Int {
+        let raw = UserDefaults.standard.integer(forKey: skipIntervalKey)
+        // UserDefaults.integer returns 0 if the key was never set; fall back
+        // to 15 (legacy default). Validate against the allowed options so
+        // an out-of-range value never reaches PlayerState.seek.
+        if raw == 0 {
+            return 15
+        }
+        return skipIntervalOptions.contains(raw) ? raw : 15
+    }
+
     // MARK: - Initialization
     private init() {
         setupRemoteCommands()
+
+        // QW-6 fix: clear the in-memory artwork cache on memory pressure.
+        // The artwork cache is not cleared by ImageCache's memory-warning
+        // handler (different cache), and MPMediaItemArtwork holds its bound
+        // UIImage strongly via closure. Worst case was 50-150MB of artwork
+        // pinned even after the user navigated away.
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleMemoryWarning),
+            name: UIApplication.didReceiveMemoryWarningNotification,
+            object: nil
+        )
+    }
+
+    @objc private func handleMemoryWarning() {
+        print("⚠️ NowPlayingService received memory warning, clearing artwork cache")
+        clearArtworkCache()
+    }
+
+    /// QW-8 fix: static app-icon artwork for tracks with nil artworkURL
+    /// (e.g., podcast / audiobook tracks that don't have a thumbnail).
+    private var _fallbackArtwork: MPMediaItemArtwork?
+    private func fallbackArtwork() -> MPMediaItemArtwork? {
+        if let cached = _fallbackArtwork { return cached }
+        // Try the asset catalog first
+        if let image = UIImage(named: "AppIcon") ?? UIImage(named: "AppIcon-1024") {
+            let artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
+            _fallbackArtwork = artwork
+            return artwork
+        }
+        return nil
     }
 
     // MARK: - Remote Command Setup
@@ -76,16 +124,20 @@ class NowPlayingService {
             return .success
         }
 
-        // Skip forward/backward (for headphones)
-        commandCenter.skipForwardCommand.preferredIntervals = [15]
+        // Skip forward/backward (for headphones / lock screen)
+        // S3-2: configurable via UserDefaults (Sprint 3 quick win QW-12)
+        // Re-read the value on every invocation so settings changes take
+        // effect immediately without re-registering the remote command.
+        let initialInterval = NSNumber(value: NowPlayingService.skipInterval)
+        commandCenter.skipForwardCommand.preferredIntervals = [initialInterval]
         commandCenter.skipForwardCommand.addTarget { _ in
-            PlayerState.shared.seek(by: 15)
+            PlayerState.shared.seek(by: Double(NowPlayingService.skipInterval))
             return .success
         }
 
-        commandCenter.skipBackwardCommand.preferredIntervals = [15]
+        commandCenter.skipBackwardCommand.preferredIntervals = [initialInterval]
         commandCenter.skipBackwardCommand.addTarget { _ in
-            PlayerState.shared.seek(by: -15)
+            PlayerState.shared.seek(by: -Double(NowPlayingService.skipInterval))
             return .success
         }
 
@@ -170,6 +222,12 @@ class NowPlayingService {
                 MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
             }
         } else {
+            // QW-8 fix: podcast / audiobook tracks frequently have nil
+            // artworkURL. Without a fallback the lock screen shows a blank
+            // placeholder. Use the app icon as a static fallback.
+            if let fallback = fallbackArtwork() {
+                nowPlayingInfo[MPMediaItemPropertyArtwork] = fallback
+            }
             MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
         }
 
