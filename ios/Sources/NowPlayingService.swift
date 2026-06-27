@@ -163,6 +163,9 @@ class NowPlayingService {
         isPlaying: Bool,
         playbackRate: Float = 1.0
     ) {
+        #if DEBUG
+        PlayCrashDiagnostics.log(.nowPlaying, "updateNowPlaying ENTRY videoId=\(track.videoId) duration=\(duration) currentTime=\(currentTime) isPlaying=\(isPlaying) artworkURL=\(track.artworkURL?.absoluteString ?? "nil")")
+        #endif
         // Store duration for future time-only updates
         currentDuration = duration
         print("🎵 NowPlayingService.updateNowPlaying - Duration: \(duration), Current: \(currentTime), Playing: \(isPlaying)")

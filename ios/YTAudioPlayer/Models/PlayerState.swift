@@ -610,6 +610,9 @@ class PlayerState: ObservableObject {
 
     /// Play a track with local file check (plays local file if available, otherwise streams)
     func play(track: Track) {
+        #if DEBUG
+        PlayCrashDiagnostics.log(.playback, "play(track:) ENTRY videoId=\(track.videoId) title=\(track.title) currentItem.videoId=\(currentItem?.track.videoId ?? "nil") playbackState=\(playbackState)")
+        #endif
         // C-5 fix: use the reconciliation helper instead of raw FileManager.fileExists.
         // This handles the case where CDDownloadedTrack has a stale row but the
         // file is missing on disk (user deleted via Files.app, etc.).
@@ -658,11 +661,14 @@ class PlayerState: ObservableObject {
     }
 
     func play(item: QueueItem, addToQueue: Bool = true) {
+        #if DEBUG
+        PlayCrashDiagnostics.log(.playback, "play(item:) ENTRY videoId=\(item.track.videoId) title=\(item.track.title) source=\(item.source) currentItem.videoId=\(currentItem?.track.videoId ?? "nil") playbackState=\(playbackState)")
+        #endif
         // Stop current playback and save progress
         if let current = currentItem {
             dataManager.updatePlaybackProgress(for: current.track.videoId, progress: progress)
         }
-        
+
         stop()
         contentType = .track
 

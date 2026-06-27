@@ -132,6 +132,7 @@
 		42E3C504942DE937780FA109 /* DebugOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18C0D521899EF1E0FD0B1CBA /* DebugOverlay.swift */; };
 		FF72B020781DEF28B28337A1 /* Snapshotable.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83E3CF03A245F1D3462729DD /* Snapshotable.swift */; };
 		D736F1C7E3BA205A66708909 /* SendTapBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7F4082B02CB8809B3DCAC6F /* SendTapBridge.swift */; };
+		517FD40FE5ED613E68CE84DD /* PlayCrashDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5C85B25FF324EFB396D8D60 /* PlayCrashDiagnostics.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -288,6 +289,7 @@
 		18C0D521899EF1E0FD0B1CBA /* DebugOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugOverlay.swift; sourceTree = "<group>"; };
 		83E3CF03A245F1D3462729DD /* Snapshotable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Snapshotable.swift; sourceTree = "<group>"; };
 		C7F4082B02CB8809B3DCAC6F /* SendTapBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SendTapBridge.swift; sourceTree = "<group>"; };
+		B5C85B25FF324EFB396D8D60 /* PlayCrashDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayCrashDiagnostics.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -578,6 +580,7 @@
 				18C0D521899EF1E0FD0B1CBA /* DebugOverlay.swift */,
 				83E3CF03A245F1D3462729DD /* Snapshotable.swift */,
 				C7F4082B02CB8809B3DCAC6F /* SendTapBridge.swift */,
+				B5C85B25FF324EFB396D8D60 /* PlayCrashDiagnostics.swift */,
 				7FFAAD2DE6B04B58F5AED09F /* PlayerStateAccessor.swift */,
 			);
 			path = DebugBridge;
@@ -805,6 +808,7 @@
 				42E3C504942DE937780FA109 /* DebugOverlay.swift in Sources */,
 				FF72B020781DEF28B28337A1 /* Snapshotable.swift in Sources */,
 				D736F1C7E3BA205A66708909 /* SendTapBridge.swift in Sources */,
+				517FD40FE5ED613E68CE84DD /* PlayCrashDiagnostics.swift in Sources */,
 				219061230F75037D452AA0B5 /* YTAudioPlayer.xcdatamodeld in Sources */,
 				E86A578CA391F693A6B3752B /* YTAudioPlayerApp.swift in Sources */,
 				7E6173BEB257A83B995CB0F4 /* YourMixesSection.swift in Sources */,

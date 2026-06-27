@@ -72,15 +72,24 @@ class ImageCache {
     /// Get image from cache or download it
     func image(for url: URL) -> AnyPublisher<UIImage?, Never> {
         let key = url.absoluteString as NSString
-        
+        #if DEBUG
+        PlayCrashDiagnostics.log(.artwork, "ImageCache.image(for:) key=\(key as String) memoryCheck=in_progress")
+        #endif
+
         // Check memory cache first
         if let image = memoryCache.object(forKey: key) {
+            #if DEBUG
+            PlayCrashDiagnostics.log(.artwork, "ImageCache HIT (memory) for key=\(key as String)")
+            #endif
             return Just(image).eraseToAnyPublisher()
         }
-        
+
         // Check disk cache
         if let image = loadFromDisk(key: key) {
             memoryCache.setObject(image, forKey: key, cost: image.cacheCost)
+            #if DEBUG
+            PlayCrashDiagnostics.log(.artwork, "ImageCache HIT (disk) for key=\(key as String)")
+            #endif
             return Just(image).eraseToAnyPublisher()
         }
         
