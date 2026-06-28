@@ -68,18 +68,21 @@ struct ContentView: View {
             }
             .modifier(HideNativeTabBar())
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                // 2026-06-28 (S6): floating pill, centered. The
-                // CyberpunkTabBar sets its own width (200pt) so we
-                // wrap it in a ZStack and align center; the ZStack
-                // has a transparent background so the safeAreaInset
-                // doesn't add a Material backdrop below our pill
-                // (which is what was producing the duplicate
+                // 2026-06-28 (S6): floating pill anchored to bottom.
+                // On iOS 26 the safeAreaInset's container is sized
+                // to fit the content. We use a HStack with Spacers
+                // so the pill is horizontally centered, and we
+                // explicitly mark the background as clear so the
+                // safeAreaInset doesn't paint a Material layer
+                // behind the pill (which was the duplicate
                 // "translucent pill" on iOS 26).
-                ZStack {
-                    Color.clear  // transparent — no Material bleed
+                HStack {
+                    Spacer(minLength: 0)
                     CyberpunkTabBar(selectedTab: $selectedTab)
+                    Spacer(minLength: 0)
                 }
                 .frame(maxWidth: .infinity)
+                .background(Color.clear)
             }
 
             // Offline banner
@@ -229,16 +232,25 @@ struct ContentView: View {
     }
 }
 
-// MARK: - Hide Native Tab Bar (iOS 15/16 compatible)
+// MARK: - Hide Native Tab Bar (2026-06-28 S6: belt + suspenders)
 
 /// Hides the native UITabBar so our custom CyberpunkTabBar takes over.
-/// On iOS 16+ uses the proper .toolbar API which cleanly removes the safe area contribution.
-/// On iOS 15 falls back to UIAppearance (visual hide; safe area may still be present but
-/// the CyberpunkTabBar safeAreaInset overrides the layout correctly in practice).
+/// On iOS 16+ uses the .toolbar API. On all versions, also flips
+/// UITabBar.appearance().isHidden = true via .onAppear, because
+/// `toolbar(.hidden, for: .tabBar)` is silently bypassed in some
+/// iOS 26 builds when a custom safeAreaInset is in play. Belt
+/// AND suspenders.
 private struct HideNativeTabBar: ViewModifier {
     func body(content: Content) -> some View {
         if #available(iOS 16.0, *) {
-            content.toolbar(.hidden, for: .tabBar)
+            content
+                .toolbar(.hidden, for: .tabBar)
+                .onAppear {
+                    UITabBar.appearance().isHidden = true
+                }
+                .onDisappear {
+                    UITabBar.appearance().isHidden = false
+                }
         } else {
             content.onAppear {
                 UITabBar.appearance().isHidden = true
