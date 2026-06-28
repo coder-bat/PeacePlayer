@@ -31,18 +31,10 @@ struct PlaylistsView: View {
 
                 ScrollView {
                     VStack(spacing: 0) {
-                        // Header
-                        HStack {
-                            Text("PLAYLISTS")
-                                .font(.system(size: 24, weight: .bold, design: .monospaced))
-                                .foregroundColor(.white)
-                                .shadow(color: Theme.cyberCyan.opacity(0.5), radius: 10, x: 0, y: 0)
-
-                            Spacer()
-                        }
-                        .padding(.horizontal)
-                        .padding(.top, 8)
-                        .padding(.bottom, 16)
+                        // 2026-06-28 (S6): top breathing room. The header
+                        // row is now in the navigation toolbar (below)
+                        // so we just add a small top spacer here.
+                        Color.clear.frame(height: 8)
 
                         // Smart Playlists Section
                         if !smartPlaylists.isEmpty {
@@ -65,9 +57,20 @@ struct PlaylistsView: View {
                     }
                 }
             }
-            .navigationTitle("")
+            .navigationTitle("PLAYLISTS")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                // 2026-06-28 (S6): title on the left, list/plus icons
+                // on the right — same row, via a custom leading item
+                // + trailing item. Replaces the previous layout where
+                // the title was a separate HStack in the ScrollView
+                // body, sitting below the icons.
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Text("PLAYLISTS")
+                        .font(.system(size: 17, weight: .bold, design: .monospaced))
+                        .foregroundColor(.white)
+                        .shadow(color: Theme.cyberCyan.opacity(0.5), radius: 6, x: 0, y: 0)
+                }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     HStack(spacing: 16) {
                         Button {

@@ -80,45 +80,62 @@ struct LibraryView: View {
                 }
 
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    HStack(spacing: 16) {
-                        if !viewModel.tracks.isEmpty {
-                            Button(isEditing ? "\(selectedTracks.count)" : "SELECT") {
-                                isEditing.toggle()
-                                if !isEditing {
-                                    selectedTracks.removeAll()
-                                }
+                    HStack(spacing: 12) {
+                        // 2026-06-28 (S6): show toolbar even when the
+                        // library is empty so the sort menu is
+                        // always accessible (it controls the
+                        // empty-state as well).
+                        Button(isEditing ? "\(selectedTracks.count)" : "SELECT") {
+                            isEditing.toggle()
+                            if !isEditing {
+                                selectedTracks.removeAll()
                             }
-                            .font(.system(size: 13, weight: .bold, design: .monospaced))
-                            .foregroundColor(Theme.cyberCyan)
+                        }
+                        .font(.system(size: 13, weight: .bold, design: .monospaced))
+                        .foregroundColor(Theme.cyberCyan)
+                        .disabled(viewModel.tracks.isEmpty)
+                        .opacity(viewModel.tracks.isEmpty ? 0.4 : 1)
 
-                            Button {
-                                viewMode = viewMode == .grid ? .list : .grid
-                            } label: {
-                                Image(systemName: viewMode == .grid ? "list.bullet" : "square.grid.2x2")
-                                    .foregroundColor(Theme.cyberCyan)
-                            }
+                        Button {
+                            viewMode = viewMode == .grid ? .list : .grid
+                        } label: {
+                            Image(systemName: viewMode == .grid ? "list.bullet" : "square.grid.2x2")
+                                .font(.system(size: 17, weight: .semibold))
+                                .foregroundColor(Theme.cyberCyan)
+                        }
 
-                            Menu {
-                                Section("SORT BY") {
-                                    ForEach(LibrarySortOption.allCases) { option in
-                                        Button {
-                                            viewModel.sortOption = option
-                                        } label: {
-                                            Label(option.rawValue,
-                                                  systemImage: viewModel.sortOption == option ? "checkmark" : option.icon)
-                                        }
+                        Menu {
+                            Section("SORT BY") {
+                                ForEach(LibrarySortOption.allCases) { option in
+                                    Button {
+                                        viewModel.sortOption = option
+                                    } label: {
+                                        Label(option.rawValue,
+                                              systemImage: viewModel.sortOption == option ? "checkmark" : option.icon)
                                     }
                                 }
+                            }
 
-                                Divider()
+                            Divider()
 
-                                Button {
-                                    showStorageInfo = true
-                                } label: {
-                                    Label("STORAGE INFO", systemImage: "externaldrive")
-                                }
+                            Button {
+                                showStorageInfo = true
                             } label: {
-                                Image(systemName: "arrow.up.arrow.down.circle")
+                                Label("STORAGE INFO", systemImage: "externaldrive")
+                            }
+                        } label: {
+                            // 2026-06-28 (S6): wrap the icon in a glass
+                            // circle so it's clearly visible against
+                            // the dark background. The previous plain
+                            // `arrow.up.arrow.down.circle` SF Symbol
+                            // was nearly invisible at the toolbar
+                            // size on the simulator.
+                            ZStack {
+                                Circle()
+                                    .fill(Theme.cyberSurface.opacity(0.85))
+                                    .frame(width: 30, height: 30)
+                                Image(systemName: "arrow.up.arrow.down")
+                                    .font(.system(size: 13, weight: .bold))
                                     .foregroundColor(Theme.cyberCyan)
                             }
                         }

@@ -127,8 +127,10 @@ struct HomeView: View {
     @StateObject private var playerState = PlayerState.shared
     @StateObject private var viewModel = HomeViewModel()
     @StateObject private var favoriteArtists = FavoriteArtistsManager.shared
+    @StateObject private var profile = UserProfile.shared
     @State private var showAllRecent = false
     @State private var showAddToPlaylistSheet = false
+    @State private var showAvatarPicker = false
     @State private var selectedTrack: Track?
     @State private var hasLoaded = false
 
@@ -140,7 +142,8 @@ struct HomeView: View {
 
                 ScrollView(showsIndicators: false) {
                     VStack(spacing: 0) {
-                        // Minimal header (now with top-right nav icons: Radio, Settings, Playlists)
+                        // 2026-06-28 (S6): top header — user profile chip
+                        // (avatar + name) on the left, nav icons on the right.
                         headerSection
                             .padding(.horizontal, 20)
                             .padding(.top, 20)
@@ -185,48 +188,74 @@ struct HomeView: View {
         .sheet(isPresented: $showAllRecent) {
             AllRecentlyPlayedView()
         }
+        .sheet(isPresented: $showAvatarPicker) {
+            AvatarPickerSheet()
+        }
         .addToPlaylistSheet(isPresented: $showAddToPlaylistSheet, track: selectedTrack)
     }
 
     // MARK: - Header
     private var headerSection: some View {
         HStack(spacing: 10) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(viewModel.greeting)
-                    .font(.system(size: 14, weight: .medium, design: .monospaced))
-                    .foregroundColor(.cyberDim)
-                    .textCase(.uppercase)
-
-                Text("PeacePlayer")
-                    .font(.system(size: 12, weight: .bold, design: .monospaced))
-                    .foregroundColor(.cyberCyan)
-            }
+            // 2026-06-28 (S6): profile chip replaces the static
+            // "Afternoon PeacePlayer" greeting. Tapping the chip
+            // opens the avatar picker. Shows the user's chosen
+            // avatar + display name (or "Set up profile" if no
+            // name is set yet).
+            profileChip
 
             Spacer()
 
             // Top-right nav icons: Search, Radio, Playlists, Settings
-            // The previously-cluttered header now hosts a 4-button cluster.
-            // Each icon is a small square chip so the row stays tight.
             HStack(spacing: 8) {
-                // Search — jumps to Search tab (index 1 in MainContainerView)
                 CyberIconChip(icon: "magnifyingglass") {
                     NotificationCenter.default.post(name: .switchTab, object: 1)
                 }
-                // Radio — opens radio view via deep link (we don't have a dedicated tab,
-                // so push via NotificationCenter; MainContainerView can listen for it)
                 CyberIconChip(icon: "antenna.radiowaves.left.and.right") {
                     NotificationCenter.default.post(name: .openRadio, object: nil)
                 }
-                // Playlists — same pattern; MainContainerView will route to playlists
                 CyberIconChip(icon: "music.note.list") {
                     NotificationCenter.default.post(name: .openPlaylists, object: nil)
                 }
-                // Settings — opens SettingsView as a sheet
                 CyberIconChip(icon: "gearshape.fill") {
                     NotificationCenter.default.post(name: .openSettings, object: nil)
                 }
             }
         }
+    }
+
+    // MARK: - Profile chip
+    private var profileChip: some View {
+        Button {
+            showAvatarPicker = true
+        } label: {
+            HStack(spacing: 10) {
+                ZStack {
+                    Circle()
+                        .fill(Theme.cyberCyan.opacity(0.18))
+                        .frame(width: 40, height: 40)
+                        .overlay(
+                            Circle()
+                                .stroke(Theme.cyberCyan.opacity(0.4), lineWidth: 1)
+                        )
+                    Image(systemName: profile.avatarSymbolName)
+                        .font(.system(size: 22, weight: .regular))
+                        .foregroundColor(.cyberCyan)
+                }
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(viewModel.greeting)
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .foregroundColor(.cyberDim)
+                        .textCase(.uppercase)
+                    Text(profile.displayName ?? "Set up profile")
+                        .font(.system(size: 13, weight: .bold, design: .monospaced))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+                }
+            }
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Hero Section

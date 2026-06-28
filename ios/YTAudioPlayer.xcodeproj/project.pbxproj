@@ -136,7 +136,9 @@
 		A1B2C3D400010000000000A1 /* AuthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D400020000000000A1 /* AuthService.swift */; };
 		A1B2C3D400030000000000A1 /* KeychainHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D400040000000000A1 /* KeychainHelper.swift */; };
 		A1B2C3D400070000000000A1 /* SyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D400080000000000A1 /* SyncService.swift */; };
+		A1B2C3D400090000000000A1 /* UserProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4000A00000000001 /* UserProfile.swift */; };
 		A1B2C3D400050000000000A1 /* LandingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D400060000000000A1 /* LandingView.swift */; };
+		A1B2C3D4000B00000000001 /* AvatarPickerSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4000C00000000001 /* AvatarPickerSheet.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -297,7 +299,9 @@
 		A1B2C3D400020000000000A1 /* AuthService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthService.swift; sourceTree = "<group>"; };
 		A1B2C3D400040000000000A1 /* KeychainHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainHelper.swift; sourceTree = "<group>"; };
 		A1B2C3D400080000000000A1 /* SyncService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncService.swift; sourceTree = "<group>"; };
+		A1B2C3D4000A00000000001 /* UserProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserProfile.swift; sourceTree = "<group>"; };
 		A1B2C3D400060000000000A1 /* LandingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LandingView.swift; sourceTree = "<group>"; };
+		A1B2C3D4000C00000000001 /* AvatarPickerSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AvatarPickerSheet.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -326,6 +330,7 @@
 				BD03FD83E3A157B679147DD7 /* HistoryView.swift */,
 				BD72DD7B62A4AC911BF749F6 /* HomeView.swift */,
 				A1B2C3D400060000000000A1 /* LandingView.swift */,
+				A1B2C3D4000C00000000001 /* AvatarPickerSheet.swift */,
 				1AD3F94F37ADACD364BBCA1A /* LibraryView.swift */,
 				3981584A595276084E907877 /* MainContainerView.swift */,
 				0BFC375ECD06E998CB697145 /* QueueRestorer.swift */,
@@ -414,6 +419,7 @@
 				A1B2C3D400020000000000A1 /* AuthService.swift */,
 				A1B2C3D400040000000000A1 /* KeychainHelper.swift */,
 				A1B2C3D400080000000000A1 /* SyncService.swift */,
+				A1B2C3D4000A00000000001 /* UserProfile.swift */,
 				7AA9786473E2C2E65D4458E8 /* AdaptiveWalkDJManager.swift */,
 				B7F42F1245CDFCF53C966438 /* AntiAlgorithmEngine.swift */,
 				2DC7C7A6C85A67E6E8A396B7 /* APIService.swift */,
@@ -824,7 +830,9 @@
 				A1B2C3D400010000000000A1 /* AuthService.swift in Sources */,
 				A1B2C3D400030000000000A1 /* KeychainHelper.swift in Sources */,
 				A1B2C3D400070000000000A1 /* SyncService.swift in Sources */,
+				A1B2C3D400090000000000A1 /* UserProfile.swift in Sources */,
 				A1B2C3D400050000000000A1 /* LandingView.swift in Sources */,
+				A1B2C3D4000B00000000001 /* AvatarPickerSheet.swift in Sources */,
 				219061230F75037D452AA0B5 /* YTAudioPlayer.xcdatamodeld in Sources */,
 				E86A578CA391F693A6B3752B /* YTAudioPlayerApp.swift in Sources */,
 				7E6173BEB257A83B995CB0F4 /* YourMixesSection.swift in Sources */,

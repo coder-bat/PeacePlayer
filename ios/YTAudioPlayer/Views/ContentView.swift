@@ -68,14 +68,18 @@ struct ContentView: View {
             }
             .modifier(HideNativeTabBar())
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                // 2026-06-28: HStack with Spacers so the floating
-                // pill is centered. CyberpunkTabBar sets its own
-                // width (200pt) so the Spacers eat the rest.
-                HStack {
-                    Spacer()
+                // 2026-06-28 (S6): floating pill, centered. The
+                // CyberpunkTabBar sets its own width (200pt) so we
+                // wrap it in a ZStack and align center; the ZStack
+                // has a transparent background so the safeAreaInset
+                // doesn't add a Material backdrop below our pill
+                // (which is what was producing the duplicate
+                // "translucent pill" on iOS 26).
+                ZStack {
+                    Color.clear  // transparent — no Material bleed
                     CyberpunkTabBar(selectedTab: $selectedTab)
-                    Spacer()
                 }
+                .frame(maxWidth: .infinity)
             }
 
             // Offline banner

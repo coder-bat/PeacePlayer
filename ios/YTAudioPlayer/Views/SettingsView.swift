@@ -11,6 +11,11 @@ struct SettingsView: View {
         ZStack {
             Theme.cyberBackground.ignoresSafeArea()
 
+            // 2026-06-28 (S6): top padding so the first section
+            // clears the top safe area instead of hugging the
+            // status bar / dynamic island.
+            VStack(spacing: 0) {
+                Color.clear.frame(height: 24)
             List {
                 // MARK: - Music Sources Section
                 Section {
@@ -214,6 +219,7 @@ struct SettingsView: View {
             }
             .listStyle(.insetGrouped)
             .background(Theme.cyberBackground)
+            }
         }
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.large)
