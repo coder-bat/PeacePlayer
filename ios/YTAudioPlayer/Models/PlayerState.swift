@@ -616,16 +616,10 @@ class PlayerState: ObservableObject {
         // C-5 fix: use the reconciliation helper instead of raw FileManager.fileExists.
         // This handles the case where CDDownloadedTrack has a stale row but the
         // file is missing on disk (user deleted via Files.app, etc.).
-        #if DEBUG
-        PlayCrashDiagnostics.log(.playback, "play(track:) PRE-isPlayable videoId=\(track.videoId)")
-        #endif
         let isPlayable = AudioFileManager.shared.isPlayable(
             videoId: track.videoId,
             context: PersistenceController.shared.viewContext
         )
-        #if DEBUG
-        PlayCrashDiagnostics.log(.playback, "play(track:) POST-isPlayable videoId=\(track.videoId) isPlayable=\(isPlayable)")
-        #endif
         let localURL = AudioFileManager.shared.localFileURL(for: track.videoId)
 
         if isPlayable {

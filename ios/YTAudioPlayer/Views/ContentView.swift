@@ -14,6 +14,12 @@ struct ContentView: View {
     @State private var selectedTab = 0
     @State private var showFullPlayer = false
     @State private var showRestorePrompt = false
+    // 2026-06-28: header-icon sheets. Surfaced from Home's top-right
+    // icon cluster via NotificationCenter so the bottom nav doesn't
+    // have to grow.
+    @State private var showSettings = false
+    @State private var showPlaylists = false
+    @State private var showRadio = false
     @Namespace private var playerNamespace
 
     var body: some View {
@@ -116,6 +122,35 @@ struct ContentView: View {
                 withAnimation(.spring(response: 0.28, dampingFraction: 0.72)) {
                     selectedTab = 5
                 }
+            }
+        }
+        // 2026-06-28: header-icon routing — the Home page's top-right
+        // icon cluster posts these to surface Settings, Playlists, and
+        // Radio as sheets so they don't fight the bottom-nav tab
+        // system for the same screen real estate.
+        .onReceive(NotificationCenter.default.publisher(for: .openSettings)) { _ in
+            showSettings = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .openPlaylists)) { _ in
+            showPlaylists = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .openRadio)) { _ in
+            showRadio = true
+        }
+        .sheet(isPresented: $showSettings) {
+            SettingsView()
+                .preferredColorScheme(.dark)
+        }
+        .sheet(isPresented: $showPlaylists) {
+            NavigationView {
+                PlaylistsView()
+                    .preferredColorScheme(.dark)
+            }
+        }
+        .sheet(isPresented: $showRadio) {
+            NavigationView {
+                RadioView(viewModel: RadioViewModel())
+                    .preferredColorScheme(.dark)
             }
         }
         .onChange(of: playerState.showQueue) { shouldShow in
@@ -331,4 +366,11 @@ struct ContentView_Previews: PreviewProvider {
 extension Notification.Name {
     static let switchTab = Notification.Name("switchTab")
     static let startSongRadio = Notification.Name("startSongRadio")
+    // 2026-06-28: header icon cluster on Home posts these to route
+    // the user to the right surface. The Home view shows sheets for
+    // each (avoids fighting the bottom-nav tab system for the same
+    // surface area).
+    static let openSettings = Notification.Name("openSettings")
+    static let openPlaylists = Notification.Name("openPlaylists")
+    static let openRadio = Notification.Name("openRadio")
 }

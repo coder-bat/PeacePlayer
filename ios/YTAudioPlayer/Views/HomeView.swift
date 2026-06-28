@@ -140,32 +140,23 @@ struct HomeView: View {
 
                 ScrollView(showsIndicators: false) {
                     VStack(spacing: 0) {
-                        // Minimal header
+                        // Minimal header (now with top-right nav icons: Radio, Settings, Playlists)
                         headerSection
                             .padding(.horizontal, 20)
                             .padding(.top, 20)
 
-                        // Hero: Now Playing or Resume
+                        // Hero: Now Playing or Resume (upgraded futuristic styling)
                         heroSection
                             .padding(.horizontal, 20)
-                            .padding(.top, 32)
-
-                        // Quick vibes - instant play chips
-                        vibesSection
-                            .padding(.top, 24)
+                            .padding(.top, 28)
 
                         // FOR YOU - Favorite artists suggestions
                         favoriteArtistsSection
                             .padding(.top, 24)
 
-                        // Recently played - horizontal scroll
+                        // Recently played - horizontal scroll (with context menu per row)
                         recentlyPlayedSection
                             .padding(.top, 24)
-
-                        // Minimal stats footer
-                        statsFooter
-                            .padding(.horizontal, 20)
-                            .padding(.top, 32)
                             .padding(.bottom, 100)
                     }
                 }
@@ -199,7 +190,7 @@ struct HomeView: View {
 
     // MARK: - Header
     private var headerSection: some View {
-        HStack {
+        HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(viewModel.greeting)
                     .font(.system(size: 14, weight: .medium, design: .monospaced))
@@ -213,9 +204,27 @@ struct HomeView: View {
 
             Spacer()
 
-            // Search button
-            CyberButton(icon: "magnifyingglass") {
-                NotificationCenter.default.post(name: .switchTab, object: 1)
+            // Top-right nav icons: Search, Radio, Playlists, Settings
+            // The previously-cluttered header now hosts a 4-button cluster.
+            // Each icon is a small square chip so the row stays tight.
+            HStack(spacing: 8) {
+                // Search — jumps to Search tab (index 1 in MainContainerView)
+                CyberIconChip(icon: "magnifyingglass") {
+                    NotificationCenter.default.post(name: .switchTab, object: 1)
+                }
+                // Radio — opens radio view via deep link (we don't have a dedicated tab,
+                // so push via NotificationCenter; MainContainerView can listen for it)
+                CyberIconChip(icon: "antenna.radiowaves.left.and.right") {
+                    NotificationCenter.default.post(name: .openRadio, object: nil)
+                }
+                // Playlists — same pattern; MainContainerView will route to playlists
+                CyberIconChip(icon: "music.note.list") {
+                    NotificationCenter.default.post(name: .openPlaylists, object: nil)
+                }
+                // Settings — opens SettingsView as a sheet
+                CyberIconChip(icon: "gearshape.fill") {
+                    NotificationCenter.default.post(name: .openSettings, object: nil)
+                }
             }
         }
     }
@@ -392,6 +401,22 @@ struct HomeView: View {
                     onDownload: {
                         HapticManager.light()
                         viewModel.downloadTrack(track)
+                    },
+                    onAddToQueue: {
+                        HapticManager.light()
+                        viewModel.addToQueue(track)
+                    },
+                    onAddToPlaylist: {
+                        HapticManager.light()
+                        selectedTrack = track
+                        showAddToPlaylistSheet = true
+                    },
+                    onStartRadio: {
+                        HapticManager.light()
+                        NotificationCenter.default.post(
+                            name: .startSongRadio,
+                            object: track
+                        )
                     }
                 )
                 .listRowInsets(EdgeInsets(top: 4, leading: 20, bottom: 4, trailing: 20))
@@ -574,64 +599,146 @@ struct NowPlayingHero: View {
 struct ResumeHero: View {
     let track: Track
     let onTap: () -> Void
+    @State private var pulse = false
 
     var body: some View {
         Button(action: onTap) {
             ZStack {
-                // Gradient background
-                RoundedRectangle(cornerRadius: 24)
+                // Glass + gradient surface (tighter than the previous 20pt padding)
+                RoundedRectangle(cornerRadius: 20)
                     .fill(
                         LinearGradient(
                             colors: [
                                 Color.cyberSurface,
-                                Color.cyberSurface.opacity(0.8)
+                                Color.cyberSurface.opacity(0.6)
                             ],
-                            startPoint: .top,
-                            endPoint: .bottom
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
                         )
                     )
                     .overlay(
-                        RoundedRectangle(cornerRadius: 24)
-                            .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                        // Animated neon border that pulses
+                        RoundedRectangle(cornerRadius: 20)
+                            .stroke(
+                                LinearGradient(
+                                    colors: [
+                                        .cyberCyan.opacity(pulse ? 0.9 : 0.3),
+                                        .cyberMagenta.opacity(pulse ? 0.5 : 0.2)
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                ),
+                                lineWidth: 1.5
+                            )
                     )
+                    .shadow(color: .cyberCyan.opacity(pulse ? 0.5 : 0.2), radius: pulse ? 18 : 8, x: 0, y: 0)
 
-                HStack(spacing: 20) {
-                    CachedAsyncImage(url: track.artworkURL) {
-                        RoundedRectangle(cornerRadius: 16)
-                            .fill(Color.cyberDim.opacity(0.3))
+                HStack(spacing: 14) {
+                    // Compact artwork with corner glow
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(Color.cyberCyan.opacity(0.25))
+                            .blur(radius: 14)
+                            .frame(width: 72, height: 72)
+                            .opacity(pulse ? 0.9 : 0.5)
+
+                        CachedAsyncImage(url: track.artworkURL) {
+                            RoundedRectangle(cornerRadius: 12)
+                                .fill(Color.cyberDim.opacity(0.3))
+                        }
+                        .frame(width: 72, height: 72)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
                     }
-                    .frame(width: 100, height: 100)
-                    .clipShape(RoundedRectangle(cornerRadius: 16))
 
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Resume")
-                            .font(.system(size: 10, weight: .bold, design: .monospaced))
-                            .foregroundColor(.cyberDim)
+                    VStack(alignment: .leading, spacing: 4) {
+                        // Glowing "RESUME" pill
+                        HStack(spacing: 6) {
+                            Circle()
+                                .fill(Color.cyberCyan)
+                                .frame(width: 6, height: 6)
+                                .shadow(color: Color.cyberCyan, radius: 4)
+                            Text("RESUME")
+                                .font(.system(size: 9, weight: .bold, design: .monospaced))
+                                .foregroundColor(.cyberCyan)
+                                .tracking(2)
+                        }
 
                         Text(track.title)
-                            .font(.system(size: 18, weight: .bold))
+                            .font(.system(size: 16, weight: .bold))
                             .foregroundColor(.white)
                             .lineLimit(1)
                             .minimumScaleFactor(0.8)
 
                         Text(track.displayArtist)
-                            .font(.system(size: 14))
+                            .font(.system(size: 12))
                             .foregroundColor(.cyberDim)
                             .lineLimit(1)
                             .minimumScaleFactor(0.8)
+
+                        // Mini equalizer
+                        ResumeBarsIndicator()
+                            .frame(height: 14)
+                            .padding(.top, 4)
                     }
 
-                    Spacer()
+                    Spacer(minLength: 8)
 
-                    Image(systemName: "play.circle.fill")
-                        .font(.system(size: 44))
-                        .foregroundColor(.white)
+                    // Round play affordance with neon ring
+                    ZStack {
+                        Circle()
+                            .stroke(
+                                LinearGradient(
+                                    colors: [.cyberCyan, .cyberMagenta],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                ),
+                                lineWidth: 1.5
+                            )
+                            .frame(width: 52, height: 52)
+                        Image(systemName: "play.fill")
+                            .font(.system(size: 18, weight: .bold))
+                            .foregroundColor(.cyberCyan)
+                            .offset(x: 1.5)  // visual centering for play triangle
+                    }
                 }
-                .padding(20)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
             }
         }
         .buttonStyle(.plain)
-        .frame(height: 140)
+        .frame(height: 96)  // reduced from 140 — less padding
+        .onAppear {
+            withAnimation(.easeInOut(duration: 1.6).repeatForever(autoreverses: true)) {
+                pulse = true
+            }
+        }
+    }
+}
+
+// MARK: - Resume Bars Indicator
+struct ResumeBarsIndicator: View {
+    @State private var animate = false
+    @Environment(\.accessibilityReduceMotion) var reduceMotion
+
+    var body: some View {
+        HStack(alignment: .bottom, spacing: 2) {
+            ForEach(0..<5) { index in
+                RoundedRectangle(cornerRadius: 1)
+                    .fill(LinearGradient(
+                        colors: [.cyberCyan, .cyberMagenta],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    ))
+                    .frame(width: 3, height: animate ? 14 : 5)
+                    .animation(
+                        reduceMotion ? .none : Animation.easeInOut(duration: 0.45)
+                            .repeatForever(autoreverses: true)
+                            .delay(Double(index) * 0.12),
+                        value: animate
+                    )
+            }
+        }
+        .onAppear { if !reduceMotion { animate = true } }
     }
 }
 
@@ -885,6 +992,41 @@ struct CyberButton: View {
                 )
         }
         .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Cyber Icon Chip (compact header icon)
+struct CyberIconChip: View {
+    let icon: String
+    let onTap: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            Image(systemName: icon)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundColor(.cyberCyan)
+                .frame(width: 34, height: 34)
+                .background(
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(Color.cyberSurface)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10)
+                                .stroke(Color.cyberCyan.opacity(0.25), lineWidth: 1)
+                        )
+                )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text(accessibilityLabel))
+    }
+
+    private var accessibilityLabel: String {
+        switch icon {
+        case "magnifyingglass": return "Search"
+        case "antenna.radiowaves.left.and.right": return "Radio"
+        case "music.note.list": return "Playlists"
+        case "gearshape.fill": return "Settings"
+        default: return icon
+        }
     }
 }
 
@@ -1179,6 +1321,18 @@ struct HomeRecentTrackRow: View {
     let onPlay: () -> Void
     let onPlayNext: () -> Void
     let onDownload: () -> Void
+    // 2026-06-28: context menu actions. The row already had swipe
+    // actions; long-press context menu gives parity on iPad and on
+    // devices where swipe isn't discoverable.
+    let onAddToQueue: () -> Void
+    let onAddToPlaylist: () -> Void
+    let onStartRadio: () -> Void
+
+    @StateObject private var playlistManager = PlaylistManager.shared
+
+    private var isLiked: Bool {
+        playlistManager.isLiked(trackId: track.videoId)
+    }
 
     var body: some View {
         Button(action: onPlay) {
@@ -1231,6 +1385,37 @@ struct HomeRecentTrackRow: View {
             }
         }
         .buttonStyle(.plain)
+        .contextMenu {
+            // 2026-06-28: long-press menu for parity with the
+            // recently-played list. Order matches iOS Music app
+            // convention: play actions first, queue, library, like,
+            // download, share at the bottom.
+            Button(action: onPlay) {
+                Label("Play", systemImage: "play.fill")
+            }
+            Button(action: onPlayNext) {
+                Label("Play Next", systemImage: "text.badge.plus")
+            }
+            Button(action: onAddToQueue) {
+                Label("Add to Queue", systemImage: "plus")
+            }
+            Button(action: onStartRadio) {
+                Label("Start Radio", systemImage: "antenna.radiowaves.left.and.right")
+            }
+            Divider()
+            Button(action: onAddToPlaylist) {
+                Label("Add to Playlist", systemImage: "music.note.list")
+            }
+            Button {
+                playlistManager.toggleLike(trackId: track.videoId)
+                HapticManager.medium()
+            } label: {
+                Label(isLiked ? "Unlike" : "Like", systemImage: isLiked ? "heart.fill" : "heart")
+            }
+            Button(action: onDownload) {
+                Label(isDownloaded ? "Downloaded" : "Download", systemImage: isDownloaded ? "checkmark.circle.fill" : "arrow.down.circle")
+            }
+        }
         .swipeActions(edge: .leading, allowsFullSwipe: false) {
             Button(action: onPlayNext) {
                 Label("Next", systemImage: "text.badge.plus")
