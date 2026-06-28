@@ -156,6 +156,21 @@ class NowPlayingService {
     }
 
     // MARK: - Update Methods
+
+    // C-2026-06-28: coalesce rapid updateNowPlaying calls. AVPlayer emits
+    // the item-duration publisher multiple times for HTTP streams as
+    // chunks resolve, and each emission ran the full pipeline below
+    // (5 widget reloads + MPNowPlayingInfoCenter write + JSON encode).
+    // On a saturated main thread this exhausted the 5-second gesture
+    // gate and iOS SIGKILLed the process.
+    //
+    // Track the most-recent pending parameters and run them on a
+    // debounce — last-write-wins is the right semantics for Now Playing
+    // info (we only care about the latest state at paint time).
+    private var pendingNowPlaying: (track: Track, duration: TimeInterval, currentTime: TimeInterval, isPlaying: Bool, playbackRate: Float)?
+    private var nowPlayingWorkItem: DispatchWorkItem?
+    private let nowPlayingDebounceInterval: TimeInterval = 0.15
+
     func updateNowPlaying(
         track: Track,
         duration: TimeInterval,
@@ -168,6 +183,44 @@ class NowPlayingService {
         #endif
         // Store duration for future time-only updates
         currentDuration = duration
+
+        // C-2026-06-28: coalesce. Cancel any pending run, stash the
+        // latest parameters, schedule a debounced run on the main
+        // queue. This collapses bursts of updateNowPlaying calls
+        // (e.g., AVPlayer's rapid duration-emit storm on streams)
+        // into one write.
+        pendingNowPlaying = (track, duration, currentTime, isPlaying, playbackRate)
+        nowPlayingWorkItem?.cancel()
+        let item = DispatchWorkItem { [weak self] in
+            self?.flushPendingNowPlaying()
+        }
+        nowPlayingWorkItem = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + nowPlayingDebounceInterval, execute: item)
+    }
+
+    private func flushPendingNowPlaying() {
+        guard let p = pendingNowPlaying else { return }
+        pendingNowPlaying = nil
+        nowPlayingWorkItem = nil
+        performNowPlayingWrite(
+            track: p.track,
+            duration: p.duration,
+            currentTime: p.currentTime,
+            isPlaying: p.isPlaying,
+            playbackRate: p.playbackRate
+        )
+    }
+
+    private func performNowPlayingWrite(
+        track: Track,
+        duration: TimeInterval,
+        currentTime: TimeInterval,
+        isPlaying: Bool,
+        playbackRate: Float
+    ) {
+        #if DEBUG
+        PlayCrashDiagnostics.log(.nowPlaying, "performNowPlayingWrite ENTRY videoId=\(track.videoId) duration=\(duration) currentTime=\(currentTime) isPlaying=\(isPlaying)")
+        #endif
         print("🎵 NowPlayingService.updateNowPlaying - Duration: \(duration), Current: \(currentTime), Playing: \(isPlaying)")
 
         var nowPlayingInfo: [String: Any] = [
@@ -248,11 +301,25 @@ class NowPlayingService {
             nextArtist: nextTrack?.displayArtist ?? "",
             currentVolume: Float(PlayerState.shared.volume)
         ))
-        WidgetSyncService.reloadAll()
+        // C-2026-06-28: widget timeline reloads are documented as
+        // asynchronous (they schedule work in the widget extension's
+        // process), but the *call site* still touches internal Core
+        // Animation / SpringBoard bookkeeping on the main thread. Off
+        // the main queue this overhead is invisible; on the main
+        // queue it can stall Now Playing writes during the burst that
+        // happens at track change.
+        let trackTitle = track.title
+        let videoId = track.videoId
+        DispatchQueue.global(qos: .utility).async {
+            WidgetSyncService.reloadAll()
+            #if DEBUG
+            PlayCrashDiagnostics.log(.nowPlaying, "widgetReload dispatched videoId=\(videoId) title=\(trackTitle)")
+            #endif
+        }
 
         updateCommandAvailability()
         #if DEBUG
-        PlayCrashDiagnostics.log(.nowPlaying, "updateNowPlaying EXIT videoId=\(track.videoId)")
+        PlayCrashDiagnostics.log(.nowPlaying, "performNowPlayingWrite EXIT videoId=\(track.videoId)")
         #endif
     }
 

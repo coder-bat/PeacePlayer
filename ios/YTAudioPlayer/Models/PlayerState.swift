@@ -1819,6 +1819,19 @@ class PlayerState: ObservableObject {
         // Observe item duration
         player.currentItem?.publisher(for: \.duration)
             .compactMap { $0.seconds > 0 ? $0.seconds : nil }
+            // C-2026-06-28: for HTTP streams the duration publisher emits
+            // many times in rapid succession as the server resolves
+            // chunks. Each call to updateRemoteControls() runs the full
+            // updateNowPlaying pipeline (MPNowPlayingInfoCenter write +
+            // 5 widget reloads + SharedNowPlayingState JSON encode).
+            // On a saturated main thread this exhausts the 5-second
+            // gesture gate and iOS SIGKILLs the process.
+            //
+            // Fix: only call updateRemoteControls() when the duration
+            // changes by more than 1 second, and skip calls that would
+            // be redundant with the existing updatePlaybackTime path.
+            // The per-second scrubber ticks still drive updatePlaybackTime.
+            .removeDuplicates(by: { abs($0 - $1) < 1.0 })
             .receive(on: DispatchQueue.main)
             .sink { [weak self] duration in
                 print("🔊 Duration updated: \(duration)")
