@@ -237,14 +237,13 @@ struct CyberpunkTabBar: View {
         let tag: Int
     }
 
+    // 2026-06-28: reduced to just Home + Library. Search, Playlists,
+    // Downloads, Radio, and Settings are all reachable from the new
+    // top-right icon cluster on the Home tab (see HomeView's
+    // headerSection). The bottom nav is now a clean two-icon strip.
     private let tabs: [TabDef] = [
-        TabDef(icon: "house.fill",                  label: "Home",      tag: 0),
-        TabDef(icon: "magnifyingglass",              label: "Search",    tag: 1),
-        TabDef(icon: "music.note.list",              label: "Playlists", tag: 2),
-        TabDef(icon: "music.note.house.fill",        label: "Library",   tag: 3),
-        TabDef(icon: "arrow.down.circle.fill",       label: "Downloads", tag: 4),
-        TabDef(icon: "radio.fill",                   label: "Radio",     tag: 5),
-        TabDef(icon: "gearshape.fill",               label: "Settings",  tag: 6),
+        TabDef(icon: "house.fill",            label: "Home",    tag: 0),
+        TabDef(icon: "music.note.house.fill", label: "Library", tag: 3),
     ]
 
     var body: some View {
@@ -321,7 +320,7 @@ struct CyberpunkTabItem: View {
 
                     // Icon with neon glow when selected
                     Image(systemName: icon)
-                        .font(.system(size: 19, weight: isSelected ? .semibold : .regular))
+                        .font(.system(size: 22, weight: isSelected ? .semibold : .regular))
                         .foregroundColor(isSelected ? .cyberCyan : .cyberDim)
                         // Inline GlowModifier (two-shadow recipe from HomeView)
                         .shadow(color: isSelected ? Color.cyberCyan.opacity(0.55) : .clear,
@@ -331,12 +330,16 @@ struct CyberpunkTabItem: View {
                 }
                 .frame(height: 32)
 
-                // Monospaced uppercase label
-                Text(label.uppercased())
-                    .font(.system(size: 9, weight: .bold, design: .monospaced))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
-                    .foregroundColor(isSelected ? .cyberCyan : .cyberDim)
+                // 2026-06-28: hidden. The bottom nav is now icons-only.
+                // (Commented out rather than deleted so the layout
+                // spacing can be tweaked back if the user changes
+                // their mind. Active indicator dot still appears below.)
+                //
+                // Text(label.uppercased())
+                //     .font(.system(size: 9, weight: .bold, design: .monospaced))
+                //     .lineLimit(1)
+                //     .minimumScaleFactor(0.7)
+                //     .foregroundColor(isSelected ? .cyberCyan : .cyberDim)
 
                 // Active indicator dot
                 Circle()
@@ -350,6 +353,7 @@ struct CyberpunkTabItem: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(Text(label))  // VoiceOver still gets the name
         .animation(.spring(response: 0.28, dampingFraction: 0.72), value: isSelected)
     }
 }
