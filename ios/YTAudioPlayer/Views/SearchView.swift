@@ -91,7 +91,7 @@ struct SearchView: View {
                     .animation(.easeInOut(duration: 0.2), value: isSearchFocused)
                 }
                 .padding(.top, 8)
-                .padding(.bottom, 12)
+                .padding(.bottom, 0)
                 .background(Theme.cyberBackground)
 
                 ZStack {
@@ -156,6 +156,9 @@ struct SearchView: View {
     
     // MARK: - Results List
     private var resultsListView: some View {
+        // 2026-06-28 (S7): zero out the default List top inset so the
+        // filter chips sit immediately under the search input with
+        // no gap.
         List {
             // Filter Chips
             Section {
@@ -266,6 +269,7 @@ struct SearchView: View {
 
         }
         .listStyle(.insetGrouped)
+        .environment(\.defaultMinListRowHeight, 0)  // S7: shrink row insets
         .task(id: viewModel.results.map(\.videoId)) {
             let ids = viewModel.results.prefix(5).map(\.videoId)
             StreamURLCache.shared.prefetchBatch(videoIds: ids)

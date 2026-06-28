@@ -43,44 +43,29 @@ struct ContentView: View {
     @ViewBuilder
     private var authenticatedBody: some View {
         ZStack {
-            // Tab content — MiniPlayer injected via safeAreaInset on each tab
-            // so it appears ABOVE the custom tab bar (not overlapping it).
-            // CyberpunkTabBar is injected via safeAreaInset on the TabView itself.
+            // Tab content — no per-tab safeAreaInset for the mini
+            // player anymore; the bottom row below combines the
+            // floating pill and the mini player side-by-side.
             TabView(selection: $selectedTab) {
-                // 2026-06-28: reduced to 3 tabs — Home (0), Search (1)
-                // reachable from the header search icon, Library (3)
-                // reachable from the stats footer shortcut. The other
-                // destinations (Playlists, Downloads, Radio, Settings)
-                // are reached from the new top-right icon cluster on
-                // Home. With <=4 tabs iOS stops showing the "More"
-                // overflow button.
                 HomeView()
-                    .safeAreaInset(edge: .bottom, spacing: 0) { miniPlayerView }
                     .tag(0)
-
                 SearchView(viewModel: searchViewModel)
-                    .safeAreaInset(edge: .bottom, spacing: 0) { miniPlayerView }
                     .tag(1)
-
                 LibraryView()
-                    .safeAreaInset(edge: .bottom, spacing: 0) { miniPlayerView }
                     .tag(3)
             }
             .modifier(HideNativeTabBar())
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                // 2026-06-28 (S6): floating pill anchored to bottom.
-                // On iOS 26 the safeAreaInset's container is sized
-                // to fit the content. We use a HStack with Spacers
-                // so the pill is horizontally centered, and we
-                // explicitly mark the background as clear so the
-                // safeAreaInset doesn't paint a Material layer
-                // behind the pill (which was the duplicate
-                // "translucent pill" on iOS 26).
-                HStack {
-                    Spacer(minLength: 0)
-                    CyberpunkTabBar(selectedTab: $selectedTab)
-                    Spacer(minLength: 0)
-                }
+                // 2026-06-28 (S7): bottom row that holds the floating
+                // tab pill on the left and the mini player on the
+                // right (when a track is playing). When there's no
+                // track playing, only the pill renders, centered
+                // in the row. Same height on both so the row stays
+                // visually balanced.
+                BottomBar(
+                    tabBar: CyberpunkTabBar(selectedTab: $selectedTab),
+                    miniPlayer: AnyView(miniPlayerView)
+                )
                 .frame(maxWidth: .infinity)
                 .background(Color.clear)
             }
@@ -256,6 +241,46 @@ private struct HideNativeTabBar: ViewModifier {
                 UITabBar.appearance().isHidden = true
             }
         }
+    }
+}
+
+// MARK: - Bottom Bar (2026-06-28 S7)
+
+// 2026-06-28 (S7): the bottom safeAreaInset now hosts a single
+// row that combines the floating tab pill (left, shifted) and the
+// mini player (right). When the mini player isn't visible, the
+// pill is centered. Layout uses an HStack with a fixed-height
+// capsule style so the row is visually balanced whether the
+// player is open or not.
+struct BottomBar: View {
+    let tabBar: CyberpunkTabBar
+    let miniPlayer: AnyView
+
+    @StateObject private var playerState = PlayerState.shared
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            if playerState.isNowPlaying {
+                // Mini player on the right, tab pill shifts to the left.
+                // Same height (56pt) and matching capsule glass style
+                // so they look like two halves of the same row.
+                Spacer(minLength: 0)
+                tabBar
+                miniPlayer
+                    .frame(height: 56)
+                    .clipShape(Capsule())
+                    .overlay(
+                        Capsule().stroke(Theme.cyberCyan.opacity(0.3), lineWidth: 1)
+                    )
+            } else {
+                // No track playing — center the pill.
+                Spacer(minLength: 0)
+                tabBar
+                Spacer(minLength: 0)
+            }
+        }
+        .padding(.horizontal, playerState.isNowPlaying ? 12 : 0)
+        .frame(height: 64)
     }
 }
 

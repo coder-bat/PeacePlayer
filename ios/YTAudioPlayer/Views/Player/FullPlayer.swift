@@ -227,32 +227,38 @@ struct FullPlayer: View {
 
     // MARK: - Portrait Layout
     private var portraitContent: some View {
+        // 2026-06-28 (S7): even vertical distribution. Replace the
+        // ScrollView with a fixed VStack + Spacers so the full screen
+        // is covered evenly (artwork, track info, scrubber,
+        // playback controls, volume, more actions) instead of
+        // everything bunched at the top.
         VStack(spacing: 0) {
             topBar
-            ScrollView(showsIndicators: false) {
-                GeometryReader { geo in
-                    Color.clear.preference(
-                        key: FullPlayerScrollOffsetKey.self,
-                        value: geo.frame(in: .named("fullPlayerScroll")).minY
-                    )
-                }
-                .frame(height: 0)
 
-                VStack(spacing: 20) {
-                    artworkSection
-                    trackInfoSection
-                    playbackControlsSection
-                    VolumeSlider()
-                        .padding(.horizontal, 8)
-                    moreActionsRow
-                    Spacer(minLength: 40)
-                }
-                .padding(.horizontal, 24)
+            VStack(spacing: 0) {
+                Spacer(minLength: 8)
+                artworkSection
+                    .layoutPriority(1)
+                Spacer(minLength: 16)
+
+                trackInfoSection
+                Spacer(minLength: 16)
+
+                progressSection
+                Spacer(minLength: 16)
+
+                playbackControlsSection
+                Spacer(minLength: 16)
+
+                VolumeSlider()
+                    .padding(.horizontal, 8)
+                Spacer(minLength: 16)
+
+                moreActionsRow
+                Spacer(minLength: 8)
             }
-            .coordinateSpace(name: "fullPlayerScroll")
-            .onPreferenceChange(FullPlayerScrollOffsetKey.self) { value in
-                scrollAtTop = value >= -10
-            }
+            .padding(.horizontal, 24)
+            .padding(.bottom, 32)
         }
     }
 

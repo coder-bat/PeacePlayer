@@ -260,19 +260,24 @@ struct HomeView: View {
 
     // MARK: - Hero Section
     private var heroSection: some View {
+        // 2026-06-28 (S7): single design for both playing and
+        // resume states. The block itself stays the same; only the
+        // state label ("NOW PLAYING" / "PAUSED" / "RESUME"), the
+        // right-side icon, and the equalizer animation change.
         Group {
-            if playerState.playbackState.isPlaying, let track = playerState.currentItem?.track {
-                // Currently playing - show live player
-                NowPlayingHero(track: track, isPlaying: playerState.playbackState.isPlaying) {
-                    viewModel.togglePlayPause()
-                }
+            if let track = playerState.currentItem?.track {
+                NowPlayingHero(
+                    track: track,
+                    state: playerState.playbackState,
+                    onTap: { viewModel.togglePlayPause() }
+                )
             } else if let lastTrack = viewModel.lastPlayedTrack {
-                // Resume last track
-                ResumeHero(track: lastTrack) {
-                    viewModel.playTrack(lastTrack)
-                }
+                NowPlayingHero(
+                    track: lastTrack,
+                    state: .idle,
+                    onTap: { viewModel.playTrack(lastTrack) }
+                )
             } else {
-                // Empty state - get started
                 EmptyHero {
                     NotificationCenter.default.post(name: .switchTab, object: 1)
                 }
@@ -548,92 +553,37 @@ struct CyberBackground: View {
 // MARK: - Now Playing Hero
 struct NowPlayingHero: View {
     let track: Track
-    let isPlaying: Bool
-    let onTap: () -> Void
-
-    var body: some View {
-        Button(action: onTap) {
-            ZStack {
-                // Glass container
-                RoundedRectangle(cornerRadius: 24)
-                    .fill(Color.cyberSurface)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 24)
-                            .stroke(
-                                LinearGradient(
-                                    colors: [.cyberCyan.opacity(0.3), .cyberMagenta.opacity(0.2)],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                ),
-                                lineWidth: 1
-                            )
-                    )
-
-                HStack(spacing: 20) {
-                    // Artwork with glow
-                    ZStack {
-                        // Glow effect
-                        RoundedRectangle(cornerRadius: 16)
-                            .fill(Color.cyberCyan.opacity(0.3))
-                            .blur(radius: 20)
-                            .frame(width: 100, height: 100)
-
-                        CachedAsyncImage(url: track.artworkURL) {
-                            RoundedRectangle(cornerRadius: 16)
-                                .fill(Color.cyberDim.opacity(0.3))
-                        }
-                        .frame(width: 100, height: 100)
-                        .clipShape(RoundedRectangle(cornerRadius: 16))
-                    }
-
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Now Playing")
-                            .font(.system(size: 10, weight: .bold, design: .monospaced))
-                            .foregroundColor(.cyberCyan)
-
-                        Text(track.title)
-                            .font(.system(size: 18, weight: .bold))
-                            .foregroundColor(.white)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.8)
-
-                        Text(track.displayArtist)
-                            .font(.system(size: 14))
-                            .foregroundColor(.cyberDim)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.8)
-
-                        // Visualizer bars
-                        CyberPlayingBars()
-                            .frame(height: 20)
-                            .padding(.top, 8)
-                    }
-
-                    Spacer()
-
-                    // Play/Pause
-                    Image(systemName: isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                        .font(.system(size: 44))
-                        .foregroundColor(.cyberCyan)
-                }
-                .padding(20)
-            }
-        }
-        .buttonStyle(.plain)
-        .frame(height: 140)
-    }
-}
-
-// MARK: - Resume Hero
-struct ResumeHero: View {
-    let track: Track
+    /// .playing shows the equalizer animation + pause icon.
+    /// .paused shows static bars + play icon.
+    /// .idle (no track loaded) shows a hint that the user can tap to play.
+    let state: PlaybackState
     let onTap: () -> Void
     @State private var pulse = false
 
+    private var statusLabel: String {
+        switch state {
+        case .playing: return "NOW PLAYING"
+        case .paused:  return "PAUSED"
+        case .loading, .buffering: return "LOADING"
+        case .idle: return "RESUME"
+        case .error: return "ERROR"
+        @unknown default: return "RESUME"
+        }
+    }
+
+    private var rightIcon: String {
+        switch state {
+        case .playing: return "pause.fill"
+        default:        return "play.fill"
+        }
+    }
+
+    private var isAnimating: Bool { state == .playing }
+
     var body: some View {
         Button(action: onTap) {
             ZStack {
-                // Glass + gradient surface (tighter than the previous 20pt padding)
+                // Glass + gradient surface — same in all states.
                 RoundedRectangle(cornerRadius: 20)
                     .fill(
                         LinearGradient(
@@ -646,13 +596,14 @@ struct ResumeHero: View {
                         )
                     )
                     .overlay(
-                        // Animated neon border that pulses
+                        // Animated neon border that pulses (only when
+                        // actually playing, to draw the eye).
                         RoundedRectangle(cornerRadius: 20)
                             .stroke(
                                 LinearGradient(
                                     colors: [
-                                        .cyberCyan.opacity(pulse ? 0.9 : 0.3),
-                                        .cyberMagenta.opacity(pulse ? 0.5 : 0.2)
+                                        .cyberCyan.opacity(pulse && isAnimating ? 0.9 : 0.35),
+                                        .cyberMagenta.opacity(pulse && isAnimating ? 0.55 : 0.25)
                                     ],
                                     startPoint: .topLeading,
                                     endPoint: .bottomTrailing
@@ -660,7 +611,7 @@ struct ResumeHero: View {
                                 lineWidth: 1.5
                             )
                     )
-                    .shadow(color: .cyberCyan.opacity(pulse ? 0.5 : 0.2), radius: pulse ? 18 : 8, x: 0, y: 0)
+                    .shadow(color: .cyberCyan.opacity(pulse && isAnimating ? 0.5 : 0.18), radius: pulse && isAnimating ? 18 : 8, x: 0, y: 0)
 
                 HStack(spacing: 14) {
                     // Compact artwork with corner glow
@@ -669,7 +620,7 @@ struct ResumeHero: View {
                             .fill(Color.cyberCyan.opacity(0.25))
                             .blur(radius: 14)
                             .frame(width: 72, height: 72)
-                            .opacity(pulse ? 0.9 : 0.5)
+                            .opacity(isAnimating && pulse ? 0.9 : 0.5)
 
                         CachedAsyncImage(url: track.artworkURL) {
                             RoundedRectangle(cornerRadius: 12)
@@ -680,15 +631,15 @@ struct ResumeHero: View {
                     }
 
                     VStack(alignment: .leading, spacing: 4) {
-                        // Glowing "RESUME" pill
+                        // State label (NOW PLAYING / PAUSED / RESUME)
                         HStack(spacing: 6) {
                             Circle()
-                                .fill(Color.cyberCyan)
+                                .fill(state == .playing ? Color.cyberCyan : Color.cyberMagenta)
                                 .frame(width: 6, height: 6)
-                                .shadow(color: Color.cyberCyan, radius: 4)
-                            Text("RESUME")
+                                .shadow(color: state == .playing ? Color.cyberCyan : Color.cyberMagenta, radius: 4)
+                            Text(statusLabel)
                                 .font(.system(size: 9, weight: .bold, design: .monospaced))
-                                .foregroundColor(.cyberCyan)
+                                .foregroundColor(state == .playing ? .cyberCyan : .cyberMagenta)
                                 .tracking(2)
                         }
 
@@ -704,15 +655,15 @@ struct ResumeHero: View {
                             .lineLimit(1)
                             .minimumScaleFactor(0.8)
 
-                        // Mini equalizer
-                        ResumeBarsIndicator()
+                        // Equalizer — animates when playing, static when paused
+                        ResumeBarsIndicator(animating: isAnimating)
                             .frame(height: 14)
                             .padding(.top, 4)
                     }
 
                     Spacer(minLength: 8)
 
-                    // Round play affordance with neon ring
+                    // Right-side control: ringed play/pause affordance
                     ZStack {
                         Circle()
                             .stroke(
@@ -724,10 +675,10 @@ struct ResumeHero: View {
                                 lineWidth: 1.5
                             )
                             .frame(width: 52, height: 52)
-                        Image(systemName: "play.fill")
+                        Image(systemName: rightIcon)
                             .font(.system(size: 18, weight: .bold))
                             .foregroundColor(.cyberCyan)
-                            .offset(x: 1.5)  // visual centering for play triangle
+                            .offset(x: rightIcon == "play.fill" ? 1.5 : 0)
                     }
                 }
                 .padding(.horizontal, 14)
@@ -735,7 +686,7 @@ struct ResumeHero: View {
             }
         }
         .buttonStyle(.plain)
-        .frame(height: 96)  // reduced from 140 — less padding
+        .frame(height: 96)
         .onAppear {
             withAnimation(.easeInOut(duration: 1.6).repeatForever(autoreverses: true)) {
                 pulse = true
@@ -744,8 +695,14 @@ struct ResumeHero: View {
     }
 }
 
+// MARK: - Resume Hero
+
 // MARK: - Resume Bars Indicator
+// 2026-06-28 (S7): takes an `animating` flag. When true the bars
+// pulse in a wave; when false they sit at a static mid-height so
+// the resume/paused state is visually distinct from playing.
 struct ResumeBarsIndicator: View {
+    let animating: Bool
     @State private var animate = false
     @Environment(\.accessibilityReduceMotion) var reduceMotion
 
@@ -758,12 +715,12 @@ struct ResumeBarsIndicator: View {
                         startPoint: .top,
                         endPoint: .bottom
                     ))
-                    .frame(width: 3, height: animate ? 14 : 5)
+                    .frame(width: 3, height: (animate && animating) ? 14 : 5)
                     .animation(
                         reduceMotion ? .none : Animation.easeInOut(duration: 0.45)
                             .repeatForever(autoreverses: true)
                             .delay(Double(index) * 0.12),
-                        value: animate
+                        value: animate && animating
                     )
             }
         }
@@ -1148,10 +1105,10 @@ class HomeViewModel: ObservableObject {
     private func updateGreeting() {
         let hour = Calendar.current.component(.hour, from: Date())
         switch hour {
-        case 5..<12: greeting = " MORNING "
-        case 12..<17: greeting = " AFTERNOON "
-        case 17..<22: greeting = " EVENING "
-        default: greeting = " NIGHT "
+        case 5..<12: greeting = "MORNING"
+        case 12..<17: greeting = "AFTERNOON"
+        case 17..<22: greeting = "EVENING"
+        default: greeting = "NIGHT"
         }
     }
 
