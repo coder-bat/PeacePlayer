@@ -29,15 +29,121 @@ struct MiniPlayer: View {
     @Environment(\.accessibilityReduceMotion) var reduceMotion
     
     var body: some View {
-        HStack(spacing: compact ? 8 : 12) {
-            // Animated artwork — smaller in compact mode so the
-            // title gets more room.
+        // 2026-06-28 (S7d): in compact mode, the mini player draws
+        // a faded version of the artwork as its full-pill
+        // background. The track title and artist are on the left,
+        // play and next buttons on the right. A semi-transparent
+        // cyberSurface overlay tints the artwork cyan so the text
+        // stays readable.
+        if compact {
+            compactBody
+        } else {
+            regularBody
+        }
+    }
+
+    // 2026-06-28 (S7d): full-pill mini player with faded artwork
+    // background, title/artist on the left, controls on the right.
+    private var compactBody: some View {
+        ZStack {
+            // Background: blurred, dimmed artwork tinted cyan.
+            if let url = playerState.currentItem?.track.artworkURL {
+                CachedAsyncImage(url: url) {
+                    Color.cyberSurface
+                }
+                .scaledToFill()
+                .blur(radius: 18)
+                .opacity(0.55)
+                .clipped()
+            } else {
+                Color.cyberSurface
+            }
+
+            // Cyber tint to keep the text readable on busy artwork.
+            LinearGradient(
+                colors: [
+                    Theme.cyberSurface.opacity(0.55),
+                    Theme.cyberCyan.opacity(0.18),
+                    Theme.cyberSurface.opacity(0.65)
+                ],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+
+            // Title + artist on the left, controls on the right.
+            HStack(spacing: 8) {
+                Button(action: {
+                    HapticManager.medium()
+                    onExpand()
+                }) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(playerState.currentItem?.track.title ?? "")
+                            .font(.system(size: 13, weight: .bold))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
+                            .foregroundColor(.white)
+                            .shadow(color: .black.opacity(0.6), radius: 2)
+
+                        Text(playerState.currentItem?.track.displayArtist ?? "")
+                            .font(.system(size: 11))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
+                            .foregroundColor(.white.opacity(0.85))
+                            .shadow(color: .black.opacity(0.5), radius: 1)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.plain)
+
+                // Play/Pause
+                Button(action: {
+                    HapticManager.light()
+                    playerState.togglePlayPause()
+                }) {
+                    Image(systemName: playerState.playbackState.isPlaying ? "pause.fill" : "play.fill")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundColor(.white)
+                        .frame(width: 32, height: 32)
+                        .background(
+                            Circle().fill(Theme.cyberCyan.opacity(0.25))
+                        )
+                }
+                .accessibilityLabel(playerState.playbackState.isPlaying ? "Pause" : "Play")
+
+                // Next
+                Button(action: {
+                    HapticManager.light()
+                    playerState.nextTrack(userSkipped: true)
+                }) {
+                    Image(systemName: "forward.fill")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundColor(.white.opacity(0.9))
+                        .frame(width: 28, height: 28)
+                }
+                .accessibilityLabel("Next track")
+                .disabled(!playerState.hasNextTrack)
+                .opacity(playerState.hasNextTrack ? 1 : 0.3)
+            }
+            .padding(.horizontal, 14)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 22))
+        .overlay(
+            RoundedRectangle(cornerRadius: 22)
+                .stroke(Theme.cyberCyan.opacity(0.4), lineWidth: 1)
+        )
+    }
+
+    // 2026-06-28 (S7d): original full mini-player body — used
+    // when shown standalone (not embedded in the bottom bar).
+    private var regularBody: some View {
+        HStack(spacing: 12) {
+            // Animated artwork
             ArtworkView(
                 artworkURL: playerState.currentItem?.track.artworkURL,
                 isPlaying: playerState.playbackState.isPlaying,
                 isLoading: playerState.playbackState.isLoading
             )
-            .frame(width: compact ? 32 : 44, height: compact ? 32 : 44)
+            .frame(width: 44, height: 44)
             
             // Track Info - tappable for expand
             Button(action: {
@@ -150,16 +256,14 @@ struct MiniPlayer: View {
                 }
             }
         }
-        .padding(.horizontal, compact ? 8 : 16)
-        .padding(.vertical, compact ? 6 : 10)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
         .frame(maxWidth: .infinity)
-        .frame(height: compact ? 44 : 64)
-        .background(compact
-            ? AnyView(Color.clear)
-            : AnyView(Rectangle().fill(.ultraThinMaterial)))
+        .frame(height: 64)
+        .background(Rectangle().fill(.ultraThinMaterial))
         .overlay(alignment: .top) {
-            // Playback progress bar (hidden for live radio, hidden in compact mode)
-            if !compact && playerState.contentType != .liveRadio {
+            // Playback progress bar (hidden for live radio)
+            if playerState.contentType != .liveRadio {
                 GeometryReader { geo in
                     let progress = clock.duration > 0
                         ? CGFloat(clock.currentTime / clock.duration)
@@ -170,20 +274,14 @@ struct MiniPlayer: View {
                 .frame(height: 2)
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: compact ? 22 : 20))
+        .clipShape(RoundedRectangle(cornerRadius: 20))
         .overlay(
-            Group {
-                if compact {
-                    Capsule().stroke(Color.cyberCyan.opacity(0.3), lineWidth: 1)
-                } else {
-                    RoundedRectangle(cornerRadius: 20)
-                        .stroke(Color.cyberCyan.opacity(0.2), lineWidth: 1)
-                }
-            }
+            RoundedRectangle(cornerRadius: 20)
+                .stroke(Color.cyberCyan.opacity(0.2), lineWidth: 1)
         )
-        .shadow(color: compact ? .clear : Color.black.opacity(0.3), radius: 10, x: 0, y: 4)
-        .padding(.horizontal, compact ? 0 : 12)
-        // Swipe gestures
+        .shadow(color: Color.black.opacity(0.3), radius: 10, x: 0, y: 4)
+        .padding(.horizontal, 12)
+        // Swipe / drag / offset — apply to both
         .offset(x: offset)
         .gesture(
             DragGesture()
@@ -194,7 +292,7 @@ struct MiniPlayer: View {
                     isDragging = true
                     let horizontalTranslation = value.translation.width
                     let verticalTranslation = value.translation.height
-                    
+
                     // Determine primary direction
                     if abs(horizontalTranslation) > abs(verticalTranslation) {
                         // Horizontal swipe - for track skipping

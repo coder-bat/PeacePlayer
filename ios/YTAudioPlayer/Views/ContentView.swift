@@ -266,20 +266,24 @@ struct BottomBar: View {
 
     @StateObject private var playerState = PlayerState.shared
 
+    // 2026-06-28 (S7d): pill and mini player share the same
+    // height so the row reads as a single unit. The mini player
+    // is now self-contained — it draws its own blurred-artwork
+    // background and rounded corners. BottomBar no longer wraps
+    // it in another clipShape/overlay (that produced the
+    // "pill-inside-pill" look).
+    private let rowHeight: CGFloat = 60
+
     var body: some View {
         HStack(alignment: .center, spacing: 8) {
             if playerState.isNowPlaying {
-                // Tab pill on the left (fixed at its preferred width),
-                // mini player flexes to fill the rest of the row.
+                // Tab pill on the left, mini player on the right.
+                // Both are fixed at rowHeight so they line up
+                // horizontally.
                 tabBar
                 miniPlayer
-                    .frame(height: 56)
+                    .frame(height: rowHeight)
                     .frame(maxWidth: .infinity)
-                    .clipShape(RoundedRectangle(cornerRadius: 22))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 22)
-                            .stroke(Theme.cyberCyan.opacity(0.3), lineWidth: 1)
-                    )
             } else {
                 // No track playing — center the pill.
                 Spacer(minLength: 0)
@@ -288,7 +292,7 @@ struct BottomBar: View {
             }
         }
         .padding(.horizontal, 12)
-        .frame(height: 64)
+        .frame(height: rowHeight + 4)  // breathing room above home indicator
     }
 }
 
@@ -333,7 +337,7 @@ struct CyberpunkTabBar: View {
                 }
             }
         }
-        .frame(width: 180, height: 56)  // fixed-size floating pill (S7: 200→180 to leave room for mini player)
+        .frame(width: 180, height: 60)  // fixed-size floating pill (S7d: 56→60 to match mini player)
         .background(
             ZStack {
                 // Glass blur
