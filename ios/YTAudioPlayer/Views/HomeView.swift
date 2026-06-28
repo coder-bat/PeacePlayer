@@ -558,6 +558,7 @@ struct NowPlayingHero: View {
     /// .idle (no track loaded) shows a hint that the user can tap to play.
     let state: PlaybackState
     let onTap: () -> Void
+    @StateObject private var playerState = PlayerState.shared
     @State private var pulse = false
 
     private var statusLabel: String {
@@ -581,7 +582,17 @@ struct NowPlayingHero: View {
     private var isAnimating: Bool { state == .playing }
 
     var body: some View {
-        Button(action: onTap) {
+        // 2026-06-28 (S8): the outer button opens the full player.
+        // The play/pause button inside the card handles its own
+        // play/pause action. SwiftUI gives inner buttons priority
+        // over outer ones in hit-testing, so the layout works.
+        Button {
+            // 2026-06-28 (S8): post a notification that ContentView
+            // listens for and uses to set showFullPlayer = true.
+            // We post rather than passing a binding down to keep
+            // NowPlayingHero self-contained.
+            NotificationCenter.default.post(name: .openFullPlayer, object: nil)
+        } label: {
             ZStack {
                 // Glass + gradient surface — same in all states.
                 RoundedRectangle(cornerRadius: 20)
@@ -663,23 +674,32 @@ struct NowPlayingHero: View {
 
                     Spacer(minLength: 8)
 
-                    // Right-side control: ringed play/pause affordance
-                    ZStack {
-                        Circle()
-                            .stroke(
-                                LinearGradient(
-                                    colors: [.cyberCyan, .cyberMagenta],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                ),
-                                lineWidth: 1.5
-                            )
-                            .frame(width: 52, height: 52)
-                        Image(systemName: rightIcon)
-                            .font(.system(size: 18, weight: .bold))
-                            .foregroundColor(.cyberCyan)
-                            .offset(x: rightIcon == "play.fill" ? 1.5 : 0)
+                    // 2026-06-28 (S8): the right-side play/pause
+                    // button is its own tappable control. Tapping it
+                    // toggles play/pause; tapping the rest of the
+                    // card opens the full player.
+                    Button {
+                        HapticManager.light()
+                        playerState.togglePlayPause()
+                    } label: {
+                        ZStack {
+                            Circle()
+                                .stroke(
+                                    LinearGradient(
+                                        colors: [.cyberCyan, .cyberMagenta],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    ),
+                                    lineWidth: 1.5
+                                )
+                                .frame(width: 52, height: 52)
+                            Image(systemName: rightIcon)
+                                .font(.system(size: 18, weight: .bold))
+                                .foregroundColor(.cyberCyan)
+                                .offset(x: rightIcon == "play.fill" ? 1.5 : 0)
+                        }
                     }
+                    .buttonStyle(.plain)
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 12)

@@ -154,6 +154,9 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .openRadio)) { _ in
             showRadio = true
         }
+        .onReceive(NotificationCenter.default.publisher(for: .openFullPlayer)) { _ in
+            showFullPlayer = true
+        }
         .sheet(isPresented: $showSettings) {
             SettingsView()
                 .preferredColorScheme(.dark)
@@ -272,18 +275,53 @@ struct BottomBar: View {
     // background and rounded corners. BottomBar no longer wraps
     // it in another clipShape/overlay (that produced the
     // "pill-inside-pill" look).
+    //
+    // 2026-06-28 (S8): added collapsed/expanded state. Swiping
+    // right on the mini player collapses it to a small icon
+    // sitting next to the pill. Tapping the collapsed icon
+    // expands it back. Padding between the pill and the player
+    // stays the same in both states.
     private let rowHeight: CGFloat = 60
+    private let collapsedWidth: CGFloat = 44
+    @State private var isCollapsed: Bool = false
+    @State private var dragOffset: CGFloat = 0
 
     var body: some View {
         HStack(alignment: .center, spacing: 8) {
             if playerState.isNowPlaying {
-                // Tab pill on the left, mini player on the right.
-                // Both are fixed at rowHeight so they line up
-                // horizontally.
+                // Tab pill on the left
                 tabBar
-                miniPlayer
-                    .frame(height: rowHeight)
-                    .frame(maxWidth: .infinity)
+
+                // Mini player on the right — animates between
+                // full width and collapsed icon width.
+                if isCollapsed {
+                    collapsedIcon
+                } else {
+                    miniPlayer
+                        .frame(height: rowHeight)
+                        .frame(maxWidth: .infinity)
+                        // 2026-06-28 (S8): horizontal swipe to
+                        // collapse / expand. Right-swipe collapses
+                        // the mini player into a small icon next
+                        // to the pill; left-swipe expands it back.
+                        .gesture(
+                            DragGesture(minimumDistance: 24)
+                                .onEnded { value in
+                                    let h = value.translation.width
+                                    if h < -40 {
+                                        // Swipe left → expand
+                                        withAnimation(.spring(response: 0.32, dampingFraction: 0.78)) {
+                                            isCollapsed = false
+                                        }
+                                    } else if h > 40 {
+                                        // Swipe right → collapse
+                                        withAnimation(.spring(response: 0.32, dampingFraction: 0.78)) {
+                                            isCollapsed = true
+                                        }
+                                    }
+                                }
+                        )
+                }
             } else {
                 // No track playing — center the pill.
                 Spacer(minLength: 0)
@@ -293,6 +331,52 @@ struct BottomBar: View {
         }
         .padding(.horizontal, 12)
         .frame(height: rowHeight + 4)  // breathing room above home indicator
+    }
+
+    /// 2026-06-28 (S8): the collapsed mini player. Same 60pt
+    /// height as the pill, but only 44pt wide — just a small
+    /// circle with a play/pause icon. Tapping it expands the
+    /// mini player back to its full width.
+    private var collapsedIcon: some View {
+        let isPlaying = playerState.playbackState == .playing
+        return Button {
+            HapticManager.light()
+            withAnimation(.spring(response: 0.32, dampingFraction: 0.78)) {
+                isCollapsed = false
+            }
+        } label: {
+            ZStack {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Theme.cyberSurface,
+                                Theme.cyberCyan.opacity(0.18)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 44, height: 44)
+                Circle()
+                    .stroke(
+                        LinearGradient(
+                            colors: [.cyberCyan, .cyberMagenta],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 1.2
+                    )
+                    .frame(width: 44, height: 44)
+                Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundColor(.cyberCyan)
+                    .offset(x: isPlaying ? 0 : 1)
+            }
+            .frame(width: 44, height: 44)
+        }
+        .buttonStyle(.plain)
+        .frame(height: 60)  // match the row height so the icon is centered vertically
     }
 }
 
@@ -448,4 +532,8 @@ extension Notification.Name {
     static let openSettings = Notification.Name("openSettings")
     static let openPlaylists = Notification.Name("openPlaylists")
     static let openRadio = Notification.Name("openRadio")
+    // 2026-06-28 (S8): posted by the home page's NowPlayingHero
+    // when the user taps the resume block. ContentView listens
+    // and opens the full player.
+    static let openFullPlayer = Notification.Name("openFullPlayer")
 }
