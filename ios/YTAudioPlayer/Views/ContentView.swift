@@ -62,9 +62,17 @@ struct ContentView: View {
                 // track playing, only the pill renders, centered
                 // in the row. Same height on both so the row stays
                 // visually balanced.
+                //
+                // 2026-06-28 (S7c): we render a compact variant of
+                // MiniPlayer (drops the skip-forward button, the
+                // live/audiobook badges, the standalone background,
+                // and tightens the layout) so the row fits the
+                // 50% width budget per side.
                 BottomBar(
                     tabBar: CyberpunkTabBar(selectedTab: $selectedTab),
-                    miniPlayer: AnyView(miniPlayerView)
+                    miniPlayer: AnyView(MiniPlayer(onExpand: {
+                        showFullPlayer = true
+                    }, compact: true))
                 )
                 .frame(maxWidth: .infinity)
                 .background(Color.clear)
@@ -267,9 +275,10 @@ struct BottomBar: View {
                 miniPlayer
                     .frame(height: 56)
                     .frame(maxWidth: .infinity)
-                    .clipShape(Capsule())
+                    .clipShape(RoundedRectangle(cornerRadius: 22))
                     .overlay(
-                        Capsule().stroke(Theme.cyberCyan.opacity(0.3), lineWidth: 1)
+                        RoundedRectangle(cornerRadius: 22)
+                            .stroke(Theme.cyberCyan.opacity(0.3), lineWidth: 1)
                     )
             } else {
                 // No track playing — center the pill.

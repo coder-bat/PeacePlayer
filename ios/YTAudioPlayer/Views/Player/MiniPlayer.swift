@@ -15,21 +15,29 @@ struct MiniPlayer: View {
     // PlaybackClock only re-renders the views that observe it.
     @StateObject private var clock = PlayerState.shared.playbackClock
     let onExpand: () -> Void
-    
+
+    // 2026-06-28 (S7c): compact mode is used when the mini player is
+    // embedded in the bottom bar alongside the floating tab pill.
+    // Drops the skip-forward button, the live/audiobook badges, the
+    // standalone background, and tightens the layout so the row
+    // fits inside ~50% of the screen width.
+    var compact: Bool = false
+
     @State private var offset: CGFloat = 0
     @State private var isDragging = false
     @GestureState private var dragState = CGSize.zero
     @Environment(\.accessibilityReduceMotion) var reduceMotion
     
     var body: some View {
-        HStack(spacing: 12) {
-            // Animated artwork
+        HStack(spacing: compact ? 8 : 12) {
+            // Animated artwork — smaller in compact mode so the
+            // title gets more room.
             ArtworkView(
                 artworkURL: playerState.currentItem?.track.artworkURL,
                 isPlaying: playerState.playbackState.isPlaying,
                 isLoading: playerState.playbackState.isLoading
             )
-            .frame(width: 44, height: 44)
+            .frame(width: compact ? 32 : 44, height: compact ? 32 : 44)
             
             // Track Info - tappable for expand
             Button(action: {
@@ -39,12 +47,12 @@ struct MiniPlayer: View {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 6) {
                         Text(playerState.currentItem?.track.title ?? "")
-                            .font(.system(size: 15, weight: .semibold))
+                            .font(.system(size: compact ? 13 : 15, weight: .semibold))
                             .lineLimit(1)
-                            .minimumScaleFactor(0.8)
+                            .minimumScaleFactor(0.7)
                             .foregroundColor(.white)
 
-                        if playerState.contentType == .liveRadio {
+                        if !compact && playerState.contentType == .liveRadio {
                             Text("LIVE")
                                 .fixedSize()
                                 .font(.system(size: 9, weight: .heavy, design: .monospaced))
@@ -54,7 +62,7 @@ struct MiniPlayer: View {
                                 .background(Capsule().fill(Theme.cyberMagenta))
                         }
 
-                        if playerState.contentType == .audiobook {
+                        if !compact && playerState.contentType == .audiobook {
                             Image(systemName: "book.fill")
                                 .font(.system(size: 10))
                                 .foregroundColor(.white)
@@ -78,67 +86,80 @@ struct MiniPlayer: View {
                         }
                     } else {
                         Text(playerState.currentItem?.track.displayArtist ?? "")
-                            .font(.system(size: 13))
+                            .font(.system(size: compact ? 11 : 13))
                             .foregroundColor(Theme.cyberDim)
                             .lineLimit(1)
-                            .minimumScaleFactor(0.8)
+                            .minimumScaleFactor(compact ? 0.7 : 0.8)
                     }
                 }
-                .frame(maxWidth: 180, alignment: .leading)
+                .frame(maxWidth: compact ? .infinity : 180, alignment: .leading)
             }
             .buttonStyle(.plain)
-            
-            Spacer()
-            
-            // Controls
-            HStack(spacing: 12) {
-                // Play/Pause button with loading state
-                ZStack {
-                    Button(action: {
-                        HapticManager.light()
-                        playerState.togglePlayPause()
-                    }) {
-                        Image(systemName: playerState.playbackState.isPlaying ? "pause.fill" : "play.fill")
-                            .font(.system(size: 22))
-                            .foregroundColor(.cyberCyan)
-                            .frame(width: 44, height: 44)
-                    }
-                    .opacity(playerState.playbackState.isLoading ? 0 : 1)
-                    .accessibilityLabel(playerState.playbackState.isPlaying
-                        ? "Pause \(playerState.currentItem?.track.title ?? "")"
-                        : "Play \(playerState.currentItem?.track.title ?? "")")
 
-                    ProgressView()
-                        .progressViewStyle(CircularProgressViewStyle())
-                        .frame(width: 44, height: 44)
-                        .opacity(playerState.playbackState.isLoading ? 1 : 0)
-                }
-                .animation(reduceMotion ? .none : .easeInOut(duration: 0.2), value: playerState.playbackState.isLoading)
-
+            // 2026-06-28 (S7c): in compact mode drop the spacer +
+            // next-track button so the row fits the 50% width budget.
+            if compact {
                 Button(action: {
                     HapticManager.light()
-                    playerState.nextTrack(userSkipped: true)
+                    playerState.togglePlayPause()
                 }) {
-                    Image(systemName: "forward.fill")
-                        .font(.system(size: 18))
-                        .foregroundColor(.white)
-                        .frame(width: 44, height: 44)
+                    Image(systemName: playerState.playbackState.isPlaying ? "pause.fill" : "play.fill")
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundColor(.cyberCyan)
+                        .frame(width: 36, height: 36)
                 }
-                .accessibilityLabel("Next track")
-                .disabled(!playerState.hasNextTrack)
-                .opacity(playerState.hasNextTrack ? 1 : 0.25)
+                .accessibilityLabel(playerState.playbackState.isPlaying ? "Pause" : "Play")
+            } else {
+                Spacer()
+
+                HStack(spacing: 12) {
+                    ZStack {
+                        Button(action: {
+                            HapticManager.light()
+                            playerState.togglePlayPause()
+                        }) {
+                            Image(systemName: playerState.playbackState.isPlaying ? "pause.fill" : "play.fill")
+                                .font(.system(size: 22))
+                                .foregroundColor(.cyberCyan)
+                                .frame(width: 44, height: 44)
+                        }
+                        .opacity(playerState.playbackState.isLoading ? 0 : 1)
+                        .accessibilityLabel(playerState.playbackState.isPlaying
+                            ? "Pause \(playerState.currentItem?.track.title ?? "")"
+                            : "Play \(playerState.currentItem?.track.title ?? "")")
+
+                        ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle())
+                            .frame(width: 44, height: 44)
+                            .opacity(playerState.playbackState.isLoading ? 1 : 0)
+                    }
+                    .animation(reduceMotion ? .none : .easeInOut(duration: 0.2), value: playerState.playbackState.isLoading)
+
+                    Button(action: {
+                        HapticManager.light()
+                        playerState.nextTrack(userSkipped: true)
+                    }) {
+                        Image(systemName: "forward.fill")
+                            .font(.system(size: 18))
+                            .foregroundColor(.white)
+                            .frame(width: 44, height: 44)
+                    }
+                    .accessibilityLabel("Next track")
+                    .disabled(!playerState.hasNextTrack)
+                    .opacity(playerState.hasNextTrack ? 1 : 0.25)
+                }
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
+        .padding(.horizontal, compact ? 8 : 16)
+        .padding(.vertical, compact ? 6 : 10)
         .frame(maxWidth: .infinity)
-        .frame(height: 64)
-        .background(
-            Rectangle().fill(.ultraThinMaterial)
-        )
+        .frame(height: compact ? 44 : 64)
+        .background(compact
+            ? AnyView(Color.clear)
+            : AnyView(Rectangle().fill(.ultraThinMaterial)))
         .overlay(alignment: .top) {
-            // Playback progress bar (hidden for live radio)
-            if playerState.contentType != .liveRadio {
+            // Playback progress bar (hidden for live radio, hidden in compact mode)
+            if !compact && playerState.contentType != .liveRadio {
                 GeometryReader { geo in
                     let progress = clock.duration > 0
                         ? CGFloat(clock.currentTime / clock.duration)
@@ -149,13 +170,19 @@ struct MiniPlayer: View {
                 .frame(height: 2)
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: 20))
+        .clipShape(RoundedRectangle(cornerRadius: compact ? 22 : 20))
         .overlay(
-            RoundedRectangle(cornerRadius: 20)
-                .stroke(Color.cyberCyan.opacity(0.2), lineWidth: 1)
+            Group {
+                if compact {
+                    Capsule().stroke(Color.cyberCyan.opacity(0.3), lineWidth: 1)
+                } else {
+                    RoundedRectangle(cornerRadius: 20)
+                        .stroke(Color.cyberCyan.opacity(0.2), lineWidth: 1)
+                }
+            }
         )
-        .shadow(color: Color.black.opacity(0.3), radius: 10, x: 0, y: 4)
-        .padding(.horizontal, 12)
+        .shadow(color: compact ? .clear : Color.black.opacity(0.3), radius: 10, x: 0, y: 4)
+        .padding(.horizontal, compact ? 0 : 12)
         // Swipe gestures
         .offset(x: offset)
         .gesture(
