@@ -135,6 +135,7 @@
 		517FD40FE5ED613E68CE84DD /* PlayCrashDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5C85B25FF324EFB396D8D60 /* PlayCrashDiagnostics.swift */; };
 		A1B2C3D400010000000000A1 /* AuthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D400020000000000A1 /* AuthService.swift */; };
 		A1B2C3D400030000000000A1 /* KeychainHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D400040000000000A1 /* KeychainHelper.swift */; };
+		A1B2C3D400070000000000A1 /* SyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D400080000000000A1 /* SyncService.swift */; };
 		A1B2C3D400050000000000A1 /* LandingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D400060000000000A1 /* LandingView.swift */; };
 /* End PBXBuildFile section */
 
@@ -295,6 +296,7 @@
 		B5C85B25FF324EFB396D8D60 /* PlayCrashDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayCrashDiagnostics.swift; sourceTree = "<group>"; };
 		A1B2C3D400020000000000A1 /* AuthService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthService.swift; sourceTree = "<group>"; };
 		A1B2C3D400040000000000A1 /* KeychainHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainHelper.swift; sourceTree = "<group>"; };
+		A1B2C3D400080000000000A1 /* SyncService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncService.swift; sourceTree = "<group>"; };
 		A1B2C3D400060000000000A1 /* LandingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LandingView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -411,6 +413,7 @@
 			children = (
 				A1B2C3D400020000000000A1 /* AuthService.swift */,
 				A1B2C3D400040000000000A1 /* KeychainHelper.swift */,
+				A1B2C3D400080000000000A1 /* SyncService.swift */,
 				7AA9786473E2C2E65D4458E8 /* AdaptiveWalkDJManager.swift */,
 				B7F42F1245CDFCF53C966438 /* AntiAlgorithmEngine.swift */,
 				2DC7C7A6C85A67E6E8A396B7 /* APIService.swift */,
@@ -820,6 +823,7 @@
 				517FD40FE5ED613E68CE84DD /* PlayCrashDiagnostics.swift in Sources */,
 				A1B2C3D400010000000000A1 /* AuthService.swift in Sources */,
 				A1B2C3D400030000000000A1 /* KeychainHelper.swift in Sources */,
+				A1B2C3D400070000000000A1 /* SyncService.swift in Sources */,
 				A1B2C3D400050000000000A1 /* LandingView.swift in Sources */,
 				219061230F75037D452AA0B5 /* YTAudioPlayer.xcdatamodeld in Sources */,
 				E86A578CA391F693A6B3752B /* YTAudioPlayerApp.swift in Sources */,

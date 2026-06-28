@@ -68,6 +68,10 @@ final class AuthService: NSObject, ObservableObject {
         self.userId = userId
         self.email = keychain.read(emailKey)
         self.isAuthenticated = true
+
+        // 2026-06-28 (Phase 3): on a returning user, pull the
+        // latest cloud state and merge it into local Core Data.
+        SyncService.shared.handleSessionRestored()
     }
 
     func signIn() async {
@@ -98,6 +102,9 @@ final class AuthService: NSObject, ObservableObject {
         if let token = keychain.read(sessionTokenKey) {
             _ = try? await postSignOut(token: token)
         }
+        // 2026-06-28 (Phase 3): cancel any in-flight sync so we
+        // don't keep writing to a now-invalid session.
+        SyncService.shared.handleSignOut()
         clearSession()
         isAuthenticated = false
     }
@@ -186,6 +193,12 @@ final class AuthService: NSObject, ObservableObject {
         self.userId = decoded.userId
         self.email = decoded.email
         self.isAuthenticated = true
+
+        // 2026-06-28 (Phase 3): kick off the cloud backup. For
+        // a new user we also pull the existing state (likely
+        // empty on first install); for returning users we just
+        // re-upload to confirm.
+        SyncService.shared.handleSignIn(isNewUser: decoded.isNewUser)
     }
 
     private func postSignOut(token: String) async throws -> Data {
