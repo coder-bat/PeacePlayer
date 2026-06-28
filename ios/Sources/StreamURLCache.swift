@@ -56,6 +56,9 @@ class StreamURLCache {
         preferM4A: Bool = true,
         quality: String = "low"
     ) -> AnyPublisher<StreamInfo, APIError> {
+        #if DEBUG
+        PlayCrashDiagnostics.log(.playback, "StreamURLCache.getStreamUrl ENTRY videoId=\(videoId)")
+        #endif
         let key = videoId as NSString
 
         if let wrapper = memoryCache.object(forKey: key), !wrapper.isExpired {

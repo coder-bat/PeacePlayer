@@ -9,6 +9,11 @@ import SwiftUI
 
 struct MiniPlayer: View {
     @StateObject private var playerState = PlayerState.shared
+    // C-2026-06-28: read currentTime / duration / progress from the
+    // focused PlaybackClock instead of PlayerState. PlayerState is a
+    // god object — every @Published change re-renders every observer.
+    // PlaybackClock only re-renders the views that observe it.
+    @StateObject private var clock = PlayerState.shared.playbackClock
     let onExpand: () -> Void
     
     @State private var offset: CGFloat = 0
@@ -135,8 +140,8 @@ struct MiniPlayer: View {
             // Playback progress bar (hidden for live radio)
             if playerState.contentType != .liveRadio {
                 GeometryReader { geo in
-                    let progress = playerState.duration > 0
-                        ? CGFloat(playerState.currentTime / playerState.duration)
+                    let progress = clock.duration > 0
+                        ? CGFloat(clock.currentTime / clock.duration)
                         : 0
                     Color.cyberCyan
                         .frame(width: geo.size.width * progress, height: 2)

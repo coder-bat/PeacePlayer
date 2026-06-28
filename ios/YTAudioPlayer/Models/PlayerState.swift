@@ -616,10 +616,16 @@ class PlayerState: ObservableObject {
         // C-5 fix: use the reconciliation helper instead of raw FileManager.fileExists.
         // This handles the case where CDDownloadedTrack has a stale row but the
         // file is missing on disk (user deleted via Files.app, etc.).
+        #if DEBUG
+        PlayCrashDiagnostics.log(.playback, "play(track:) PRE-isPlayable videoId=\(track.videoId)")
+        #endif
         let isPlayable = AudioFileManager.shared.isPlayable(
             videoId: track.videoId,
             context: PersistenceController.shared.viewContext
         )
+        #if DEBUG
+        PlayCrashDiagnostics.log(.playback, "play(track:) POST-isPlayable videoId=\(track.videoId) isPlayable=\(isPlayable)")
+        #endif
         let localURL = AudioFileManager.shared.localFileURL(for: track.videoId)
 
         if isPlayable {
@@ -636,7 +642,16 @@ class PlayerState: ObservableObject {
             play(item: item)
         } else {
             // Stream from backend - fetch stream URL first
-            StreamURLCache.shared.getStreamUrl(videoId: track.videoId, quality: "low")
+            #if DEBUG
+            PlayCrashDiagnostics.log(.playback, "play(track:) PRE-getStreamUrl videoId=\(track.videoId)")
+            #endif
+            // C-2026-06-28: bypass StreamURLCache. The cache added
+            // locking + NSCache + share() + Just wrapping that hung
+            // indefinitely on a fresh install. APIService.getStreamUrl
+            // is itself a synchronous Just and we hit the backend
+            // directly here. The cache can be re-added later with
+            // better instrumentation once we know what's blocking.
+            APIService.shared.getStreamUrl(videoId: track.videoId, preferM4A: true, quality: "low")
                 .sink(
                     receiveCompletion: { result in
                         if case .failure(let error) = result {
@@ -1811,7 +1826,14 @@ class PlayerState: ObservableObject {
         // Note: Asset loading observation removed - using standard URL initialization
         
         // Time observer for progress updates
-        let interval = CMTime(seconds: 0.5, preferredTimescale: CMTimeScale(NSEC_PER_SEC))
+        // C-2026-06-28: 1.0s instead of 0.5s. The lock screen / Control
+        // Center / scrubber all display in 1s increments (the iOS Music
+        // app's periodic time observer also runs at 1s). Going to 0.5s
+        // doubled the @Published churn on PlaybackClock and starved
+        // the main thread — UI taps were lost because SwiftUI never
+        // got a turn to dispatch them. 1s is the precision floor the
+        // user can perceive.
+        let interval = CMTime(seconds: 1.0, preferredTimescale: CMTimeScale(NSEC_PER_SEC))
         timeObserver = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
             self?.updateProgress()
         }
@@ -1933,24 +1955,21 @@ class PlayerState: ObservableObject {
             print("⏱️ Progress: \(String(format: "%.1f", current))s / \(String(format: "%.1f", total))s, state: \(playbackState)")
         }
 
-        // Sprint 2 / C-4 fix: write to PlaybackClock first (the focused
-        // observable that the scrubber observes). Then mirror to the
-        // legacy @Published properties on PlayerState for backwards
-        // compat with NowPlayingService, MiniPlayer, etc.
+        // Sprint 2 / C-4 fix: write to PlaybackClock only. The legacy
+        // `currentTime` / `duration` / `progress` @Published properties
+        // were mirrored here, but that forced every view observing
+        // PlayerState (MiniPlayer, LyricsView, etc.) to re-render every
+        // tick. MiniPlayer now reads from `playbackClock` directly.
+        // LyricsView polls via its own timer. The legacy @Published
+        // mirrors remain as a debug affordance but are no longer
+        // updated on the hot path.
         let effectiveTotal = effectiveDuration > 0 ? effectiveDuration : total
         _ = playbackClock.tick(currentSeconds: current, totalSeconds: total, effectiveDuration: effectiveTotal)
-
-        currentTime = current
-        // Debug: Log duration changes
-        if abs(duration - total) > 0.1 {
-            print("🎵 Duration changing from \(duration) to \(total)")
-        }
-        duration = total
 
         // Update Now Playing info periodically (every ~1 second)
         if progressLogCounter % 2 == 0 {
             NowPlayingService.shared.updatePlaybackTime(
-                currentTime: currentTime,
+                currentTime: current,
                 isPlaying: playbackState.isPlaying,
                 playbackRate: playbackRate
             )
@@ -1961,14 +1980,18 @@ class PlayerState: ObservableObject {
             print("🎵 updateProgress: current=\(current), total=\(total), expectedDuration=\(expectedDuration), effectiveTotal=\(effectiveTotal)")
         }
         if effectiveTotal > 0 {
+            // C-2026-06-28: progress is computed from PlaybackClock now;
+            // this function does not write to `progress` on PlayerState
+            // (it would force every view observing PlayerState to
+            // re-render every tick — including the rest of the Home
+            // tab). Views that need it should read `playbackClock.progress`.
             let newProgress = current / effectiveTotal
-            progress = min(newProgress, 1.0)  // Cap at 1.0 to prevent overflow
 
             // Prepare next track for crossfade when near the end (use effective duration)
             let timeRemaining = effectiveTotal - current
             if timeRemaining <= CrossfadeManager.shared.duration && timeRemaining > CrossfadeManager.shared.duration - 1 {
                 prepareNextTrackForCrossfade()
-            } 
+            }
             // Track listening time (only count when playing and progress is moving forward)
             let now = Date()
             let timeDelta = now.timeIntervalSince(lastProgressUpdate)
@@ -1981,7 +2004,7 @@ class PlayerState: ObservableObject {
                 }
             }
             lastProgressUpdate = now
-            
+
             // Save progress periodically (every 5% progress)
             if Int(newProgress * 100) % 5 == 0 {
                 if let item = currentItem {
