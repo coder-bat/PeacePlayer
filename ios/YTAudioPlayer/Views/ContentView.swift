@@ -28,6 +28,13 @@ struct ContentView: View {
             // so it appears ABOVE the custom tab bar (not overlapping it).
             // CyberpunkTabBar is injected via safeAreaInset on the TabView itself.
             TabView(selection: $selectedTab) {
+                // 2026-06-28: reduced to 3 tabs — Home (0), Search (1)
+                // reachable from the header search icon, Library (3)
+                // reachable from the stats footer shortcut. The other
+                // destinations (Playlists, Downloads, Radio, Settings)
+                // are reached from the new top-right icon cluster on
+                // Home. With <=4 tabs iOS stops showing the "More"
+                // overflow button.
                 HomeView()
                     .safeAreaInset(edge: .bottom, spacing: 0) { miniPlayerView }
                     .tag(0)
@@ -36,29 +43,20 @@ struct ContentView: View {
                     .safeAreaInset(edge: .bottom, spacing: 0) { miniPlayerView }
                     .tag(1)
 
-                PlaylistsView()
-                    .safeAreaInset(edge: .bottom, spacing: 0) { miniPlayerView }
-                    .tag(2)
-
                 LibraryView()
                     .safeAreaInset(edge: .bottom, spacing: 0) { miniPlayerView }
                     .tag(3)
-
-                DownloadQueueView()
-                    .safeAreaInset(edge: .bottom, spacing: 0) { miniPlayerView }
-                    .tag(4)
-
-                RadioView(viewModel: radioViewModel)
-                    .safeAreaInset(edge: .bottom, spacing: 0) { miniPlayerView }
-                    .tag(5)
-
-                SettingsView()
-                    .safeAreaInset(edge: .bottom, spacing: 0) { miniPlayerView }
-                    .tag(6)
             }
             .modifier(HideNativeTabBar())
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                CyberpunkTabBar(selectedTab: $selectedTab)
+                // 2026-06-28: HStack with Spacers so the floating
+                // pill is centered. CyberpunkTabBar sets its own
+                // width (200pt) so the Spacers eat the rest.
+                HStack {
+                    Spacer()
+                    CyberpunkTabBar(selectedTab: $selectedTab)
+                    Spacer()
+                }
             }
 
             // Offline banner
@@ -247,6 +245,11 @@ struct CyberpunkTabBar: View {
     ]
 
     var body: some View {
+        // 2026-06-28: floating pill. The bar is now a centered
+        // capsule with a fixed width, instead of a full-width
+        // strip. Sits above the home indicator with breathing
+        // room on either side so the bar reads as a single
+        // object floating above the content.
         HStack(spacing: 0) {
             ForEach(tabs, id: \.tag) { tab in
                 CyberpunkTabItem(
@@ -262,36 +265,32 @@ struct CyberpunkTabBar: View {
                 }
             }
         }
-        .padding(.top, 6)
-        // Glass background that extends behind the home indicator
+        .frame(width: 200, height: 56)  // fixed-size floating pill
         .background(
             ZStack {
-                // Base blur
-                Rectangle()
+                // Glass blur
+                Capsule()
                     .fill(.ultraThinMaterial)
-                // Dark cyberpunk tint over the blur
-                Rectangle()
-                    .fill(Color.cyberSurface.opacity(0.82))
-                // Very subtle cyan top-glow gradient
-                VStack(spacing: 0) {
-                    LinearGradient(
-                        colors: [Color.cyberCyan.opacity(0.05), .clear],
-                        startPoint: .top,
-                        endPoint: .bottom
+                // Dark cyberpunk tint
+                Capsule()
+                    .fill(Color.cyberSurface.opacity(0.78))
+                // Subtle cyan glow inside the capsule
+                Capsule()
+                    .stroke(
+                        LinearGradient(
+                            colors: [Color.cyberCyan.opacity(0.6), Color.cyberMagenta.opacity(0.4)],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        ),
+                        lineWidth: 1
                     )
-                    .frame(height: 36)
-                    Spacer()
-                }
             }
-            .ignoresSafeArea(edges: .bottom)
+            .shadow(color: .black.opacity(0.5), radius: 12, x: 0, y: 4)
+            .shadow(color: Color.cyberCyan.opacity(0.15), radius: 16, x: 0, y: 0)
         )
-        // Glowing top border
-        .overlay(alignment: .top) {
-            Rectangle()
-                .fill(Color.cyberCyan.opacity(0.45))
-                .frame(height: 1)
-                .shadow(color: Color.cyberCyan.opacity(0.5), radius: 6, x: 0, y: -3)
-        }
+        .padding(.bottom, 6)  // breathing room above home indicator
+        // The bar is centered horizontally by the parent ZStack
+        // (no Spacer needed — see the call site in body).
     }
 }
 
