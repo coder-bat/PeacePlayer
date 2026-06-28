@@ -843,7 +843,12 @@ class PlayerState: ObservableObject {
 
         print("🔊 Upgrading to high quality stream for: \(item.track.title)")
 
-        StreamURLCache.shared.getStreamUrl(videoId: item.track.videoId, quality: "high")
+        // C-2026-06-28: bypass StreamURLCache. The cache had an
+        // activeFetchLock deadlock on its first synchronous subscribe
+        // (the Just publisher's receiveCompletion tried to re-lock
+        // activeFetchLock from the same thread that held the outer
+        // lock). We now go direct to APIService for the upgrade.
+        APIService.shared.getStreamUrl(videoId: item.track.videoId, preferM4A: true, quality: "high")
             .sink(
                 receiveCompletion: { [weak self] result in
                     if case .failure(let error) = result {

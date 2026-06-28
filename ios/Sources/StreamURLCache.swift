@@ -23,7 +23,14 @@ class StreamURLCache {
     private let diskLock = NSLock()
 
     private var activeFetches: [String: AnyCancellable] = [:]
-    private let activeFetchLock = NSLock()
+    // C-2026-06-28: was NSLock. The synchronous .sink() on a Just
+    // publisher at line 102 fires receiveCompletion immediately on
+    // the subscribing thread, and the completion handler at line 95
+    // re-acquires activeFetchLock — but the outer lock at line 77 is
+    // still held by that same thread. NSLock is non-recursive, so
+    // the thread deadlocks. NSRecursiveLock allows the same thread
+    // to re-acquire the lock and breaks the cycle.
+    private let activeFetchLock = NSRecursiveLock()
 
     private let maxDiskAge: TimeInterval = 3 * 60 * 60 // 3 hours (under backend 3.5h TTL)
 
