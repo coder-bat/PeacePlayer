@@ -251,6 +251,9 @@ class NowPlayingService {
         WidgetSyncService.reloadAll()
 
         updateCommandAvailability()
+        #if DEBUG
+        PlayCrashDiagnostics.log(.nowPlaying, "updateNowPlaying EXIT videoId=\(track.videoId)")
+        #endif
     }
 
     func updatePlaybackTime(currentTime: TimeInterval, isPlaying: Bool, playbackRate: Float = 1.0) {
@@ -264,6 +267,9 @@ class NowPlayingService {
         print("🎵 NowPlayingService.updatePlaybackTime - Current: \(currentTime), Duration: \(currentDuration), Playing: \(isPlaying)")
 
         MPNowPlayingInfoCenter.default().nowPlayingInfo = currentNowPlayingInfo
+        #if DEBUG
+        PlayCrashDiagnostics.log(.nowPlaying, "updatePlaybackTime EXIT currentTime=\(currentTime) isPlaying=\(isPlaying)")
+        #endif
     }
 
     func clearNowPlaying() {
