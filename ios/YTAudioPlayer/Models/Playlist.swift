@@ -83,7 +83,7 @@ enum SmartPlaylistType: String, Codable, CaseIterable, Identifiable {
     
     var icon: String {
         switch self {
-        case .recentlyAdded: return "clock.badge.plus"
+        case .recentlyAdded: return "clock.badge.checkmark"
         case .recentlyPlayed: return "clock.arrow.circlepath"
         case .mostPlayed: return "chart.bar.fill"
         case .favorites: return "heart.fill"

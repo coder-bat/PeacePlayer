@@ -670,14 +670,20 @@ class PlayerState: ObservableObject {
         }
 
         stop()
+        #if DEBUG
+        PlayCrashDiagnostics.log(.playback, "play(item:) POST-stop")
+        #endif
         contentType = .track
 
         currentItem = item
+        #if DEBUG
+        PlayCrashDiagnostics.log(.playback, "play(item:) POST-currentItem-set")
+        #endif
         // Store expected duration from track metadata
         updateExpectedDuration(Double(item.track.durationSeconds))
         print("🎵 CRITICAL: Set expectedDuration = \(expectedDuration) from track.durationSeconds = \(item.track.durationSeconds)")
         playbackState = .loading
-        
+
         if addToQueue {
             // Add to queue if not already there
             if !queue.contains(where: { $0.track.videoId == item.track.videoId }) {
@@ -753,22 +759,34 @@ class PlayerState: ObservableObject {
         // Setup observers
         print("🔊 Setting up observers...")
         setupPlayerObservers()
+        #if DEBUG
+        PlayCrashDiagnostics.log(.playback, "play(item:) POST-setupPlayerObservers")
+        #endif
         print("✅ Observers set up")
-        
+
         // Start playback immediately for fast start - don't wait for readyToPlay
         // AVPlayer will handle buffering as it plays. Keep playbackState as .loading
         // until the item reports .readyToPlay so the UI shows accurate feedback.
         print("🔊 Starting playback immediately (fast-start mode)...")
         player?.play()
+        #if DEBUG
+        PlayCrashDiagnostics.log(.playback, "play(item:) POST-player.play")
+        #endif
         player?.rate = playbackRate
         // playbackState stays .loading; observer will flip to .playing when ready.
 
         print("🔊 Auto-populating queue...")
         QueuePrefetcher.shared.autoPopulateQueue(startingFrom: item.track)
-        
+        #if DEBUG
+        PlayCrashDiagnostics.log(.playback, "play(item:) POST-QueuePrefetcher")
+        #endif
+
         // Setup remote controls
         print("🔊 Setting up remote controls...")
         setupRemoteControls()
+        #if DEBUG
+        PlayCrashDiagnostics.log(.playback, "play(item:) POST-setupRemoteControls")
+        #endif
         print("✅ Remote controls set up")
         
         // Prepare next track for crossfade (with delay to allow queue to populate)
@@ -785,6 +803,9 @@ class PlayerState: ObservableObject {
         }
 
         print("✅ play() completed successfully for: \(item.track.title)")
+        #if DEBUG
+        PlayCrashDiagnostics.log(.playback, "play(item:) EXIT videoId=\(item.track.videoId)")
+        #endif
     }
 
     // MARK: - Adaptive Quality Switching
