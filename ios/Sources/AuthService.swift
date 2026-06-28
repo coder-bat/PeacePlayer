@@ -37,7 +37,12 @@ final class AuthService: NSObject, ObservableObject {
     private var currentDelegate: AppleIDDelegate?
 
     private override init() {
-        self.baseURL = URL(string: "http://localhost:8181")!
+        // 2026-06-28: read the same baseURL as APIService. The
+        // previous hardcoded localhost was unreachable on real
+        // devices — `localhost` on an iPhone is the phone itself,
+        // not the Mac. The IP in APIService.baseURL is the
+        // Tailscale address of the backend host.
+        self.baseURL = URL(string: APIService.shared.baseURL) ?? URL(string: "http://localhost:8181")!
         super.init()
     }
 
