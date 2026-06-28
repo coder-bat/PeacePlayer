@@ -48,18 +48,26 @@ struct MiniPlayer: View {
     // pill height matches the row height (60pt) instead of
     // ballooning from the play button's intrinsic 32pt + next
     // button's 28pt + 2 lines of text.
+    //
+    // S7f (2026-06-28): the CachedAsyncImage was reporting its
+    // natural image size (often 300x300) which made the ZStack
+    // balloon past 60pt. We now clamp the ZStack to .frame(height:
+    // 56) so the artwork scales down to fit the row.
     private var compactBody: some View {
         ZStack {
             // Background: blurred, dimmed artwork tinted cyan.
             // Resizable so the ZStack's frame controls the size.
             if let url = playerState.currentItem?.track.artworkURL {
-                CachedAsyncImage(url: url) {
-                    Color.cyberSurface
+                GeometryReader { geo in
+                    CachedAsyncImage(url: url) {
+                        Color.cyberSurface
+                    }
+                    .frame(width: geo.size.width, height: geo.size.height)
+                    .scaledToFill()
+                    .blur(radius: 18)
+                    .opacity(0.55)
+                    .clipped()
                 }
-                .scaledToFill()
-                .blur(radius: 18)
-                .opacity(0.55)
-                .clipped()
             } else {
                 Color.cyberSurface
             }
