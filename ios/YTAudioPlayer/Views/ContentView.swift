@@ -259,15 +259,14 @@ struct BottomBar: View {
     @StateObject private var playerState = PlayerState.shared
 
     var body: some View {
-        HStack(alignment: .center, spacing: 12) {
+        HStack(alignment: .center, spacing: 8) {
             if playerState.isNowPlaying {
-                // Mini player on the right, tab pill shifts to the left.
-                // Same height (56pt) and matching capsule glass style
-                // so they look like two halves of the same row.
-                Spacer(minLength: 0)
+                // Tab pill on the left (fixed at its preferred width),
+                // mini player flexes to fill the rest of the row.
                 tabBar
                 miniPlayer
                     .frame(height: 56)
+                    .frame(maxWidth: .infinity)
                     .clipShape(Capsule())
                     .overlay(
                         Capsule().stroke(Theme.cyberCyan.opacity(0.3), lineWidth: 1)
@@ -279,7 +278,7 @@ struct BottomBar: View {
                 Spacer(minLength: 0)
             }
         }
-        .padding(.horizontal, playerState.isNowPlaying ? 12 : 0)
+        .padding(.horizontal, 12)
         .frame(height: 64)
     }
 }
@@ -325,7 +324,7 @@ struct CyberpunkTabBar: View {
                 }
             }
         }
-        .frame(width: 200, height: 56)  // fixed-size floating pill
+        .frame(width: 180, height: 56)  // fixed-size floating pill (S7: 200→180 to leave room for mini player)
         .background(
             ZStack {
                 // Glass blur

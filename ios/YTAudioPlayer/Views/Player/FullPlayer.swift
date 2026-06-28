@@ -244,9 +244,9 @@ struct FullPlayer: View {
                 trackInfoSection
                 Spacer(minLength: 16)
 
-                progressSection
-                Spacer(minLength: 16)
-
+                // 2026-06-28 (S7b): progressSection is rendered inside
+                // playbackControlsSection already, so we don't add it
+                // here — that would produce a second progress bar.
                 playbackControlsSection
                 Spacer(minLength: 16)
 
