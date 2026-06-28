@@ -44,9 +44,14 @@ struct MiniPlayer: View {
 
     // 2026-06-28 (S7d): full-pill mini player with faded artwork
     // background, title/artist on the left, controls on the right.
+    // S7e: tightened the inner controls and the VStack so the
+    // pill height matches the row height (60pt) instead of
+    // ballooning from the play button's intrinsic 32pt + next
+    // button's 28pt + 2 lines of text.
     private var compactBody: some View {
         ZStack {
             // Background: blurred, dimmed artwork tinted cyan.
+            // Resizable so the ZStack's frame controls the size.
             if let url = playerState.currentItem?.track.artworkURL {
                 CachedAsyncImage(url: url) {
                     Color.cyberSurface
@@ -76,16 +81,16 @@ struct MiniPlayer: View {
                     HapticManager.medium()
                     onExpand()
                 }) {
-                    VStack(alignment: .leading, spacing: 2) {
+                    VStack(alignment: .leading, spacing: 0) {
                         Text(playerState.currentItem?.track.title ?? "")
-                            .font(.system(size: 13, weight: .bold))
+                            .font(.system(size: 12, weight: .bold))
                             .lineLimit(1)
                             .minimumScaleFactor(0.7)
                             .foregroundColor(.white)
                             .shadow(color: .black.opacity(0.6), radius: 2)
 
                         Text(playerState.currentItem?.track.displayArtist ?? "")
-                            .font(.system(size: 11))
+                            .font(.system(size: 10, weight: .medium))
                             .lineLimit(1)
                             .minimumScaleFactor(0.7)
                             .foregroundColor(.white.opacity(0.85))
@@ -95,36 +100,37 @@ struct MiniPlayer: View {
                 }
                 .buttonStyle(.plain)
 
-                // Play/Pause
+                // Play/Pause — 28pt keeps the inner content from
+                // pushing the row taller than 60pt.
                 Button(action: {
                     HapticManager.light()
                     playerState.togglePlayPause()
                 }) {
                     Image(systemName: playerState.playbackState.isPlaying ? "pause.fill" : "play.fill")
-                        .font(.system(size: 16, weight: .bold))
+                        .font(.system(size: 14, weight: .bold))
                         .foregroundColor(.white)
-                        .frame(width: 32, height: 32)
+                        .frame(width: 28, height: 28)
                         .background(
                             Circle().fill(Theme.cyberCyan.opacity(0.25))
                         )
                 }
                 .accessibilityLabel(playerState.playbackState.isPlaying ? "Pause" : "Play")
 
-                // Next
+                // Next — 26pt, no background ring.
                 Button(action: {
                     HapticManager.light()
                     playerState.nextTrack(userSkipped: true)
                 }) {
                     Image(systemName: "forward.fill")
-                        .font(.system(size: 14, weight: .bold))
+                        .font(.system(size: 12, weight: .bold))
                         .foregroundColor(.white.opacity(0.9))
-                        .frame(width: 28, height: 28)
+                        .frame(width: 26, height: 26)
                 }
                 .accessibilityLabel("Next track")
                 .disabled(!playerState.hasNextTrack)
                 .opacity(playerState.hasNextTrack ? 1 : 0.3)
             }
-            .padding(.horizontal, 14)
+            .padding(.horizontal, 12)
         }
         .clipShape(RoundedRectangle(cornerRadius: 22))
         .overlay(
