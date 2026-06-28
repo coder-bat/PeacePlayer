@@ -133,10 +133,24 @@ final class AudioVisualizerEngine: ObservableObject {
 
     private func startDisplayTimer() {
         stopDisplayTimer()
+        // C-2026-06-28: process FFT work on a dedicated background queue
+        // so the main thread stays responsive to SwiftUI touches. The
+        // tap's audio buffer callback (tapProcess) writes to ringBuffer
+        // under ringLock; we drain the buffer on the background queue,
+        // run the FFT, and hop back to main only to publish the
+        // smoothed bands.
         displayTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
-            self?.processPendingSamples()
+            guard let self = self else { return }
+            self.fftProcessingQueue.async { [weak self] in
+                self?.processPendingSamples()
+            }
         }
     }
+
+    private let fftProcessingQueue = DispatchQueue(
+        label: "com.peaceplayer.audiovisualizer.fft",
+        qos: .userInitiated
+    )
 
     private func stopDisplayTimer() {
         displayTimer?.invalidate()
