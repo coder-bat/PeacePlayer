@@ -133,6 +133,9 @@
 		FF72B020781DEF28B28337A1 /* Snapshotable.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83E3CF03A245F1D3462729DD /* Snapshotable.swift */; };
 		D736F1C7E3BA205A66708909 /* SendTapBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7F4082B02CB8809B3DCAC6F /* SendTapBridge.swift */; };
 		517FD40FE5ED613E68CE84DD /* PlayCrashDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5C85B25FF324EFB396D8D60 /* PlayCrashDiagnostics.swift */; };
+		A1B2C3D400010000000000A1 /* AuthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D400020000000000A1 /* AuthService.swift */; };
+		A1B2C3D400030000000000A1 /* KeychainHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D400040000000000A1 /* KeychainHelper.swift */; };
+		A1B2C3D400050000000000A1 /* LandingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D400060000000000A1 /* LandingView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -290,6 +293,9 @@
 		83E3CF03A245F1D3462729DD /* Snapshotable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Snapshotable.swift; sourceTree = "<group>"; };
 		C7F4082B02CB8809B3DCAC6F /* SendTapBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SendTapBridge.swift; sourceTree = "<group>"; };
 		B5C85B25FF324EFB396D8D60 /* PlayCrashDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayCrashDiagnostics.swift; sourceTree = "<group>"; };
+		A1B2C3D400020000000000A1 /* AuthService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthService.swift; sourceTree = "<group>"; };
+		A1B2C3D400040000000000A1 /* KeychainHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainHelper.swift; sourceTree = "<group>"; };
+		A1B2C3D400060000000000A1 /* LandingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LandingView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -317,6 +323,7 @@
 				1A4D4641A6DFB5120002B115 /* ContentView.swift */,
 				BD03FD83E3A157B679147DD7 /* HistoryView.swift */,
 				BD72DD7B62A4AC911BF749F6 /* HomeView.swift */,
+				A1B2C3D400060000000000A1 /* LandingView.swift */,
 				1AD3F94F37ADACD364BBCA1A /* LibraryView.swift */,
 				3981584A595276084E907877 /* MainContainerView.swift */,
 				0BFC375ECD06E998CB697145 /* QueueRestorer.swift */,
@@ -402,6 +409,8 @@
 		3CF5087538BB50482203ED42 /* Sources */ = {
 			isa = PBXGroup;
 			children = (
+				A1B2C3D400020000000000A1 /* AuthService.swift */,
+				A1B2C3D400040000000000A1 /* KeychainHelper.swift */,
 				7AA9786473E2C2E65D4458E8 /* AdaptiveWalkDJManager.swift */,
 				B7F42F1245CDFCF53C966438 /* AntiAlgorithmEngine.swift */,
 				2DC7C7A6C85A67E6E8A396B7 /* APIService.swift */,
@@ -809,6 +818,9 @@
 				FF72B020781DEF28B28337A1 /* Snapshotable.swift in Sources */,
 				D736F1C7E3BA205A66708909 /* SendTapBridge.swift in Sources */,
 				517FD40FE5ED613E68CE84DD /* PlayCrashDiagnostics.swift in Sources */,
+				A1B2C3D400010000000000A1 /* AuthService.swift in Sources */,
+				A1B2C3D400030000000000A1 /* KeychainHelper.swift in Sources */,
+				A1B2C3D400050000000000A1 /* LandingView.swift in Sources */,
 				219061230F75037D452AA0B5 /* YTAudioPlayer.xcdatamodeld in Sources */,
 				E86A578CA391F693A6B3752B /* YTAudioPlayerApp.swift in Sources */,
 				7E6173BEB257A83B995CB0F4 /* YourMixesSection.swift in Sources */,

@@ -31,6 +31,15 @@ import httpx
 from ytm_client import YTMusicClient, get_client, reset_client
 from extractor import AudioExtractor, get_extractor
 from stream_cache import get_cache
+from apple_auth import (
+    verify_apple_identity_token,
+    mint_session_jwt,
+    current_user_from_request,
+    get_or_create_user,
+    touch_last_seen,
+    load_sync_blob,
+    save_sync_blob,
+)
 
 # --- Configuration from environment ---
 STREAM_CONNECT_TIMEOUT = float(os.environ.get("STREAM_CONNECT_TIMEOUT", "5"))
@@ -233,6 +242,61 @@ class AuthStatusResponse(BaseModel):
     message: str
 
 
+class AppleSignInRequest(BaseModel):
+    """Body of POST /auth/apple.
+
+    `identityToken` is the JWT that iOS hands back from
+    ASAuthorizationAppleIDProvider. We verify it against Apple's
+    public JWKS, then mint our own session JWT.
+
+    `authorizationCode` is optional — it's a one-time code that
+    can be exchanged with Apple for refresh tokens. We don't need
+    it for the music-streaming use case, but we accept it so the
+    iOS code can send the standard Sign in with Apple payload.
+    """
+    identityToken: str
+    authorizationCode: Optional[str] = None
+    user: Optional[str] = None  # Apple-provided user identifier (only on first sign-in)
+    fullName: Optional[dict] = None  # {givenName, familyName} on first sign-in only
+    email: Optional[str] = None  # only on first sign-in (Apple rotates this on re-sign-in)
+
+
+class AppleSignInResponse(BaseModel):
+    """Successful sign-in response. The iOS app stores the session
+    token in Keychain and posts it as a Bearer token on subsequent
+    requests."""
+    userId: str           # our UUID
+    sessionToken: str     # our 30-day JWT
+    expiresAt: int        # unix seconds
+    email: Optional[str] = None
+    isNewUser: bool       # true if this is the first sign-in
+    serverTime: int
+
+
+class SyncUploadRequest(BaseModel):
+    """Body of POST /sync/upload. The iOS app posts its local Core
+    Data (playlists, favorites, history) here on first sign-in so
+    it's safe in the cloud."""
+    playlists: List[dict] = []
+    favorites: List[str] = []  # videoIds
+    history: List[dict] = []
+    favoriteArtists: List[str] = []
+    clientVersion: int = 1
+    uploadedAt: int = 0
+
+
+class SyncBlobResponse(BaseModel):
+    """Body of GET /sync/download. The shape mirrors the upload
+    request so the iOS client can apply it back into Core Data
+    with a single Codable decoder."""
+    playlists: List[dict] = []
+    favorites: List[str] = []
+    history: List[dict] = []
+    favoriteArtists: List[str] = []
+    uploadedAt: int = 0
+    serverTime: int
+
+
 # Root endpoint
 @app.get("/")
 @limiter.limit("15/minute")
@@ -275,6 +339,124 @@ async def refresh_auth(request: Request):
         "authenticated": client.authenticated,
         "message": "Authentication reloaded"
     }
+
+
+# --- Apple Sign-In (2026-06-28) ---
+# The iOS app posts the identityToken from ASAuthorizationAppleIDProvider.
+# We verify it against Apple's JWKS, provision a user record on first
+# sign-in, and mint a 30-day session JWT. The JWT is sent back so the
+# iOS app can store it in Keychain and use it on subsequent requests.
+
+@app.post("/auth/apple", response_model=AppleSignInResponse)
+@limiter.limit("30/minute")
+async def auth_apple(request: Request, body: AppleSignInRequest):
+    """Verify an Apple identity token and return a session JWT.
+
+    Always returns 200 with the session token on success. A new
+    user record is created on first sign-in; subsequent sign-ins
+    update the last_seen_at and return the existing user_id.
+    """
+    try:
+        claims = verify_apple_identity_token(body.identityToken)
+    except Exception as e:
+        # PyJWTError or any unexpected JWKS error — all map to 401.
+        logger.warning(f"Apple identity token rejected: {e}")
+        raise HTTPException(status_code=401, detail="invalid_identity_token")
+
+    apple_sub = claims.get("sub")
+    if not apple_sub:
+        raise HTTPException(status_code=401, detail="missing_subject_claim")
+
+    user, is_new = get_or_create_user(apple_sub, claims)
+
+    # Apple only sends the user's name + email on FIRST sign-in.
+    # If we have them in this request body and the user record
+    # doesn't already have them, persist them. Subsequent sign-ins
+    # send None for both.
+    if body.fullName and not user.get("name"):
+        given = (body.fullName.get("givenName") or "").strip()
+        family = (body.fullName.get("familyName") or "").strip()
+        user["name"] = " ".join(p for p in (given, family) if p) or None
+        save_user(user)
+    if body.email and not user.get("email"):
+        user["email"] = body.email
+        user["email_verified"] = True  # Apple verifies the email at the relay
+        save_user(user)
+
+    touch_last_seen(user["user_id"])
+
+    expires_at = int(time.time()) + 30 * 24 * 60 * 60  # 30 days
+    session_token = mint_session_jwt(user["user_id"], apple_sub)
+
+    return AppleSignInResponse(
+        userId=user["user_id"],
+        sessionToken=session_token,
+        expiresAt=expires_at,
+        email=user.get("email"),
+        isNewUser=is_new,
+        serverTime=int(time.time()),
+    )
+
+
+@app.post("/auth/signout")
+@limiter.limit("15/minute")
+async def auth_signout(request: Request):
+    """Sign the current session out. The session JWT is stateless
+    (just a signed blob) so we can't actually invalidate it; the
+    iOS app must drop the token from Keychain. This endpoint
+    exists so the client can record a sign-out timestamp on the
+    server (useful for audit) and for parity with the iOS
+    flow."""
+    user = current_user_from_request(request.headers.get("Authorization"))
+    if not user:
+        # 204 even when not authenticated — sign-out is idempotent.
+        return {"ok": True}
+    user["last_signout_at"] = int(time.time())
+    save_user(user)
+    return {"ok": True}
+
+
+# --- Sync (2026-06-28) ---
+# The iOS app posts the user's local Core Data on first sign-in
+# (so it's safe in the cloud), and downloads it on subsequent
+# sign-ins (so a new device picks up where they left off).
+# Both endpoints require a valid session JWT.
+
+@app.post("/sync/upload")
+@limiter.limit("10/minute")
+async def sync_upload(request: Request, body: SyncUploadRequest):
+    user = current_user_from_request(request.headers.get("Authorization"))
+    if not user:
+        raise HTTPException(status_code=401, detail="unauthorized")
+    blob = {
+        "playlists": body.playlists,
+        "favorites": body.favorites,
+        "history": body.history,
+        "favoriteArtists": body.favoriteArtists,
+        "uploadedAt": int(time.time()),
+        "clientVersion": body.clientVersion,
+    }
+    save_sync_blob(user["user_id"], blob)
+    return {"ok": True, "uploadedAt": blob["uploadedAt"]}
+
+
+@app.get("/sync/download", response_model=SyncBlobResponse)
+@limiter.limit("10/minute")
+async def sync_download(request: Request):
+    user = current_user_from_request(request.headers.get("Authorization"))
+    if not user:
+        raise HTTPException(status_code=401, detail="unauthorized")
+    blob = load_sync_blob(user["user_id"])
+    if not blob:
+        return SyncBlobResponse(serverTime=int(time.time()))
+    return SyncBlobResponse(
+        playlists=blob.get("playlists", []),
+        favorites=blob.get("favorites", []),
+        history=blob.get("history", []),
+        favoriteArtists=blob.get("favoriteArtists", []),
+        uploadedAt=blob.get("uploadedAt", 0),
+        serverTime=int(time.time()),
+    )
 
 
 @app.get("/cache/stats")

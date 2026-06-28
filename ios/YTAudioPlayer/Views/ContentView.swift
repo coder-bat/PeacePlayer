@@ -11,6 +11,10 @@ struct ContentView: View {
     @StateObject private var networkMonitor = NetworkMonitor.shared
     @StateObject private var searchViewModel = SearchViewModel()
     @StateObject private var radioViewModel = RadioViewModel()
+    // 2026-06-28: Apple Sign-In. The LandingView shows when this is
+    // false; the main UI shows when it's true. bootstrap() is called
+    // from init() in YTAudioPlayerApp.swift before ContentView mounts.
+    @StateObject private var auth = AuthService.shared
     @State private var selectedTab = 0
     @State private var showFullPlayer = false
     @State private var showRestorePrompt = false
@@ -23,6 +27,21 @@ struct ContentView: View {
     @Namespace private var playerNamespace
 
     var body: some View {
+        // 2026-06-28: gate the entire app on Apple sign-in. There is
+        // no guest path in this version. While auth.isAuthenticated is
+        // false we render only the LandingView; once it flips the main
+        // tab UI mounts in its place.
+        if !auth.isAuthenticated {
+            LandingView()
+                .transition(.opacity)
+        } else {
+            authenticatedBody
+                .transition(.opacity)
+        }
+    }
+
+    @ViewBuilder
+    private var authenticatedBody: some View {
         ZStack {
             // Tab content — MiniPlayer injected via safeAreaInset on each tab
             // so it appears ABOVE the custom tab bar (not overlapping it).

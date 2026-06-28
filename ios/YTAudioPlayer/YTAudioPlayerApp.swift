@@ -21,6 +21,11 @@ struct YTAudioPlayerApp: App {
         // Sync library data immediately so widgets show correct state on launch
         WidgetSyncService.shared.syncLibraryData()
 
+        // 2026-06-28: restore the Apple Sign-In session from Keychain.
+        // If we have a valid JWT, isAuthenticated flips to true and the
+        // main UI renders; otherwise ContentView shows the LandingView.
+        AuthService.shared.bootstrap()
+
         // Phase 2 / ios-qa: spin up the embedded StateServer so the
         // simulator-side test agent can hit the app at `http://127.0.0.1:9999`
         // to take screenshots, read state, drive the UI, etc. The server

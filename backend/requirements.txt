@@ -13,3 +13,7 @@ aiofiles==23.2.1
 requests==2.31.0
 tinydb==4.8.0
 pydantic==2.5.3
+
+# Apple Sign-In (2026-06-28)
+PyJWT>=2.8.0
+cryptography>=41.0.0
