@@ -54,6 +54,10 @@ struct MiniPlayer: View {
     // balloon past 60pt. We now clamp the ZStack to .frame(height:
     // 56) so the artwork scales down to fit the row.
     private var compactBody: some View {
+        // 2026-06-28 (S7g): clamp to the bottom bar's exact row
+        // height (60pt). Without this the CachedAsyncImage's
+        // intrinsic content size + the .blur + .opacity modifiers
+        // pushed the ZStack ~2pt taller than the tab pill.
         ZStack {
             // Background: blurred, dimmed artwork tinted cyan.
             // Resizable so the ZStack's frame controls the size.
@@ -140,11 +144,12 @@ struct MiniPlayer: View {
             }
             .padding(.horizontal, 12)
         }
-        .clipShape(RoundedRectangle(cornerRadius: 22))
+        .clipShape(Capsule())
         .overlay(
-            RoundedRectangle(cornerRadius: 22)
+            Capsule()
                 .stroke(Theme.cyberCyan.opacity(0.4), lineWidth: 1)
         )
+        .frame(height: 60)  // 2026-06-28 S7g: clamp exactly to the row height
     }
 
     // 2026-06-28 (S7d): original full mini-player body — used
