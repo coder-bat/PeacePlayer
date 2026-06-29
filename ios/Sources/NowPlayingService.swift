@@ -184,6 +184,30 @@ class NowPlayingService {
         // Store duration for future time-only updates
         currentDuration = duration
 
+        // 2026-06-29 (S9e): the debounce was collapsing the
+        // "new track starts" update with subsequent "current time"
+        // updates, leaving the iOS Now Playing (Lock Screen /
+        // Control Center) showing the previous track info for a
+        // moment when the app was in the background. We now
+        // bypass the debounce for track changes (a different
+        // videoId) and write immediately.
+        if let pending = pendingNowPlaying, pending.track.videoId != track.videoId {
+            // Track changed — flush any pending write first so the
+            // new track takes precedence, then write the new info
+            // synchronously.
+            nowPlayingWorkItem?.cancel()
+            nowPlayingWorkItem = nil
+            pendingNowPlaying = nil
+            performNowPlayingWrite(
+                track: track,
+                duration: duration,
+                currentTime: currentTime,
+                isPlaying: isPlaying,
+                playbackRate: playbackRate
+            )
+            return
+        }
+
         // C-2026-06-28: coalesce. Cancel any pending run, stash the
         // latest parameters, schedule a debounced run on the main
         // queue. This collapses bursts of updateNowPlaying calls

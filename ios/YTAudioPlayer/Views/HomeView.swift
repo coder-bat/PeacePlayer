@@ -1172,10 +1172,16 @@ class HomeViewModel: ObservableObject {
 
         StreamURLCache.shared.getStreamUrl(videoId: track.videoId)
             .handleErrors(with: .shared, retry: { [weak self] in
+                print("▶️ [S9e] playTrack: getStreamUrl failed, retrying")
                 self?.playTrack(track)
             })
-            .sink(receiveCompletion: { _ in },
+            .sink(receiveCompletion: { completion in
+                if case .failure(let error) = completion {
+                    print("▶️ [S9e] playTrack: stream URL FAILED for \(track.title): \(error)")
+                }
+            },
                   receiveValue: { streamInfo in
+                print("▶️ [S9e] playTrack: stream URL received for \(track.title), calling play()")
                 let item = QueueItem(
                     track: track,
                     streamUrl: streamInfo.streamUrl,
