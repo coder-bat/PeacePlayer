@@ -679,38 +679,40 @@ struct NowPlayingHero: View {
                     // toggles play/pause; tapping the rest of the
                     // card opens the full player.
                     //
-                    // 2026-06-29 (S9b): when state == .idle, just
-                    // calling playerState.togglePlayPause() did
-                    // nothing useful — it set playbackState to
-                    // .playing but no AVPlayer was loaded, so the
-                    // button briefly flashed pause and then reverted
-                    // to play. The fix: when state is .idle, we
-                    // need to actually start the track. We use
-                    // onTap (the same callback the outer card uses)
-                    // which calls viewModel.playTrack(track) and
-                    // sets up the AVPlayer / stream URL.
-                    Button {
-                        HapticManager.light()
-                        onTap()
-                    } label: {
-                        ZStack {
-                            Circle()
-                                .stroke(
-                                    LinearGradient(
-                                        colors: [.cyberCyan, .cyberMagenta],
-                                        startPoint: .topLeading,
-                                        endPoint: .bottomTrailing
-                                    ),
-                                    lineWidth: 1.5
-                                )
-                                .frame(width: 52, height: 52)
-                            Image(systemName: rightIcon)
-                                .font(.system(size: 18, weight: .bold))
-                                .foregroundColor(.cyberCyan)
-                                .offset(x: rightIcon == "play.fill" ? 1.5 : 0)
-                        }
+                    // 2026-06-29 (S9d): SwiftUI's nested Button
+                    // behavior was the cause of "tap does nothing"
+                    // on the inner button — when the inner Button
+                    // shares its action with the outer Button, the
+                    // hit-testing sometimes routes to the outer.
+                    // We use a tap gesture with a clear content
+                    // shape on the inner button, which guarantees
+                    // the inner tap fires (the outer Button does
+                    // NOT see the tap inside the inner's content
+                    // shape).
+                    ZStack {
+                        Circle()
+                            .stroke(
+                                LinearGradient(
+                                    colors: [.cyberCyan, .cyberMagenta],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                ),
+                                lineWidth: 1.5
+                            )
+                            .frame(width: 52, height: 52)
+                        Image(systemName: rightIcon)
+                            .font(.system(size: 18, weight: .bold))
+                            .foregroundColor(.cyberCyan)
+                            .offset(x: rightIcon == "play.fill" ? 1.5 : 0)
                     }
-                    .buttonStyle(.plain)
+                    .contentShape(Circle())
+                    .onTapGesture {
+                        HapticManager.light()
+                        // 2026-06-29 (S9d): log so we can see the
+                        // play flow in the console.
+                        print("▶️ [S9d] NowPlayingHero play button tapped, state=\(state), track=\(track.title)")
+                        onTap()
+                    }
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 12)
@@ -1155,6 +1157,10 @@ class HomeViewModel: ObservableObject {
 
     @MainActor
     func playTrack(_ track: Track) {
+        // 2026-06-29 (S9d): log so we can see the play flow in the
+        // console when the user reports "tap does nothing".
+        print("▶️ [S9d] playTrack ENTRY track=\(track.title) videoId=\(track.videoId)")
+
         // Show loading indicator immediately before fetching stream URL
         let loadingItem = QueueItem(
             track: track,
