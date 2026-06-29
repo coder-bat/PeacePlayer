@@ -678,9 +678,20 @@ struct NowPlayingHero: View {
                     // button is its own tappable control. Tapping it
                     // toggles play/pause; tapping the rest of the
                     // card opens the full player.
+                    //
+                    // 2026-06-29 (S9b): when state == .idle, just
+                    // calling playerState.togglePlayPause() did
+                    // nothing useful — it set playbackState to
+                    // .playing but no AVPlayer was loaded, so the
+                    // button briefly flashed pause and then reverted
+                    // to play. The fix: when state is .idle, we
+                    // need to actually start the track. We use
+                    // onTap (the same callback the outer card uses)
+                    // which calls viewModel.playTrack(track) and
+                    // sets up the AVPlayer / stream URL.
                     Button {
                         HapticManager.light()
-                        playerState.togglePlayPause()
+                        onTap()
                     } label: {
                         ZStack {
                             Circle()

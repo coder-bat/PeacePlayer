@@ -268,7 +268,13 @@ struct SearchView: View {
             }
 
         }
-        .listStyle(.insetGrouped)
+        // 2026-06-29 (S9b): plain list style + hidden background so
+        // the search results look like the home recently played
+        // list (flat, no insetGrouped gray card). scrollContentBackground
+        // is iOS 16+; on iOS 15 the .listStyle(.plain) + .background
+        // modifier on the list itself is enough.
+        .listStyle(.plain)
+        .modifier(ListBackgroundHider())
         .environment(\.defaultMinListRowHeight, 0)  // S7: shrink row insets
         .task(id: viewModel.results.map(\.videoId)) {
             let ids = viewModel.results.prefix(5).map(\.videoId)
@@ -1127,5 +1133,19 @@ private struct ScrollDismissesKeyboardModifier: ViewModifier {
 private extension View {
     func applyScrollDismissKeyboard() -> some View {
         self.scrollDismissesKeyboard(.interactively)
+    }
+}
+
+// 2026-06-29 (S9b): hide the List's default background on iOS
+// 16+ (the insetGrouped / plain list still shows a system
+// background color). On iOS 15 the .listStyle modifier is
+// sufficient.
+private struct ListBackgroundHider: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(iOS 16.0, *) {
+            content.scrollContentBackground(.hidden)
+        } else {
+            content
+        }
     }
 }

@@ -281,7 +281,13 @@ struct BottomBar: View {
     // sitting next to the pill. Tapping the collapsed icon
     // expands it back. Padding between the pill and the player
     // stays the same in both states.
-    private let rowHeight: CGFloat = 60
+    // 2026-06-29 (S9b): rowHeight is 58 instead of 60 because
+    // the tab pill's drop shadow extends 12pt below the visible
+    // 60pt frame, which on iOS 26 was making it read 1pt taller
+    // than the mini player. With 58pt the shadow's effective
+    // height is roughly 60pt (matches the mini player's
+    // visible height) and the row reads as a single unit.
+    private let rowHeight: CGFloat = 58
     private let collapsedWidth: CGFloat = 44
     @State private var isCollapsed: Bool = false
     @State private var dragOffset: CGFloat = 0
