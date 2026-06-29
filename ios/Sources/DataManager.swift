@@ -118,6 +118,13 @@ class DataManager: ObservableObject {
     private func flushProgressUpdates() {
         guard !pendingProgressUpdates.isEmpty else { return }
         saveRecentlyPlayed()
+        // S11 fix (Bug 8): also persist the most-recent track id and
+        // its progress so the resume block on HomeView can seek to the
+        // correct position instead of always starting from 0.
+        if let currentTrackId = pendingProgressUpdates.keys.first,
+           let currentProgress = pendingProgressUpdates[currentTrackId] {
+            saveLastPlaybackState(trackId: currentTrackId, progress: currentProgress)
+        }
         pendingProgressUpdates.removeAll()
         print("💾 Batched progress updates saved to UserDefaults")
     }

@@ -295,6 +295,11 @@ class NowPlayingService {
                             MPNowPlayingInfoPropertyDefaultPlaybackRate: 1.0,
                             MPMediaItemPropertyArtwork: artwork
                         ]
+                        // S11 fix (Bug 2): also update currentNowPlayingInfo
+                        // so the next updatePlaybackTime tick doesn't
+                        // overwrite our just-loaded artwork with the stale
+                        // (pre-artwork) cached dictionary.
+                        self.currentNowPlayingInfo[MPMediaItemPropertyArtwork] = artwork
                         MPNowPlayingInfoCenter.default().nowPlayingInfo = updatedInfo
                     }
                 }

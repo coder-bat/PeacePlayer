@@ -272,10 +272,13 @@ struct HomeView: View {
                     onTap: { viewModel.togglePlayPause() }
                 )
             } else if let lastTrack = viewModel.lastPlayedTrack {
-                NowPlayingHero(
-                    track: lastTrack,
-                    state: .idle,
-                    onTap: { viewModel.playTrack(lastTrack) }
+                // S11 fix (Bug 8): the local lookup has to happen
+                // outside the ViewBuilder (`let` and `print` aren't
+                // allowed inside `Group { }`). Read the saved progress
+                // for the last-played track from DataManager.
+                ResumeBlockContent(
+                    viewModel: viewModel,
+                    lastTrack: lastTrack
                 )
             } else {
                 EmptyHero {
@@ -551,6 +554,33 @@ struct CyberBackground: View {
 }
 
 // MARK: - Now Playing Hero
+
+/// S11 fix (Bug 8): wraps the resume-block UI in a struct so we
+/// can do non-view work (DataManager lookup, print, optionally
+/// debounce) outside the parent's @ViewBuilder. SwiftUI ViewBuilder
+/// only accepts View expressions; it can't run `let` declarations
+/// or free-form `print` calls without a wrapper.
+struct ResumeBlockContent: View {
+    let viewModel: HomeViewModel
+    let lastTrack: Track
+
+    var body: some View {
+        let savedProgress = DataManager.shared.recentlyPlayed
+            .first(where: { $0.videoId == lastTrack.videoId })?
+            .playbackProgress
+        let _ = {
+            print("▶️ [S11] resume block: lastTrack=\(lastTrack.title) savedProgress=\(savedProgress ?? -1)")
+        }()
+        return NowPlayingHero(
+            track: lastTrack,
+            state: .idle,
+            onTap: {
+                viewModel.playTrack(lastTrack, seekToProgress: savedProgress)
+            }
+        )
+    }
+}
+
 struct NowPlayingHero: View {
     let track: Track
     /// .playing shows the equalizer animation + pause icon.
@@ -1156,10 +1186,10 @@ class HomeViewModel: ObservableObject {
     }
 
     @MainActor
-    func playTrack(_ track: Track) {
+    func playTrack(_ track: Track, seekToProgress progress: Double? = nil) {
         // 2026-06-29 (S9d): log so we can see the play flow in the
         // console when the user reports "tap does nothing".
-        print("▶️ [S9d] playTrack ENTRY track=\(track.title) videoId=\(track.videoId)")
+        print("▶️ [S9d] playTrack ENTRY track=\(track.title) videoId=\(track.videoId) seekToProgress=\(progress ?? -1)")
 
         // Show loading indicator immediately before fetching stream URL
         let loadingItem = QueueItem(
@@ -1173,7 +1203,7 @@ class HomeViewModel: ObservableObject {
         StreamURLCache.shared.getStreamUrl(videoId: track.videoId)
             .handleErrors(with: .shared, retry: { [weak self] in
                 print("▶️ [S9e] playTrack: getStreamUrl failed, retrying")
-                self?.playTrack(track)
+                self?.playTrack(track, seekToProgress: progress)
             })
             .sink(receiveCompletion: { completion in
                 if case .failure(let error) = completion {
@@ -1188,6 +1218,15 @@ class HomeViewModel: ObservableObject {
                     source: .stream
                 )
                 PlayerState.shared.play(item: item)
+                // S11 fix (Bug 8): seek to saved progress if the caller
+                // passed one (e.g., resume block tapping the most-
+                // recently-played track at its last-known position).
+                if let p = progress, p > 0.02, p < 0.98 {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                        print("▶️ [S11] playTrack: seeking to progress \(p)")
+                        PlayerState.shared.seek(to: p)
+                    }
+                }
             })
             .store(in: &cancellables)
     }

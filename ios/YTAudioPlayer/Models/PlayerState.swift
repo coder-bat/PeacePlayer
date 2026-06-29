@@ -466,20 +466,13 @@ class PlayerState: ObservableObject {
             }
         }
     }
-    
-    /// Restores playback state from saved data
-    func restorePlaybackState() {
-        let (trackId, progress) = dataManager.loadLastPlaybackState()
-        guard let trackId = trackId else { return }
-        
-        // Find the track in recently played
-        if let recentTrack = dataManager.recentlyPlayed.first(where: { $0.videoId == trackId }) {
-            // We could auto-resume here, but let's just remember the state
-            // The user can tap "Continue Listening" on Home
-            print("📱 Can resume track: \(recentTrack.title) at \(Int(progress * 100))%")
-        }
-    }
-    
+
+    // S11 fix (Bug 16): removed dead `restorePlaybackState()` method.
+    // It was never invoked anywhere. The lastPlaybackProgress resume
+    // functionality is now handled by `HomeViewModel.playTrack(_:seekToProgress:)`
+    // reading `dataManager.recentlyPlayed.first?.playbackProgress`
+    // directly when the user taps the resume hero on Home.
+
     // MARK: - Audio Session
     
     private func setupAudioSession() {
@@ -589,6 +582,39 @@ class PlayerState: ObservableObject {
 
     // MARK: - Background Task Helpers
 
+    // S11 fix (Bug 14): safety-timeout handle for the
+    // isHandlingCompletion flag reset. The observer in
+    // setupPlayerObservers will reset the flag when the new track
+    // transitions from .loading to .playing. This timer is the
+    // safety net in case the new player never reports ready (e.g.,
+    // failed to load, queue exhausted, no autoplay candidate).
+    private var completionFlagResetWorkItem: DispatchWorkItem?
+
+    private func scheduleCompletionFlagReset(after seconds: TimeInterval) {
+        completionFlagResetWorkItem?.cancel()
+        let item = DispatchWorkItem { [weak self] in
+            guard let self = self else { return }
+            if self.isHandlingCompletion {
+                self.isHandlingCompletion = false
+                print("🏁 [S11] Completion flag reset (safety timeout \(seconds)s)")
+            }
+        }
+        completionFlagResetWorkItem = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds, execute: item)
+    }
+
+    /// Clears isHandlingCompletion immediately. Called by the new
+    /// player's status observer when playbackState transitions out
+    /// of .loading — the equivalent of "new track is now playing".
+    private func clearCompletionFlag() {
+        completionFlagResetWorkItem?.cancel()
+        completionFlagResetWorkItem = nil
+        if isHandlingCompletion {
+            isHandlingCompletion = false
+            print("🏁 [S11] Completion flag reset (new track playing)")
+        }
+    }
+
     private func beginTrackTransitionBackgroundTask() {
         endTrackTransitionBackgroundTask()
         trackTransitionBackgroundTask = UIApplication.shared.beginBackgroundTask(withName: "com.peaceplayer.trackTransition") { [weak self] in
@@ -647,9 +673,28 @@ class PlayerState: ObservableObject {
             // better instrumentation once we know what's blocking.
             APIService.shared.getStreamUrl(videoId: track.videoId, preferM4A: true, quality: "low")
                 .sink(
-                    receiveCompletion: { result in
+                    receiveCompletion: { [weak self] result in
                         if case .failure(let error) = result {
-                            print("❌ Failed to get stream URL: \(error)")
+                            // S11 fix (Bug 12): previously silent —
+                            // just printed and left the player in
+                            // .loading forever. Surface to user with
+                            // retry so they can recover without
+                            // killing/reopening the app.
+                            print("❌ [S11] Failed to get stream URL for \(track.title): \(error)")
+                            #if DEBUG
+                            PlayCrashDiagnostics.log(.playback, "S11: play(track:) stream URL FAILED videoId=\(track.videoId) error=\(error)")
+                            #endif
+                            DispatchQueue.main.async {
+                                self?.playbackState = .error("Could not load track")
+                                ErrorHandler.shared.show(
+                                    .playbackFailed("Couldn't load \"\(track.title)\". Try again or pick another track."),
+                                    retry: { [weak self] in
+                                        self?.play(track: track)
+                                    }
+                                )
+                                self?.endTrackTransitionBackgroundTask()
+                                self?.clearCompletionFlag()
+                            }
                         }
                     },
                     receiveValue: { [weak self] streamInfo in
@@ -683,6 +728,20 @@ class PlayerState: ObservableObject {
         PlayCrashDiagnostics.log(.playback, "play(item:) POST-stop")
         #endif
         contentType = .track
+
+        // S10: Reactivate the audio session before creating the new player.
+        // stop() nil'd the previous AVPlayer; iOS can deactivate the session
+        // when there's no active player. In the background, an inactive
+        // session causes iOS to suspend the app before the new player has
+        // buffered enough to start producing audio.
+        do {
+            try AVAudioSession.sharedInstance().setActive(true)
+            #if DEBUG
+            PlayCrashDiagnostics.log(.playback, "play(item:) POST-audioSession.setActive")
+            #endif
+        } catch {
+            print("❌ S10: failed to reactivate audio session: \(error)")
+        }
 
         currentItem = item
         #if DEBUG
@@ -797,6 +856,24 @@ class PlayerState: ObservableObject {
         PlayCrashDiagnostics.log(.playback, "play(item:) POST-setupRemoteControls")
         #endif
         print("✅ Remote controls set up")
+
+        // S10: Refresh system Now Playing immediately when a new track
+        // starts, so the Lock Screen / Control Center update right away
+        // rather than waiting for the duration publisher (which can be
+        // 1-3s late for HTTP streams served by yt-dlp's proxy-stream).
+        // isPlaying: false because state is .loading until readyToPlay;
+        // NowPlayingService treats rate=0 as paused, which matches what
+        // the Lock Screen should show during the brief buffer.
+        NowPlayingService.shared.updateNowPlaying(
+            track: item.track,
+            duration: Double(item.track.durationSeconds),
+            currentTime: 0,
+            isPlaying: playbackState.isPlaying,
+            playbackRate: playbackRate
+        )
+        #if DEBUG
+        PlayCrashDiagnostics.log(.playback, "play(item:) POST-updateNowPlaying videoId=\(item.track.videoId)")
+        #endif
         
         // Prepare next track for crossfade (with delay to allow queue to populate)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
@@ -940,7 +1017,12 @@ class PlayerState: ObservableObject {
     }
     
     func playQueue(at index: Int, isCrossfadeFallback: Bool = false) {
-        print("▶️ playQueue called with index: \(index), queue.count: \(queue.count)")
+        // S11: log every entry so we can verify the play-from-queue path
+        // was reached (especially after autoplay-from-recently-played).
+        print("▶️ [S11] playQueue ENTRY index=\(index) queue.count=\(queue.count) currentIndex=\(currentIndex) isCrossfadeFallback=\(isCrossfadeFallback)")
+        #if DEBUG
+        PlayCrashDiagnostics.log(.playback, "S11: playQueue ENTRY index=\(index) queue.count=\(queue.count) isCrossfadeFallback=\(isCrossfadeFallback)")
+        #endif
 
         // Reset completion flag when starting a new track
         // But don't reset if this is a crossfade fallback (crossfade will handle it)
@@ -967,7 +1049,11 @@ class PlayerState: ObservableObject {
             currentIndex = index
             play(item: item, addToQueue: false)
         }
-        endTrackTransitionBackgroundTask()
+        // S11 fix (Bug 11): removed `endTrackTransitionBackgroundTask()`.
+        // Releasing here would end the BG task BEFORE the new player has
+        // buffered enough audio. The task is now released by the
+        // isPlaybackLikelyToKeepUp observer in setupPlayerObservers, which
+        // is the original S10 release point.
     }
     
     private func refreshAndPlay(item: QueueItem, at index: Int) {
@@ -1000,15 +1086,20 @@ class PlayerState: ObservableObject {
                     print("▶️ URL refreshed, playing...")
                     self.currentIndex = index
                     self.play(item: refreshedItem, addToQueue: false)
-                    self.endTrackTransitionBackgroundTask()
+                    // S11 fix (Bug 11): removed `endTrackTransitionBackgroundTask()`.
+                    // The task is now released by the isPlaybackLikelyToKeepUp
+                    // observer when the new track is actually playing.
                 }
             )
             .store(in: &cancellables)
     }
     
     private func refreshAndPlayCurrentItem() {
-        guard let item = currentItem else { return }
-        print("🔄 Refreshing current item: \(item.track.title)")
+        guard let item = currentItem else {
+            print("⚠️ [S11] refreshAndPlayCurrentItem: no currentItem — no-op")
+            return
+        }
+        print("🔄 [S11] refreshAndPlayCurrentItem ENTRY videoId=\(item.track.videoId) title=\(item.track.title)")
 
         StreamURLCache.shared.getStreamUrl(videoId: item.track.videoId)
             .sink(
@@ -1051,8 +1142,29 @@ class PlayerState: ObservableObject {
     }
     
     func togglePlayPause() {
-        guard let player = player else { return }
-        
+        // S11: log every entry so silent-no-op reports are diagnosable.
+        print("▶️ [S11] togglePlayPause ENTRY currentItem=\(currentItem?.track.videoId ?? "nil") playerNil=\(player == nil) playbackState=\(playbackState) isHandlingCompletion=\(isHandlingCompletion)")
+        #if DEBUG
+        PlayCrashDiagnostics.log(.playback, "S11: togglePlayPause ENTRY currentItem=\(currentItem?.track.videoId ?? "nil") playerNil=\(player == nil) playbackState=\(playbackState)")
+        #endif
+
+        // S11 fix (Bug 1): when there's a current item but no AVPlayer
+        // (e.g., after restoreQueue set currentItem on cold launch),
+        // the previous guard returned silently. Fall through to play the
+        // current item so the resume button actually does something.
+        guard let player = player else {
+            if let item = currentItem {
+                print("▶️ [S11] togglePlayPause: player nil but currentItem set — falling through to play(item:)")
+                #if DEBUG
+                PlayCrashDiagnostics.log(.playback, "S11: togglePlayPause: player nil, resuming currentItem=\(item.track.videoId)")
+                #endif
+                play(item: item, addToQueue: false)
+            } else {
+                print("⚠️ [S11] togglePlayPause: no current item either — true no-op")
+            }
+            return
+        }
+
         if playbackState.isPlaying {
             player.pause()
             playbackState = .paused
@@ -1060,18 +1172,33 @@ class PlayerState: ObservableObject {
             player.play()
             playbackState = .playing
         }
-        
+
         updateRemoteControls()
     }
-    
+
     func pause() {
+        print("⏸ [S11] pause ENTRY playerNil=\(player == nil) playbackState=\(playbackState)")
         player?.pause()
         playbackState = .paused
         updateRemoteControls()
     }
-    
+
     func resume() {
-        player?.play()
+        print("▶️ [S11] resume ENTRY playerNil=\(player == nil) playbackState=\(playbackState) currentItem=\(currentItem?.track.videoId ?? "nil")")
+        #if DEBUG
+        PlayCrashDiagnostics.log(.playback, "S11: resume ENTRY playerNil=\(player == nil) currentItem=\(currentItem?.track.videoId ?? "nil")")
+        #endif
+        // S11: same fall-through as togglePlayPause — if no player but
+        // there's a current item (cold launch after restoreQueue),
+        // resume should kick off playback.
+        guard let player = player else {
+            if let item = currentItem {
+                print("▶️ [S11] resume: player nil but currentItem set — falling through to play(item:)")
+                play(item: item, addToQueue: false)
+            }
+            return
+        }
+        player.play()
         playbackState = .playing
         updateRemoteControls()
     }
@@ -1113,6 +1240,14 @@ class PlayerState: ObservableObject {
         cancellables.removeAll()
 
         player = nil
+        // S11 fix (Bug 9): clear currentItem so the UI doesn't keep
+        // showing "now playing" chrome after the player is gone.
+        // restoreQueue() will repopulate this on cold launch for a
+        // saved queue, but only via the PlaybackQueueManager path —
+        // not as a stale leftover from a previous playback session.
+        // isNowPlaying is computed from currentItem != nil, so this
+        // also makes hero/mini-player chrome correctly hide.
+        currentItem = nil
         playbackState = .idle
         progress = 0.0
         currentTime = 0.0
@@ -1194,6 +1329,16 @@ class PlayerState: ObservableObject {
         // (was previously only called in play(item:), missing radio/podcast/audiobook)
         AudioVisualizerEngine.shared.installTap(on: playerItem)
         setupPlayerObservers()
+        // S11 fix (Bug 2): refresh Lock Screen / Control Center with
+        // the radio station's metadata. Previously Lock Screen kept
+        // showing the previous track.
+        NowPlayingService.shared.updateNowPlaying(
+            track: radioTrack,
+            duration: 0,  // live = no duration
+            currentTime: 0,
+            isPlaying: true,
+            playbackRate: 1.0
+        )
     }
 
     func playPodcastEpisode(_ episode: PodcastEpisode) {
@@ -1234,6 +1379,16 @@ class PlayerState: ObservableObject {
         // QW-13 fix: install the visualizer tap on the new player item
         AudioVisualizerEngine.shared.installTap(on: playerItem)
         setupPlayerObservers()
+        // S11 fix (Bug 2): refresh Lock Screen / Control Center with
+        // the podcast metadata. Without this, the Lock Screen kept
+        // showing whatever track was playing before.
+        NowPlayingService.shared.updateNowPlaying(
+            track: podcastTrack,
+            duration: Double(episode.durationSeconds),
+            currentTime: 0,
+            isPlaying: true,
+            playbackRate: 1.0
+        )
 
         // Resume from saved position
         let key = "podcast_position_\(episode.guid)"
@@ -1295,6 +1450,15 @@ class PlayerState: ObservableObject {
         // QW-13 fix: install the visualizer tap on the new player item
         AudioVisualizerEngine.shared.installTap(on: playerItem)
         setupPlayerObservers()
+        // S11 fix (Bug 2): refresh Lock Screen / Control Center with
+        // audiobook chapter metadata.
+        NowPlayingService.shared.updateNowPlaying(
+            track: audiobookTrack,
+            duration: Double(chapter.durationSeconds),
+            currentTime: 0,
+            isPlaying: true,
+            playbackRate: 1.0
+        )
 
         // Resume from saved position
         let key = "audiobook_position_\(chapter.guid)"
@@ -1353,6 +1517,13 @@ class PlayerState: ObservableObject {
     // MARK: - Queue Management
 
     func addToQueue(_ item: QueueItem) {
+        // S11 fix (Bug 10): dedup before appending so callers don't
+        // need to worry about double-add (e.g., search-result tap
+        // followed by swipe-to-add-to-queue).
+        if queue.contains(where: { $0.track.videoId == item.track.videoId }) {
+            print("⚠️ [S11] addToQueue: skipping duplicate videoId=\(item.track.videoId)")
+            return
+        }
         queue.append(item)
 
         // Trim queue if it gets too large
@@ -1364,14 +1535,19 @@ class PlayerState: ObservableObject {
     }
 
     func addToQueueNext(_ item: QueueItem) {
+        // S11 fix (Bug 10): dedup before inserting.
+        if queue.contains(where: { $0.track.videoId == item.track.videoId }) {
+            print("⚠️ [S11] addToQueueNext: skipping duplicate videoId=\(item.track.videoId)")
+            return
+        }
         let insertIndex = min(currentIndex + 1, queue.count)
         queue.insert(item, at: insertIndex)
-        
+
         // Trim queue if it gets too large
         if queue.count > maxQueueSize {
             trimQueue()
         }
-        
+
         dataManager.saveQueue(queue)
     }
     
@@ -1457,6 +1633,16 @@ class PlayerState: ObservableObject {
         print("⏭️ nextTrack called. Queue count: \(queue.count), currentIndex: \(currentIndex)")
         beginTrackTransitionBackgroundTask()
 
+        // S10 diagnostic: distinguish "user pressed next" from "track
+        // finished, autoplay kicked in". These take very different paths
+        // and we want to know which fired when reading the console after
+        // a background-track-transition repro.
+        let fromCompletion = !userSkipped && isHandlingCompletion
+        #if DEBUG
+        PlayCrashDiagnostics.log(.playback, "S10: nextTrack ENTRY fromCompletion=\(fromCompletion) queue.count=\(queue.count) currentIndex=\(currentIndex) userSkipped=\(userSkipped)")
+        #endif
+        print("⏭️ S10: nextTrack ENTRY fromCompletion=\(fromCompletion) queue.count=\(queue.count) currentIndex=\(currentIndex)")
+
         // Anti-Algorithm: track skip/complete
         if let currentVideoId = currentItem?.track.videoId {
             if userSkipped {
@@ -1498,8 +1684,14 @@ class PlayerState: ObservableObject {
                 // Loop — fall through to playQueue(at: 0) below
                 print("⏭️ Gapless: looping to beginning")
             } else {
-                print("⏭️ End of queue reached (gapless)")
+                // S11 fix (Bug 6): previously went silent at end of
+                // queue when gapless was enabled. Now fall through to
+                // autoplay-from-recently-played, matching the non-
+                // gapless path so the user always has continuous music.
+                print("⏭️ End of queue reached (gapless) — falling through to autoplay")
+                autoplayNextFromRecentlyPlayed()
                 endTrackTransitionBackgroundTask()
+                clearCompletionFlag()
                 return
             }
         }
@@ -1540,21 +1732,38 @@ class PlayerState: ObservableObject {
     /// track that isn't the one that just finished and starts
     /// playback on it. If no candidates are available, leaves the
     /// player in the .paused state on the last track.
+    ///
+    /// S10: do NOT release the track-transition background task here.
+    /// The previous code ended it the instant `play(track:)` returned,
+    /// which was BEFORE the new AVPlayer had buffered any audio. In the
+    /// background, iOS could then suspend the app while the stream was
+    /// still being fetched by yt-dlp. The task is now released in the
+    /// `isPlaybackLikelyToKeepUp` observer once the new track is
+    /// audibly playing (see setupPlayerObservers).
     private func autoplayNextFromRecentlyPlayed() {
         let justPlayedId = currentItem?.track.videoId
         let candidates = dataManager.recentlyPlayed
             .filter { $0.videoId != justPlayedId }
             .compactMap { $0.toTrack }
 
+        #if DEBUG
+        PlayCrashDiagnostics.log(.playback, "S10: autoplayNextFromRecentlyPlayed candidates=\(candidates.count)")
+        #endif
+        print("⏭️ S10: autoplay candidates=\(candidates.count) justPlayed=\(justPlayedId ?? "nil")")
+
         guard let nextTrack = candidates.first else {
             print("⏭️ No recently-played candidates; staying on last track")
+            // No next track — release the background task so we don't
+            // hold it forever.
             endTrackTransitionBackgroundTask()
             return
         }
 
-        print("⏭️ Autoplaying next: \(nextTrack.title)")
+        print("⏭️ S10: Autoplaying next: \(nextTrack.title)")
         play(track: nextTrack)
-        endTrackTransitionBackgroundTask()
+        // Note: background task is released in setupPlayerObservers'
+        // isPlaybackLikelyToKeepUp observer when the new track is
+        // actually playing.
     }
     
     private func performCrossfadeToNextItem(_ item: QueueItem, at index: Int) {
@@ -1674,6 +1883,19 @@ class PlayerState: ObservableObject {
             currentItem = queue[matchIdx]
             dataManager.addToRecentlyPlayed(currentItem!.track)
             NotificationCenter.default.post(name: .trackPlayed, object: nil)
+            // S11 fix (Bug 2): refresh Lock Screen / Control Center
+            // immediately on gapless auto-advance. Without this the
+            // system Now Playing kept showing the previous track
+            // until the next duration-publisher tick (1-3s for HTTP
+            // streams).
+            let item = queue[matchIdx]
+            NowPlayingService.shared.updateNowPlaying(
+                track: item.track,
+                duration: Double(item.track.durationSeconds),
+                currentTime: 0,
+                isPlaying: playbackState.isPlaying,
+                playbackRate: playbackRate
+            )
         }
         // Re-enqueue so we always have a few items in the queue player.
         enqueueUpcomingItemsForGapless()
@@ -1684,7 +1906,17 @@ class PlayerState: ObservableObject {
     /// in the URL — for streams, it's the path component after /proxy-stream/).
     private func trackIdentifier(for playerItem: AVPlayerItem) -> String? {
         guard let asset = playerItem.asset as? AVURLAsset else { return nil }
-        return asset.url.lastPathComponent.replacingOccurrences(of: ".m4a", with: "")
+        // S11 fix (Bug 7): previously only stripped .m4a; the proxy
+        // endpoint also serves .webm when preferM4A=false. Use the
+        // delegate's preferred bit depth via pathExtension rather than
+        // hardcoding the suffix.
+        let lastPath = asset.url.lastPathComponent
+        for ext in ["m4a", "webm", "mp4", "mp3"] {
+            if lastPath.hasSuffix(".\(ext)") {
+                return String(lastPath.dropLast(ext.count + 1))
+            }
+        }
+        return lastPath
     }
 
     private func prepareNextTrackForCrossfade() {
@@ -1839,6 +2071,13 @@ class PlayerState: ObservableObject {
                                     self?.refreshAndPlayCurrentItem()
                                 }
                             )
+                            // S11 fix (Bug 4): end the BG task we acquired
+                            // (via Trigger A or Trigger B) so it doesn't
+                            // leak for the 2.5s wait. The nextTrack()
+                            // dispatch below will re-acquire via
+                            // nextTrack's beginTrackTransitionBackgroundTask().
+                            self?.endTrackTransitionBackgroundTask()
+                            self?.clearCompletionFlag()
                             DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
                                 self?.nextTrack()
                             }
@@ -1946,6 +2185,22 @@ class PlayerState: ObservableObject {
                         self.playbackState = .playing
                     } else if self.playbackState == .loading {
                         self.playbackState = .playing
+                        // S10: the new track has buffered enough to start
+                        // producing audio. It's now safe to release the
+                        // 30-second background task we acquired in
+                        // nextTrack / playerDidFinishPlaying — the audio
+                        // session's "audio" background mode keeps the app
+                        // alive on its own. Releasing earlier meant we
+                        // could be suspended before any audio flowed,
+                        // especially in the background after autoplay.
+                        self.endTrackTransitionBackgroundTask()
+                        print("🔓 S10: BG task released — new track is playing")
+                        // S11 fix (Bug 14): pair with the flag reset.
+                        // The handleTrackCompletion defer scheduled a
+                        // 5s safety timeout; we can clear that and the
+                        // isHandlingCompletion flag right now since the
+                        // new track is confirmed playing.
+                        self.clearCompletionFlag()
                     }
                 }
             }
@@ -2050,6 +2305,11 @@ class PlayerState: ObservableObject {
 
             if shouldTriggerCompletion && !playbackState.isLoading {
                 print("🏁 Track reached end (current: \(current), actual: \(actualDuration), effective: \(effectiveTotal))")
+                // S11 fix (Bug 3): Trigger B (1s polling) was not
+                // beginning the BG task like Trigger A did. In an
+                // edge case where the polling fires first, completion
+                // proceeded without any background-task protection.
+                beginTrackTransitionBackgroundTask()
                 completionQueue.async { [weak self] in
                     self?.handleTrackCompletion()
                 }
@@ -2082,6 +2342,24 @@ class PlayerState: ObservableObject {
                 let newItem = AVPlayerItem(url: url)
                 player?.replaceCurrentItem(with: newItem)
                 player?.play()
+            }
+            return
+        }
+        // S11 fix (Bug 5): podcasts don't auto-advance to unrelated
+        // recently-played music. Stop playback and surface end of
+        // episode so the user can pick the next episode manually.
+        if contentType == .podcastEpisode {
+            print("🎙 [S11] Podcast episode ended — stopping (no auto-advance to music)")
+            NowPlayingService.shared.clearNowPlaying()
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                self.player?.pause()
+                self.playbackState = .paused
+                ErrorHandler.shared.show(
+                    .playbackFailed("Episode ended. Pick another episode to keep listening.")
+                )
+                self.endTrackTransitionBackgroundTask()
+                self.clearCompletionFlag()
             }
             return
         }
@@ -2176,18 +2454,37 @@ class PlayerState: ObservableObject {
         }
         isHandlingCompletion = true
 
-        // Ensure flag is reset even if something goes wrong
+        // S11 fix (Bug 14): extend the auto-reset from 0.5s to a more
+        // generous window tied to the new player's state. The old 0.5s
+        // was too short — a slow-buffering autoplay track combined
+        // with the S10 "BG task waits for isPlaybackLikelyToKeepUp"
+        // release could re-fire completion before the new track had
+        // settled. Now: reset when the new player's playbackState
+        // transitions out of .loading OR after a 5s safety timeout.
         defer {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-                self?.isHandlingCompletion = false
-                print("🏁 Completion flag reset")
+            DispatchQueue.main.async { [weak self] in
+                // Reset will happen either via the observer in
+                // play(item:) setup (when .loading -> .playing flips)
+                // OR via this 5s safety timeout, whichever comes first.
+                self?.scheduleCompletionFlagReset(after: 5.0)
             }
         }
 
-        // Stop the player to prevent progress from continuing to increment
-        DispatchQueue.main.async { [weak self] in
-            self?.player?.pause()
-        }
+        // S10 diagnostic: log entry so we can confirm the autoplay path
+        // fires from the background-track-transition flow.
+        #if DEBUG
+        PlayCrashDiagnostics.log(.playback, "S10: handleTrackCompletion ENTRY contentType=\(contentType) queue.count=\(queue.count) currentIndex=\(currentIndex) gapless=\(CrossfadeManager.shared.gaplessEnabled) videoId=\(currentItem?.track.videoId ?? "nil")")
+        #endif
+        print("🏁 S10: handleTrackCompletion ENTRY contentType=\(contentType) queue.count=\(queue.count) currentIndex=\(currentIndex) gapless=\(CrossfadeManager.shared.gaplessEnabled)")
+
+        // S10: do NOT dispatch a separate pause() here. The
+        // .AVPlayerItemDidPlayToEndTime notification only fires when
+        // AVPlayer has already auto-paused on the finished item, and
+        // `stop()` inside play(item:) replaces the item with nil as
+        // part of swapping in the new player. A separate pause dispatch
+        // creates an audio gap between the old and new players; in the
+        // background this gap is exactly when iOS suspends the app
+        // before the new player can take over.
 
         // Save final listening time
         if accumulatedListeningTime > 0 {
