@@ -1522,9 +1522,39 @@ class PlayerState: ObservableObject {
             print("⏭️ Looping to beginning")
             playQueue(at: 0)
         } else {
-            print("⏭️ End of queue reached")
-            endTrackTransitionBackgroundTask()
+            // 2026-06-29 (S9c): when the queue is exhausted (the
+            // common case is a single-track play from search or
+            // home), fall back to autoplay from the user's
+            // recently-played list. We pick the most recent track
+            // that isn't the one that just finished and start
+            // playback on it. This makes the listening experience
+            // continuous without requiring the user to manually
+            // queue tracks.
+            print("⏭️ End of queue reached — trying autoplay from recently played")
+            autoplayNextFromRecentlyPlayed()
         }
+    }
+
+    /// 2026-06-29 (S9c): fall back to the user's recently-played
+    /// list when the queue is exhausted. Picks the most recent
+    /// track that isn't the one that just finished and starts
+    /// playback on it. If no candidates are available, leaves the
+    /// player in the .paused state on the last track.
+    private func autoplayNextFromRecentlyPlayed() {
+        let justPlayedId = currentItem?.track.videoId
+        let candidates = dataManager.recentlyPlayed
+            .filter { $0.videoId != justPlayedId }
+            .compactMap { $0.toTrack }
+
+        guard let nextTrack = candidates.first else {
+            print("⏭️ No recently-played candidates; staying on last track")
+            endTrackTransitionBackgroundTask()
+            return
+        }
+
+        print("⏭️ Autoplaying next: \(nextTrack.title)")
+        play(track: nextTrack)
+        endTrackTransitionBackgroundTask()
     }
     
     private func performCrossfadeToNextItem(_ item: QueueItem, at index: Int) {
