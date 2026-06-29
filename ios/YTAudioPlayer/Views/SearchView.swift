@@ -711,116 +711,79 @@ struct SearchResultRow: View {
     let onPlayNext: () -> Void
     let onAddToPlaylist: () -> Void
     @StateObject private var playlistManager = PlaylistManager.shared
-    
+
     var body: some View {
-        HStack(spacing: 12) {
-            // Artwork with indicators
-            ZStack(alignment: .bottomTrailing) {
-                ArtworkThumbnail(url: track.artworkURL)
-                    .frame(width: 50, height: 50)
-                
-                // Download status badge
-                if let task = downloadTask, task.status.isActive {
-                    ZStack {
-                        Circle()
-                            .fill(Color.black.opacity(0.7))
-                            .frame(width: 20, height: 20)
-                        
-                        CircularProgressView(progress: task.progress)
-                            .frame(width: 16, height: 16)
-                    }
-                    .offset(x: 4, y: 4)
-                } else if isDownloaded {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 14))
-                        .foregroundColor(.cyberCyan)
-                        .background(Circle().fill(Color.black))
-                        .offset(x: 4, y: 4)
-                }
-                
-                // Now playing indicator
-                if isPlaying {
-                    CyberPlayingBars()
-                        .frame(width: 16, height: 16)
-                        .padding(4)
-                        .background(.ultraThinMaterial)
-                        .cornerRadius(CornerRadius.xs)
-                        .offset(x: -4, y: -4)
-                }
-            }
-            
-            // Info
-            VStack(alignment: .leading, spacing: 4) {
-                Text(track.title)
-                    .font(.system(size: 16, weight: isPlaying ? .bold : .semibold))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-                    .foregroundColor(isPlaying ? .cyberCyan : .white)
-
-                Text(track.displayArtist)
-                    .font(.system(size: 14))
-                    .foregroundColor(.cyberDim)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-
-                HStack(spacing: 4) {
-                    if !track.album.isEmpty && track.album != "Unknown Album" {
-                        Text(track.album)
-                            .font(.system(size: 12))
-                            .foregroundColor(.cyberDim)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.8)
-                    }
-
-                    Text("• \(track.durationText)")
-                        .font(.system(size: 12))
-                        .foregroundColor(.cyberDim)
-
-                    if track.isExplicit {
-                        Text("• E")
-                            .font(.system(size: 12))
-                            .foregroundColor(.cyberDim)
-                    }
-                }
-            }
-            
-            Spacer()
-            
-            // Actions - Play button + download indicator
+        // 2026-06-29 (S9): match the HomeRecentTrackRow design.
+        // Cleaner layout: 50pt square artwork, title + artist
+        // (no album/duration subtitle), a tight 36pt right-side
+        // play indicator cluster with download status and an
+        // animated equalizer when playing. No big play button.
+        Button(action: onPlay) {
             HStack(spacing: 12) {
-                // Download status indicator (not clickable)
-                if let task = downloadTask {
-                    if task.status.isActive {
+                CachedAsyncImage(url: track.artworkURL) {
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color.cyberDim.opacity(0.3))
+                }
+                .frame(width: 50, height: 50)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .overlay(alignment: .bottomTrailing) {
+                    // Download badge — only on the artwork corner
+                    if let task = downloadTask, task.status.isActive {
                         ZStack {
                             Circle()
-                                .stroke(Color.cyberDim.opacity(0.3), lineWidth: 2)
-                                .frame(width: 22, height: 22)
-                            Circle()
-                                .trim(from: 0, to: task.progress)
-                                .stroke(Color.cyberCyan, style: StrokeStyle(lineWidth: 2, lineCap: .round))
-                                .frame(width: 22, height: 22)
-                                .rotationEffect(.degrees(-90))
+                                .fill(Color.black.opacity(0.7))
+                                .frame(width: 18, height: 18)
+                            CircularProgressView(progress: task.progress)
+                                .frame(width: 14, height: 14)
                         }
-                    } else if task.status == .completed {
+                        .offset(x: 4, y: 4)
+                    } else if isDownloaded {
                         Image(systemName: "checkmark.circle.fill")
-                            .font(.system(size: 22))
+                            .font(.system(size: 12))
                             .foregroundColor(.cyberCyan)
+                            .background(Circle().fill(Color.black))
+                            .offset(x: 4, y: 4)
                     }
-                } else if isDownloaded {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 22))
-                        .foregroundColor(.cyberCyan)
                 }
 
-                Button(action: onPlay) {
-                    Image(systemName: isPlaying ? "waveform" : "play.fill")
-                        .font(.system(size: 28))
-                        .foregroundColor(.cyberCyan)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(track.title)
+                        .font(.system(size: 16, weight: isPlaying ? .bold : .medium))
+                        .foregroundColor(isPlaying ? .cyberCyan : .white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+
+                    Text(track.displayArtist)
+                        .font(.system(size: 14))
+                        .foregroundColor(.cyberDim)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                 }
+
+                Spacer()
+
+                // 2026-06-29: play indicator cluster (same as
+                // HomeRecentTrackRow). Shows a download icon, an
+                // animated equalizer, or a small play button.
+                HStack(spacing: 8) {
+                    if isDownloaded && downloadTask == nil {
+                        Image(systemName: "arrow.down.circle.fill")
+                            .font(.system(size: 14))
+                            .foregroundColor(.cyberCyan)
+                    }
+
+                    if isPlaying {
+                        PlayingBarsIndicator()
+                    } else {
+                        Image(systemName: "play.fill")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(.cyberCyan)
+                    }
+                }
+                .frame(width: 36)
             }
         }
-        .padding(.vertical, 10)
-        .background(isPlaying ? Color.cyberCyan.opacity(0.08) : Color.clear)
+        .buttonStyle(.plain)
         .contextMenu {
             Button(action: onPlay) {
                 Label(isPlaying ? "Now Playing" : "Play", systemImage: "play.fill")
