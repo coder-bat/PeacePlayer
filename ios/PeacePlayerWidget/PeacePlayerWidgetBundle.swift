@@ -14,6 +14,8 @@ struct PeacePlayerWidgetBundle: WidgetBundle {
         NowPlayingWidget()
         if #available(iOSApplicationExtension 17.0, *) {
             NowPlayingFullWidget()
+            // S12: vinyl-record-styled medium widget
+            VinylNowPlayingWidget()
         }
         ResumeWidget()
         ShuffleFavoritesWidget()

@@ -94,6 +94,8 @@
 		AB91C2EEBB54FBEAB25F0CED /* ShortcutPlaybackController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2EB0B5914F7E53240295D03C /* ShortcutPlaybackController.swift */; };
 		AC30D021A828DC129499800D /* SleepTimerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 791B0D8E28834A5D34E9FA93 /* SleepTimerView.swift */; };
 		B2E798633D3FE21CFA1B4EA7 /* SharedNowPlayingState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39607B6AF4B8C14661E4BD57 /* SharedNowPlayingState.swift */; };
+		7A1B2C3D4E5F60718293A4E8 /* VinylNowPlayingWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A1B2C3D4E5F60718293A4D7 /* VinylNowPlayingWidget.swift */; };
+		7A1B2C3D4E5F60718293A4C6 /* VinylRecordView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A1B2C3D4E5F60718293A4B5 /* VinylRecordView.swift */; };
 		B5A9F19389EDBC0B9918E9F3 /* PlaylistsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CAC504FA4E7BBC2BDCEBC5BD /* PlaylistsView.swift */; };
 		BD20B0BFE6EF6539F2B0544B /* MoodBrowseSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = B344F2CAD91FD76A9E1E66BD /* MoodBrowseSection.swift */; };
 		C07A6AEA8DC36752100668BB /* RadioViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 291054BB5EAE5ACCBA8C8EF9 /* RadioViewModel.swift */; };
@@ -204,6 +206,8 @@
 		51554D239E59D64D0D95EDD0 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 		538A97384F4577D3971EDB4D /* WalkDJAppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WalkDJAppDelegate.swift; sourceTree = "<group>"; };
 		5668E156B653F13002526708 /* PeacePlayerWidget.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = PeacePlayerWidget.entitlements; sourceTree = "<group>"; };
+		7A1B2C3D4E5F60718293A4D7 /* VinylNowPlayingWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VinylNowPlayingWidget.swift; sourceTree = "<group>"; };
+		7A1B2C3D4E5F60718293A4B5 /* VinylRecordView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VinylRecordView.swift; sourceTree = "<group>"; };
 		56AF7CCCA582C56C371F11A0 /* PeacePlayerWidgetIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeacePlayerWidgetIntents.swift; sourceTree = "<group>"; };
 		56CE1E3E13C142FD71EAE1CE /* ResumeWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResumeWidget.swift; sourceTree = "<group>"; };
 		580361D396ED3D52EB48EFFF /* ShareCardGenerator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareCardGenerator.swift; sourceTree = "<group>"; };
@@ -503,6 +507,8 @@
 				0F15FD3F181894856FF634D2 /* PeacePlayerWidgetBundle.swift */,
 				56AF7CCCA582C56C371F11A0 /* PeacePlayerWidgetIntents.swift */,
 				56CE1E3E13C142FD71EAE1CE /* ResumeWidget.swift */,
+				7A1B2C3D4E5F60718293A4D7 /* VinylNowPlayingWidget.swift */,
+				7A1B2C3D4E5F60718293A4B5 /* VinylRecordView.swift */,
 				6A5BA9202ABE322C59404BE0 /* WidgetTheme.swift */,
 			);
 			path = PeacePlayerWidget;
@@ -708,6 +714,8 @@
 				E06930EDFBFCCD1AAFC5CA26 /* ResumeWidget.swift in Sources */,
 				B2E798633D3FE21CFA1B4EA7 /* SharedNowPlayingState.swift in Sources */,
 				400280C613F6E73E4B338CC8 /* WidgetTheme.swift in Sources */,
+				7A1B2C3D4E5F60718293A4E8 /* VinylNowPlayingWidget.swift in Sources */,
+				7A1B2C3D4E5F60718293A4C6 /* VinylRecordView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
