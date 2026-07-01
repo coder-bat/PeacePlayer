@@ -18,12 +18,10 @@ struct ContentView: View {
     @State private var selectedTab = 0
     @State private var showFullPlayer = false
     @State private var showRestorePrompt = false
-    // 2026-06-28: header-icon sheets. Surfaced from Home's top-right
-    // icon cluster via NotificationCenter so the bottom nav doesn't
-    // have to grow.
-    @State private var showSettings = false
-    @State private var showPlaylists = false
-    @State private var showRadio = false
+    // S13: prevent the restore prompt from re-appearing in the same
+    // session after dismissal. Cleared when the app cold-launches
+    // (UserDefaults is process-scoped via AppStorage).
+    @AppStorage("queueRestorePromptShown") private var restorePromptShownThisSession = false
     @Namespace private var playerNamespace
 
     var body: some View {
@@ -141,38 +139,26 @@ struct ContentView: View {
                 }
             }
         }
-        // 2026-06-28: header-icon routing — the Home page's top-right
-        // icon cluster posts these to surface Settings, Playlists, and
-        // Radio as sheets so they don't fight the bottom-nav tab
-        // system for the same screen real estate.
-        .onReceive(NotificationCenter.default.publisher(for: .openSettings)) { _ in
-            showSettings = true
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .openPlaylists)) { _ in
-            showPlaylists = true
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .openRadio)) { _ in
-            showRadio = true
-        }
+        // 2026-06-28: header-icon routing. S14 removed the Settings /
+        // Playlists / Radio sheets and their notification routes —
+        // HomeView now pushes those destinations into its own
+        // NavigationStack. The remaining `.openFullPlayer` and
+        // `.openSearch` notifications are still in use.
         .onReceive(NotificationCenter.default.publisher(for: .openFullPlayer)) { _ in
             showFullPlayer = true
         }
-        .sheet(isPresented: $showSettings) {
-            SettingsView()
-                .preferredColorScheme(.dark)
-        }
-        .sheet(isPresented: $showPlaylists) {
-            NavigationView {
-                PlaylistsView()
-                    .preferredColorScheme(.dark)
+        // S13: Library's empty-state CTA posts this so we surface the
+        // Search tab. Search is tag 1 in the TabView (Home=0, Search=1,
+        // Library=3 — the gap is for future tabs).
+        .onReceive(NotificationCenter.default.publisher(for: .openSearch)) { _ in
+            withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
+                selectedTab = 1
             }
         }
-        .sheet(isPresented: $showRadio) {
-            NavigationView {
-                RadioView(viewModel: RadioViewModel())
-                    .preferredColorScheme(.dark)
-            }
-        }
+        // S14: Settings / Playlists / Radio are no longer presented as
+        // sheets from ContentView — HomeView's NavigationStack pushes
+        // these destinations directly. Swipe-from-edge back gesture
+        // works automatically.
         .onChange(of: playerState.showQueue) { shouldShow in
             if shouldShow && !showFullPlayer {
                 withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
@@ -184,8 +170,22 @@ struct ContentView: View {
         .onAppear {
             setupAppearance()
             PlaybackQueueManager.shared.startObservingPlayerStateIfNeeded(playerState: playerState)
-            if QueueRestorer.shared.shouldShowRestorePrompt() {
+
+            // S13: silent auto-restore for single-track queues. The
+            // user's last session left a 1-track queue — resume it
+            // immediately without the modal prompt. For 2+ tracks
+            // we still ask, since auto-playback of multi-track
+            // queues can be jarring.
+            let savedCount = PlaybackQueueManager.shared.loadQueue().count
+            if savedCount == 1, !restorePromptShownThisSession {
+                QueueRestorer.shared.restoreAndResume()
+                    .sink(receiveCompletion: { _ in }, receiveValue: { _ in })
+                    .store(in: &QueueRestorer.shared.cancellables)
+                restorePromptShownThisSession = true
+            } else if QueueRestorer.shared.shouldShowRestorePrompt(),
+                      !restorePromptShownThisSession {
                 showRestorePrompt = true
+                restorePromptShownThisSession = true
             }
         }
     }
@@ -291,6 +291,10 @@ struct BottomBar: View {
     private let collapsedWidth: CGFloat = 44
     @State private var isCollapsed: Bool = false
     @State private var dragOffset: CGFloat = 0
+    // S13: visual cue that fades in after collapse and points
+    // leftward (←) to suggest "swipe / tap to expand". Auto-fades
+    // after a few seconds so it doesn't become permanent chrome.
+    @State private var chevronCueOpacity: Double = 0
 
     var body: some View {
         HStack(alignment: .center, spacing: 8) {
@@ -378,11 +382,32 @@ struct BottomBar: View {
                     .font(.system(size: 16, weight: .bold))
                     .foregroundColor(.cyberCyan)
                     .offset(x: isPlaying ? 0 : 1)
+
+                // S13: chevron hint — appears to the left of the
+                // collapsed icon after the user collapses the mini
+                // player, hinting that they can swipe/tap to expand.
+                // Auto-fades after a few seconds.
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 11, weight: .heavy))
+                    .foregroundColor(.cyberCyan.opacity(0.7))
+                    .offset(x: -22)
+                    .opacity(chevronCueOpacity)
             }
             .frame(width: 44, height: 44)
         }
         .buttonStyle(.plain)
         .frame(height: 60)  // match the row height so the icon is centered vertically
+        // S13: schedule the chevron hint animation. Shows for ~3s after
+        // first collapse, then fades out permanently.
+        .onAppear {
+            // Fade in after 0.6s delay, then fade out at 3.6s.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                withAnimation(.easeIn(duration: 0.3)) { chevronCueOpacity = 1 }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                    withAnimation(.easeOut(duration: 0.5)) { chevronCueOpacity = 0 }
+                }
+            }
+        }
     }
 }
 
@@ -531,15 +556,19 @@ struct ContentView_Previews: PreviewProvider {
 extension Notification.Name {
     static let switchTab = Notification.Name("switchTab")
     static let startSongRadio = Notification.Name("startSongRadio")
-    // 2026-06-28: header icon cluster on Home posts these to route
-    // the user to the right surface. The Home view shows sheets for
-    // each (avoids fighting the bottom-nav tab system for the same
-    // surface area).
-    static let openSettings = Notification.Name("openSettings")
-    static let openPlaylists = Notification.Name("openPlaylists")
-    static let openRadio = Notification.Name("openRadio")
     // 2026-06-28 (S8): posted by the home page's NowPlayingHero
     // when the user taps the resume block. ContentView listens
     // and opens the full player.
     static let openFullPlayer = Notification.Name("openFullPlayer")
+    // S13: posted by LibraryView's empty-state CTA. ContentView listens
+    // and switches to the Search tab (tag 1).
+    static let openSearch = Notification.Name("openSearch")
+    // S13: posted by LibraryView when the user adds a track to the
+    // queue from the row context menu. FullPlayer observes this to
+    // pulse its Queue icon as feedback (Phase 4.1).
+    static let trackAddedToQueue = Notification.Name("trackAddedToQueue")
+    // S14: `.openSettings`, `.openPlaylists`, `.openRadio` removed —
+    // HomeView's NavigationStack now pushes these destinations
+    // directly via `NavigationLink(value:)`. No notification routing
+    // needed.
 }

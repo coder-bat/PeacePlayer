@@ -68,7 +68,11 @@ enum Theme {
 }
 
 // MARK: - Typography
-// Uses semantic system fonts so all text scales with the user's Dynamic Type preference.
+// S13: Semantic system fonts that scale with the user's Dynamic Type preference.
+// Custom fonts (Sora / Hanken Grotesk / JetBrains Mono) are deferred — when
+// font files are added to the bundle and registered in Info.plist via
+// `UIAppFonts`, a `registerFonts()` method can be wired here without
+// changing any call site (tokens are the indirection point).
 enum Typography {
     // MARK: Large Titles
     static let largeTitle: Font = .largeTitle
@@ -89,6 +93,14 @@ enum Typography {
     static let footnote: Font = .footnote
     static let caption1: Font = .caption
     static let caption2: Font = .caption2
+
+    // MARK: Sectioning (S13 — replaces ad-hoc `.system(size: 12, weight: .bold, design: .monospaced)`)
+    /// Section heading inside a content area (e.g. "Recently Played", "Quick Vibes").
+    static let sectionHeader = Font.system(size: 13, weight: .bold, design: .monospaced)
+    /// Large featured section title (e.g. "FOR YOU").
+    static let sectionTitle = Font.system(size: 22, weight: .bold, design: .default)
+    /// Small uppercase eyebrow tag (e.g. track-row sublabel).
+    static let eyebrow = Font.system(size: 11, weight: .bold, design: .monospaced)
 
     // MARK: Player Specific (fixed sizes — controlled visual context)
     static let playerTitle = Font.system(size: 22, weight: .bold, design: .default)

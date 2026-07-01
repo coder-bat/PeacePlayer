@@ -221,6 +221,12 @@ class DataManager: ObservableObject {
             let data = try encoder.encode(savedQueue)
             defaults.set(data, forKey: Keys.savedQueue)
         } catch {
+            // S13: queue-encoding failure is user-actionable because it
+            // breaks queue restore on next launch. The other two silent
+            // catches in this file (play history + listening stats)
+            // are background telemetry and stay as print-only to avoid
+            // toast spam.
+            ErrorHandler.shared.show(.parsing("Couldn't save your queue (\(items.count) tracks). Resume may not work next time."))
             print("⚠️ Failed to encode queue (\(items.count) items): \(error.localizedDescription)")
         }
     }

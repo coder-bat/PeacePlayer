@@ -81,7 +81,7 @@ struct DiscoverView: View {
                     .textCase(.uppercase)
 
                 Text("Find Your Music")
-                    .font(.system(size: 12, weight: .bold, design: .monospaced))
+                    .font(Typography.sectionHeader)
                     .foregroundColor(.cyberMagenta)
                     .glow(color: .cyberMagenta, radius: 8)
             }
@@ -128,7 +128,7 @@ struct DiscoverView: View {
     private var categorySection: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("BROWSE")
-                .font(.system(size: 12, weight: .bold, design: .monospaced))
+                .font(Typography.sectionHeader)
                 .foregroundColor(.cyberDim)
                 .padding(.horizontal, 20)
 
@@ -150,7 +150,7 @@ struct DiscoverView: View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
                 Text("TRENDING")
-                    .font(.system(size: 12, weight: .bold, design: .monospaced))
+                    .font(Typography.sectionHeader)
                     .foregroundColor(.cyberDim)
 
                 Spacer()
@@ -202,7 +202,7 @@ struct DiscoverView: View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
                 Text("New Releases")
-                    .font(.system(size: 12, weight: .bold, design: .monospaced))
+                    .font(Typography.sectionHeader)
                     .foregroundColor(.cyberDim)
 
                 Spacer()

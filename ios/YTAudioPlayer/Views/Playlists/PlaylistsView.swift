@@ -23,84 +23,82 @@ struct PlaylistsView: View {
     }
 
     var body: some View {
-        NavigationView {
-            ZStack {
-                // Cyberpunk background
-                Theme.cyberBackground
-                    .ignoresSafeArea()
+        // S14 (post-hotfix): Playlists is pushed INTO Home's
+        // NavigationStack — no inner NavigationStack wrapper. (An
+        // earlier iteration added one, which caused a crash on push:
+        // iOS does not allow NavigationStack nested inside another
+        // NavigationStack.)
+        ZStack {
+            // Cyberpunk background
+            Theme.cyberBackground
+                .ignoresSafeArea()
 
-                ScrollView {
-                    VStack(spacing: 0) {
-                        // 2026-06-28 (S6): top breathing room. The header
-                        // row is now in the navigation toolbar (below)
-                        // so we just add a small top spacer here.
-                        Color.clear.frame(height: 8)
+            ScrollView {
+                VStack(spacing: 0) {
+                    // 2026-06-28 (S6): top breathing room. The header
+                    // row is now in the navigation toolbar (below)
+                    // so we just add a small top spacer here.
+                    Color.clear.frame(height: 8)
 
-                        // Smart Playlists Section
-                        if !smartPlaylists.isEmpty {
-                            SmartPlaylistsCyberpunk(playlists: smartPlaylists) { playlist in
-                                selectedPlaylist = playlist
-                            }
+                    // Smart Playlists Section
+                    if !smartPlaylists.isEmpty {
+                        SmartPlaylistsCyberpunk(playlists: smartPlaylists) { playlist in
+                            selectedPlaylist = playlist
                         }
-
-                        // User Playlists Section
-                        UserPlaylistsCyberpunk(
-                            playlists: userPlaylists,
-                            viewMode: viewMode,
-                            onSelect: { playlist in
-                                selectedPlaylist = playlist
-                            },
-                            onCreate: {
-                                showCreateSheet = true
-                            }
-                        )
                     }
-                }
-            }
-            .navigationTitle("PLAYLISTS")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                // 2026-06-28 (S6): title on the left, list/plus icons
-                // on the right — same row, via a custom leading item
-                // + trailing item. Replaces the previous layout where
-                // the title was a separate HStack in the ScrollView
-                // body, sitting below the icons.
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Text("PLAYLISTS")
-                        .font(.system(size: 17, weight: .bold, design: .monospaced))
-                        .foregroundColor(.white)
-                        .shadow(color: Theme.cyberCyan.opacity(0.5), radius: 6, x: 0, y: 0)
-                }
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    HStack(spacing: 16) {
-                        Button {
-                            withAnimation(.easeInOut(duration: 0.2)) {
-                                viewMode = viewMode == .grid ? .list : .grid
-                            }
-                        } label: {
-                            Image(systemName: viewMode == .grid ? "list.bullet" : "square.grid.2x2")
-                                .font(.system(size: 17, weight: .semibold))
-                                .foregroundColor(Theme.cyberCyan)
-                        }
 
-                        Button {
+                    // User Playlists Section
+                    UserPlaylistsCyberpunk(
+                        playlists: userPlaylists,
+                        viewMode: viewMode,
+                        onSelect: { playlist in
+                            selectedPlaylist = playlist
+                        },
+                        onCreate: {
                             showCreateSheet = true
-                        } label: {
-                            Image(systemName: "plus")
-                                .font(.system(size: 17, weight: .semibold))
-                                .foregroundColor(Theme.cyberCyan)
                         }
+                    )
+                }
+            }
+        }
+        .navigationTitle("PLAYLISTS")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            // S14: dropped the redundant `ToolbarItem(placement:
+            // .navigationBarLeading)` Text("PLAYLISTS") that was
+            // dead UI — it looked tappable (cyan shadow + bold
+            // monospaced) but was a Text, not a Button, so taps
+            // did nothing. The standard `.navigationTitle`
+            // provides the title in the nav bar.
+            ToolbarItem(placement: .navigationBarTrailing) {
+                HStack(spacing: 16) {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            viewMode = viewMode == .grid ? .list : .grid
+                        }
+                    } label: {
+                        Image(systemName: viewMode == .grid ? "list.bullet" : "square.grid.2x2")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundColor(Theme.cyberCyan)
+                    }
+
+                    Button {
+                        showCreateSheet = true
+                    } label: {
+                        Image(systemName: "plus")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundColor(Theme.cyberCyan)
                     }
                 }
             }
-            .sheet(isPresented: $showCreateSheet) {
-                CreatePlaylistSheet()
-            }
-            .sheet(item: $selectedPlaylist) { playlist in
-                PlaylistDetailView(playlist: playlist)
-            }
-            .preferredColorScheme(.dark)
         }
+        .sheet(isPresented: $showCreateSheet) {
+            CreatePlaylistSheet()
+        }
+        .sheet(item: $selectedPlaylist) { playlist in
+            PlaylistDetailView(playlist: playlist)
+        }
+        .preferredColorScheme(.dark)
     }
 
     private var smartPlaylists: [Playlist] {

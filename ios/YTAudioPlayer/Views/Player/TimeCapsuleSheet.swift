@@ -87,7 +87,7 @@ struct TimeCapsuleSheet: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Your message to the future")
                 .font(.caption)
-                .foregroundColor(.cyan)
+                .foregroundColor(Theme.cyberCyan)
 
             TextEditor(text: $noteText)
                 .frame(minHeight: 120)
@@ -112,7 +112,7 @@ struct TimeCapsuleSheet: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Mood")
                 .font(.caption)
-                .foregroundColor(.cyan)
+                .foregroundColor(Theme.cyberCyan)
 
             HStack(spacing: 12) {
                 ForEach(moods, id: \.self) { mood in
@@ -120,7 +120,7 @@ struct TimeCapsuleSheet: View {
                         .font(.title2)
                         .padding(8)
                         .background(
-                            selectedMood == mood ? Color.cyan.opacity(0.3) : Color.white.opacity(0.05)
+                            selectedMood == mood ? Theme.cyberCyan.opacity(0.3) : Color.white.opacity(0.05)
                         )
                         .cornerRadius(8)
                         .onTapGesture { selectedMood = (selectedMood == mood) ? nil : mood }
@@ -133,7 +133,7 @@ struct TimeCapsuleSheet: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Unlock date")
                 .font(.caption)
-                .foregroundColor(.cyan)
+                .foregroundColor(Theme.cyberCyan)
 
             DatePicker(
                 "Opens on",
@@ -142,7 +142,7 @@ struct TimeCapsuleSheet: View {
                 displayedComponents: .date
             )
             .datePickerStyle(.graphical)
-            .tint(.cyan)
+            .tint(Theme.cyberCyan)
             .colorScheme(.dark)
 
             let days = Calendar.current.dateComponents([.day], from: Date(), to: unlockDate).day ?? 0
@@ -166,7 +166,7 @@ struct TimeCapsuleSheet: View {
             .padding(.vertical, 16)
             .background(
                 noteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                    ? Theme.tertiaryText : Color.cyan
+                    ? Theme.tertiaryText : Theme.cyberCyan
             )
             .cornerRadius(14)
         }
@@ -181,8 +181,8 @@ struct TimeCapsuleSheet: View {
 
             Image(systemName: "envelope.fill")
                 .font(.system(size: 64))
-                .foregroundColor(.cyan)
-                .shadow(color: .cyan.opacity(0.5), radius: 20)
+                .foregroundColor(Theme.cyberCyan)
+                .shadow(color: Theme.cyberCyan.opacity(0.5), radius: 20)
 
             Text("Capsule Sealed ✨")
                 .font(.title2.bold())
@@ -200,7 +200,7 @@ struct TimeCapsuleSheet: View {
             Spacer()
 
             Button("Done") { dismiss() }
-                .foregroundColor(.cyan)
+                .foregroundColor(Theme.cyberCyan)
                 .padding()
         }
         .transition(.opacity.combined(with: .scale))

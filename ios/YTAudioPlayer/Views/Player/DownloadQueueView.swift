@@ -372,6 +372,7 @@ struct CompletedDownloadCard: View {
                 .font(.system(size: 28))
                 .foregroundColor(statusColor)
                 .frame(width: 32)
+                .accessibilityLabel(statusIconAccessibilityLabel)
 
             // Thumbnail placeholder
             RoundedRectangle(cornerRadius: 8)
@@ -384,11 +385,24 @@ struct CompletedDownloadCard: View {
                 )
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(task.track.title)
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundColor(.white)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
+                HStack(spacing: 6) {
+                    Text(task.track.title)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+
+                    // S13: explicit "FAILED" badge inline with the title
+                    // makes the failure state unmistakable at a glance.
+                    if case .failed = task.status {
+                        Text("FAILED")
+                            .font(.system(size: 9, weight: .heavy, design: .monospaced))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Capsule().fill(Theme.cyberMagenta))
+                    }
+                }
 
                 Text(task.track.displayArtist)
                     .font(.system(size: 13))
@@ -415,6 +429,10 @@ struct CompletedDownloadCard: View {
                         .font(.system(size: 28))
                         .foregroundColor(Theme.cyberCyan)
                 }
+                // S13: 44pt minimum hit target.
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
+                .accessibilityLabel("Retry download")
             }
 
             // Delete button (per-item)
@@ -425,6 +443,9 @@ struct CompletedDownloadCard: View {
                     .font(.system(size: 24))
                     .foregroundColor(Theme.cyberMagenta.opacity(0.6))
             }
+            // S13: 44pt minimum hit target.
+            .frame(minWidth: 44, minHeight: 44)
+            .contentShape(Rectangle())
             .accessibilityLabel("Remove download")
         }
         .padding(12)
@@ -437,11 +458,15 @@ struct CompletedDownloadCard: View {
     }
 
     private var statusIcon: String {
+        // S13: failed rows now use `exclamationmark.triangle.fill`
+        // instead of `exclamationmark.circle.fill` to make the error
+        // state visually unmistakable. The icon is the user's first
+        // signal that something went wrong with this download.
         switch task.status {
         case .completed:
             return "checkmark.circle.fill"
         case .failed:
-            return "exclamationmark.circle.fill"
+            return "exclamationmark.triangle.fill"
         default:
             return "questionmark.circle.fill"
         }
@@ -455,6 +480,18 @@ struct CompletedDownloadCard: View {
             return Theme.cyberMagenta
         default:
             return Theme.cyberDim
+        }
+    }
+
+    // S13: a11y label for the status icon. VoiceOver users hear what
+    // state the download is in, not the SF Symbol name.
+    private var statusIconAccessibilityLabel: String {
+        switch task.status {
+        case .completed: return "Download completed"
+        case .failed: return "Download failed"
+        case .pending: return "Download pending"
+        case .downloading: return "Downloading"
+        case .converting: return "Converting"
         }
     }
 

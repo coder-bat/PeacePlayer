@@ -41,7 +41,10 @@ struct LibraryView: View {
     @State private var searchQuery = ""
 
     var body: some View {
-        NavigationView {
+        // S14: NavigationStack replaces the deprecated NavigationView
+        // so the Library tab's chrome (DONE/DELETE toolbar in edit
+        // mode + standard nav bar) is consistent with iOS 16+ patterns.
+        NavigationStack {
             ZStack {
                 // Cyberpunk background
                 Theme.cyberBackground
@@ -178,7 +181,17 @@ struct LibraryView: View {
     }
 
     private var emptyView: some View {
-        EmptyStateView(type: .library)
+        // S13: Empty library now offers a CTA that posts the
+        // `.openSearch` notification. ContentView listens and switches
+        // to the Search tab. The cyberpunk dim text + cyan button keeps
+        // the design language consistent with the rest of the app.
+        EmptyStateView(
+            type: .library,
+            action: {
+                NotificationCenter.default.post(name: .openSearch, object: nil)
+            },
+            actionTitle: "Search Music"
+        )
     }
 
     private var contentView: some View {
@@ -291,6 +304,18 @@ struct LibraryView: View {
                         onAddToQueue: {
                             HapticManager.light()
                             viewModel.addToQueue(track)
+                            // S13: surface a brief toast so the user
+                            // has confirmation beyond the haptic, and
+                            // notify FullPlayer so the Queue icon can
+                            // pulse (Phase 4.1).
+                            UndoService.shared.registerUndo(
+                                message: "Added \(track.title) to Queue",
+                                restore: { /* no undo for add-to-queue */ }
+                            )
+                            NotificationCenter.default.post(
+                                name: .trackAddedToQueue,
+                                object: track
+                            )
                         },
                         onDelete: {
                             HapticManager.medium()
@@ -336,6 +361,18 @@ struct LibraryView: View {
                         onAddToQueue: {
                             HapticManager.light()
                             viewModel.addToQueue(track)
+                            // S13: surface a brief toast so the user
+                            // has confirmation beyond the haptic, and
+                            // notify FullPlayer so the Queue icon can
+                            // pulse (Phase 4.1).
+                            UndoService.shared.registerUndo(
+                                message: "Added \(track.title) to Queue",
+                                restore: { /* no undo for add-to-queue */ }
+                            )
+                            NotificationCenter.default.post(
+                                name: .trackAddedToQueue,
+                                object: track
+                            )
                         },
                         onDelete: {
                             HapticManager.medium()
@@ -464,6 +501,13 @@ struct GridTrackCell: View {
                     .foregroundColor(Theme.cyberDim.opacity(0.7))
             }
         }
+        // S13: tap target. The inner play-button overlay (in the
+        // ZStack above) is itself a Button — SwiftUI's hit-testing
+        // routes taps on the play button to its action, and taps
+        // anywhere else on the row to this .onTapGesture. The
+        // `.contentShape(Rectangle())` makes the entire artwork +
+        // text area tappable (otherwise only the rendered shapes
+        // would receive touches).
         .contentShape(Rectangle())
         .onTapGesture(perform: onTap)
         .contextMenu {
@@ -630,6 +674,9 @@ struct ListTrackRow: View {
             RoundedRectangle(cornerRadius: CornerRadius.md)
                 .stroke(isPlaying ? Theme.cyberCyan.opacity(0.3) : Color.clear, lineWidth: 1)
         )
+        // S13: same tap-target pattern as GridTrackCell. The inner
+        // play Button (line 628) handles its own frame; everything
+        // else on the row falls through to this .onTapGesture.
         .contentShape(Rectangle())
         .onTapGesture(perform: onTap)
         .contextMenu {
@@ -719,7 +766,7 @@ struct StorageInfoSheetCyberpunk: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        NavigationView {
+        NavigationStack {
             ZStack {
                 Theme.cyberBackground
                     .ignoresSafeArea()

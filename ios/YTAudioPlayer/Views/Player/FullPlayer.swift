@@ -40,6 +40,10 @@ struct FullPlayer: View {
     @State private var colorExtractionTask: Task<Void, Never>?
     @State private var dragOffset: CGFloat = 0
     @State private var scrollAtTop: Bool = true
+    // S13: pulse animation for the Queue button when a track is added.
+    // The notification observer resets `pulseAmount` to 1.15 each time
+    // a new track is queued, then animates back to 1.0 over ~0.4s.
+    @State private var queuePulseAmount: CGFloat = 1.0
     @State private var showScrubberThumb = false
     @State private var scrubberHideTask: Task<Void, Never>? = nil
     @State private var isTrackInfoExpanded = false
@@ -665,7 +669,11 @@ private struct ProgressSection: View {
 
                 Spacer()
 
-                Text(formatTime(clock.expectedDuration > 0 ? clock.expectedDuration : clock.duration))
+                // S13: render "--:--" instead of "0:00" when we genuinely don't
+                // know the duration yet (live radio, HLS streams, tracks
+                // whose metadata hasn't resolved). `0:00` looks like a
+                // bug; `--:--` reads as "we don't know".
+                Text(durationLabel)
                     .font(.system(size: 12, weight: .medium, design: .monospaced))
                     .foregroundColor(.cyberDim)
             }
@@ -678,6 +686,18 @@ private struct ProgressSection: View {
         let mins = total / 60
         let secs = total % 60
         return String(format: "%d:%02d", mins, secs)
+    }
+
+    // S13: when neither `expectedDuration` (backend-supplied) nor
+    // `duration` (AVPlayer-resolved) has produced a value, fall back to
+    // the placeholder "--:--" so the UI doesn't display a misleading
+    // "0:00". Live radio content hides the scrubber entirely (see
+    // the parent `progressSection`'s `contentType != .liveRadio`
+    // guard) but for HLS / HTTP streams with unknown duration this
+    // branch fires.
+    private var durationLabel: String {
+        let resolved = clock.expectedDuration > 0 ? clock.expectedDuration : clock.duration
+        return resolved > 0 ? formatTime(resolved) : "--:--"
     }
 }
 
@@ -879,6 +899,18 @@ private struct ProgressSection: View {
                 }
             )
             .frame(maxWidth: .infinity)
+            // S13: pulse on the Queue button when a track is added from
+            // the Library. NotificationCenter posts `.trackAddedToQueue`
+            // from LibraryView's row context menu; we observe it here
+            // and animate the icon's scale 1.0 → 1.18 → 1.0.
+            .scaleEffect(queuePulseAmount)
+            .animation(.spring(response: 0.32, dampingFraction: 0.55), value: queuePulseAmount)
+            .onReceive(NotificationCenter.default.publisher(for: .trackAddedToQueue)) { _ in
+                queuePulseAmount = 1.18
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
+                    queuePulseAmount = 1.0
+                }
+            }
             
             // Sleep Timer
             PlayerControlButton(
@@ -1393,6 +1425,35 @@ struct AudioSettingsView: View {
                             .foregroundColor(.cyberDim)
                     } footer: {
                         Text("Walk DJ uses motion activity and notifications to suggest a seed song, then hands off to the existing related-song flow.")
+                            .foregroundColor(.cyberDim)
+                    }
+
+                    // S13: Loudness Normalization (Replay Gain).
+                    // Previously the toggle was UserDefaults-backed but
+                    // not exposed — users couldn't see or change it.
+                    // Default stays `true` to preserve current behavior.
+                    Section {
+                        Toggle(isOn: Binding(
+                            get: { PlayerState.replayGainEnabled },
+                            set: { PlayerState.replayGainEnabled = $0 }
+                        )) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Loudness Normalization")
+                                    .font(.body)
+                                    .foregroundColor(.white)
+                                Text("Match volume across tracks using Replay Gain metadata")
+                                    .font(.caption)
+                                    .foregroundColor(.cyberDim)
+                            }
+                        }
+                        .tint(Color.cyberCyan)
+                        .listRowBackground(Color.cyberSurface)
+                    } header: {
+                        Text("LOUDNESS")
+                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                            .foregroundColor(.cyberDim)
+                    } footer: {
+                        Text("When enabled, the backend's Replay Gain value (in dB) is applied as a pre-gain multiplier so quiet songs and loud songs play at similar volumes.")
                             .foregroundColor(.cyberDim)
                     }
 

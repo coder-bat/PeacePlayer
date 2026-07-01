@@ -216,49 +216,56 @@ struct QueueItemRow: View {
     var onTap: (() -> Void)? = nil
 
     var body: some View {
-        HStack(spacing: 12) {
-            Group {
-                if let artworkURL = item.track.artworkURL {
-                    CachedAsyncImage(url: artworkURL) {
+        // S13: Wrap the entire row content in a Button so the tap
+        // target is unambiguous and works alongside the row's
+        // `.contextMenu` and the SwiftUI `List` swipeActions the
+        // parent attaches. The previously-bare `.onTapGesture` could
+        // be eaten by the swipe gesture recognizer on iOS 16+.
+        Button {
+            onTap?()
+        } label: {
+            HStack(spacing: 12) {
+                Group {
+                    if let artworkURL = item.track.artworkURL {
+                        CachedAsyncImage(url: artworkURL) {
+                            placeholderView
+                        }
+                    } else {
                         placeholderView
                     }
-                } else {
-                    placeholderView
+                }
+                .frame(width: 50, height: 50)
+                .cornerRadius(6)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(item.track.title)
+                        .font(.system(size: 16, weight: isPlaying ? .semibold : .regular))
+                        .foregroundColor(isPlaying ? .cyberCyan : .white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+
+                    Text(item.track.displayArtist)
+                        .font(.system(size: 14))
+                        .foregroundColor(.cyberDim)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                }
+
+                Spacer()
+
+                if isPlaying {
+                    CyberPlayingBars()
+                        .frame(width: 20, height: 20)
                 }
             }
-            .frame(width: 50, height: 50)
-            .cornerRadius(6)
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(item.track.title)
-                    .font(.system(size: 16, weight: isPlaying ? .semibold : .regular))
-                    .foregroundColor(isPlaying ? .cyberCyan : .white)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-
-                Text(item.track.displayArtist)
-                    .font(.system(size: 14))
-                    .foregroundColor(.cyberDim)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-            }
-
-            Spacer()
-
-            if isPlaying {
-                CyberPlayingBars()
-                    .frame(width: 20, height: 20)
-            }
+            .padding(.vertical, 4)
+            .background(isPlaying ? Color.cyberCyan.opacity(0.08) : Color.clear)
+            .cornerRadius(8)
         }
-        .padding(.vertical, 4)
-        .background(isPlaying ? Color.cyberCyan.opacity(0.08) : Color.clear)
-        .cornerRadius(8)
-        .contentShape(Rectangle())
-        .onTapGesture {
-            if let onTap = onTap {
-                onTap()
-            }
-        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(item.track.title)
+        .accessibilityHint(item.track.displayArtist)
+        .accessibilityAddTraits(.isButton)
     }
 
     private var placeholderView: some View {

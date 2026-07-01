@@ -12,9 +12,13 @@ import SwiftUI
 
 struct AvatarPickerSheet: View {
     @StateObject private var profile = UserProfile.shared
+    @StateObject private var dataManager = DataManager.shared
+    @StateObject private var auth = AuthService.shared
     @Environment(\.dismiss) private var dismiss
     @State private var draftSelection: String
     @State private var draftName: String
+    @State private var showSignOutConfirmation = false
+    @State private var isSigningOut = false
 
     init() {
         let p = UserProfile.shared
@@ -52,6 +56,40 @@ struct AvatarPickerSheet: View {
 
                 ScrollView {
                     VStack(spacing: 20) {
+                        // S13: Listening-time stat at the top of the
+                        // profile sheet. Reads from DataManager.shared
+                        // (formatted via formattedListeningTime() which
+                        // already converts seconds to "Xh Ym").
+                        HStack(spacing: 14) {
+                            ZStack {
+                                Circle()
+                                    .fill(Theme.cyberCyan.opacity(0.18))
+                                    .frame(width: 44, height: 44)
+                                Image(systemName: "clock.fill")
+                                    .font(.system(size: 18))
+                                    .foregroundColor(Theme.cyberCyan)
+                            }
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("LISTENING TIME")
+                                    .font(Typography.eyebrow)
+                                    .foregroundColor(Theme.cyberDim)
+                                Text(dataManager.formattedListeningTime())
+                                    .font(.system(size: 17, weight: .semibold))
+                                    .foregroundColor(.white)
+                            }
+                            Spacer()
+                        }
+                        .padding(.vertical, 8)
+                        .padding(.horizontal, 14)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12)
+                                .fill(Theme.cyberSurface)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .stroke(Theme.cyberCyan.opacity(0.2), lineWidth: 1)
+                                )
+                        )
+
                         // Display name input
                         VStack(alignment: .leading, spacing: 6) {
                             Text("DISPLAY NAME (OPTIONAL)")
@@ -114,6 +152,39 @@ struct AvatarPickerSheet: View {
                                 .clipShape(RoundedRectangle(cornerRadius: 12))
                                 .shadow(color: Theme.cyberCyan.opacity(0.4), radius: 12)
                         }
+
+                        // S13: Sign Out — also reachable from Settings
+                        // Account section, but Profile sheet is the more
+                        // discoverable surface for active users.
+                        Button {
+                            showSignOutConfirmation = true
+                        } label: {
+                            HStack(spacing: 10) {
+                                if isSigningOut {
+                                    ProgressView()
+                                        .progressViewStyle(.circular)
+                                        .tint(.red)
+                                } else {
+                                    Image(systemName: "rectangle.portrait.and.arrow.right")
+                                        .foregroundColor(.red)
+                                }
+                                Text(isSigningOut ? "Signing Out…" : "Sign Out")
+                                    .foregroundColor(.red)
+                                Spacer()
+                            }
+                            .padding(.vertical, 14)
+                            .padding(.horizontal, 16)
+                            .background(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .fill(Color.red.opacity(0.08))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .stroke(Color.red.opacity(0.3), lineWidth: 1)
+                                    )
+                            )
+                        }
+                        .disabled(isSigningOut)
+                        .padding(.top, 12)
                     }
                     .padding(.horizontal, 20)
                     .padding(.top, 24)
@@ -122,6 +193,31 @@ struct AvatarPickerSheet: View {
             }
         }
         .preferredColorScheme(.dark)
+        // S13: Sign-out confirmation. Mirrors the dialog in Settings.
+        .confirmationDialog(
+            "Sign Out?",
+            isPresented: $showSignOutConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Sign Out", role: .destructive) {
+                Task { await performSignOut() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Your downloads stay on this device, but you'll need to sign in again to sync.")
+        }
+    }
+
+    // S13: async sign-out helper. Wraps AuthService.signOut() +
+    // widget reload. ContentView observes auth.isAuthenticated and
+    // bounces to LandingView once sign-out completes.
+    private func performSignOut() async {
+        isSigningOut = true
+        defer { isSigningOut = false }
+        await AuthService.shared.signOut()
+        WidgetSyncService.reloadAll()
+        HapticManager.medium()
+        dismiss()
     }
 }
 

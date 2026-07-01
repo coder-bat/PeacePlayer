@@ -123,6 +123,17 @@ struct AllRecentlyPlayedView: View {
     }
 }
 
+// S14: Navigation destinations accessible from the Home page header
+// chip cluster. The Home tab owns its own NavigationStack; tapping
+// Settings / Playlists / Radio chips pushes the destination into that
+// stack so swipe-from-edge back gesture works (instead of a modal
+// sheet that lacked nav chrome and looked like a "black bar").
+enum HomeDestination: Hashable {
+    case settings
+    case playlists
+    case radio
+}
+
 struct HomeView: View {
     @StateObject private var playerState = PlayerState.shared
     @StateObject private var viewModel = HomeViewModel()
@@ -133,9 +144,14 @@ struct HomeView: View {
     @State private var showAvatarPicker = false
     @State private var selectedTrack: Track?
     @State private var hasLoaded = false
+    // S14: path for Home's NavigationStack. Pushing onto this path
+    // animates the destination view in from the right and gives it a
+    // standard nav bar with a back button — replaces the previous
+    // modal-sheet behavior.
+    @State private var path: [HomeDestination] = []
 
     var body: some View {
-        NavigationView {
+        NavigationStack(path: $path) {
             ZStack {
                 // Animated background gradient
                 CyberBackground()
@@ -178,7 +194,21 @@ struct HomeView: View {
                         .transition(.opacity)
                 }
             }
-            .navigationBarHidden(true)
+            // S14: hide the standard nav bar on Home itself (the
+            // headerSection is the custom chrome). When a destination
+            // pushes onto the stack, that destination shows its own
+            // nav bar with a back button.
+            .toolbar(.hidden, for: .navigationBar)
+            .navigationDestination(for: HomeDestination.self) { destination in
+                switch destination {
+                case .settings:
+                    SettingsView()
+                case .playlists:
+                    PlaylistsView()
+                case .radio:
+                    RadioView(viewModel: RadioViewModel())
+                }
+            }
         }
         .task {
             guard !hasLoaded else { return }
@@ -207,19 +237,34 @@ struct HomeView: View {
             Spacer()
 
             // Top-right nav icons: Search, Radio, Playlists, Settings
+            // S14: each chip is wrapped in either a Button (Search, for
+            // a side-effect) or a NavigationLink (Radio / Playlists /
+            // Settings, to push into Home's stack). CyberIconChip is
+            // a pure visual so the outer wrapper's gesture handler
+            // fires reliably — previously the inner Button wrapper
+            // ate the tap and the NavigationLink never fired.
             HStack(spacing: 8) {
-                CyberIconChip(icon: "magnifyingglass") {
+                Button {
                     NotificationCenter.default.post(name: .switchTab, object: 1)
+                } label: {
+                    CyberIconChip(icon: "magnifyingglass")
                 }
-                CyberIconChip(icon: "antenna.radiowaves.left.and.right") {
-                    NotificationCenter.default.post(name: .openRadio, object: nil)
+                .buttonStyle(.plain)
+
+                NavigationLink(value: HomeDestination.radio) {
+                    CyberIconChip(icon: "antenna.radiowaves.left.and.right")
                 }
-                CyberIconChip(icon: "music.note.list") {
-                    NotificationCenter.default.post(name: .openPlaylists, object: nil)
+                .buttonStyle(.plain)
+
+                NavigationLink(value: HomeDestination.playlists) {
+                    CyberIconChip(icon: "music.note.list")
                 }
-                CyberIconChip(icon: "gearshape.fill") {
-                    NotificationCenter.default.post(name: .openSettings, object: nil)
+                .buttonStyle(.plain)
+
+                NavigationLink(value: HomeDestination.settings) {
+                    CyberIconChip(icon: "gearshape.fill")
                 }
+                .buttonStyle(.plain)
             }
         }
     }
@@ -292,7 +337,7 @@ struct HomeView: View {
     private var vibesSection: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Quick Vibes")
-                .font(.system(size: 12, weight: .bold, design: .monospaced))
+                .font(Typography.sectionHeader)
                 .foregroundColor(.cyberDim)
                 .padding(.horizontal, 20)
 
@@ -315,7 +360,7 @@ struct HomeView: View {
             if !favoriteArtists.isEmpty && !viewModel.artistSuggestions.isEmpty {
                 VStack(alignment: .leading, spacing: 16) {
                     Text("FOR YOU")
-                        .font(.system(size: 12, weight: .bold, design: .monospaced))
+                        .font(Typography.sectionHeader)
                         .foregroundColor(.cyberCyan)
                         .padding(.horizontal, 20)
 
@@ -324,7 +369,7 @@ struct HomeView: View {
                             VStack(alignment: .leading, spacing: 10) {
                                 HStack {
                                     Text(artist.uppercased())
-                                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                                        .font(Typography.eyebrow)
                                         .foregroundColor(.cyberMagenta)
 
                                     Spacer()
@@ -385,13 +430,50 @@ struct HomeView: View {
 
     // MARK: - Recently Played
     private var recentlyPlayedSection: some View {
+        // S13: Previously the entire Recently Played section silently
+        // disappeared when the user had no listening history. New users
+        // saw a wall of mostly-empty sections. Now we show a small
+        // "Get started" empty state instead, suggesting they tap a
+        // search tab to explore.
         Group {
-            if !viewModel.recentlyPlayed.isEmpty {
+            if viewModel.recentlyPlayed.isEmpty {
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("Recently Played")
+                        .font(Typography.sectionHeader)
+                        .foregroundColor(.cyberDim)
+                        .padding(.horizontal, 20)
+
+                    VStack(spacing: 12) {
+                        Image(systemName: "clock.arrow.circlepath")
+                            .font(.system(size: 36, weight: .light))
+                            .foregroundColor(.cyberDim.opacity(0.7))
+                        Text("Nothing here yet")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(.white)
+                        Text("Tracks you play will show up here")
+                            .font(.system(size: 12))
+                            .foregroundColor(.cyberDim.opacity(0.8))
+                            .multilineTextAlignment(.center)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 28)
+                    .padding(.horizontal, 20)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(Color.cyberSurface.opacity(0.4))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .stroke(Color.cyberDim.opacity(0.2), lineWidth: 1)
+                            )
+                    )
+                    .padding(.horizontal, 20)
+                }
+            } else {
                 let recentTracks = Array(viewModel.recentlyPlayed.prefix(20))
                 VStack(alignment: .leading, spacing: 16) {
                     HStack {
                         Text("Recently Played")
-                            .font(.system(size: 12, weight: .bold, design: .monospaced))
+                            .font(Typography.sectionHeader)
                             .foregroundColor(.cyberDim)
 
                         Spacer()
@@ -400,7 +482,7 @@ struct HomeView: View {
                             Button("View All") {
                                 showAllRecent = true
                             }
-                            .font(.system(size: 11, weight: .medium, design: .monospaced))
+                            .font(Typography.eyebrow)
                             .foregroundColor(.cyberCyan)
                         }
                     }
@@ -1047,25 +1129,28 @@ struct CyberButton: View {
 // MARK: - Cyber Icon Chip (compact header icon)
 struct CyberIconChip: View {
     let icon: String
-    let onTap: () -> Void
 
+    // S14: CyberIconChip is now a pure visual (no Button wrapper).
+    // Previously it wrapped its content in a `Button(action: onTap)`,
+    // which meant a NavigationLink with this chip as its label
+    // couldn't navigate — the inner Button's gesture handler ate
+    // the tap before the NavigationLink saw it. Callers now wrap
+    // the chip themselves: in a `Button` for actions, or in a
+    // `NavigationLink` for pushes.
     var body: some View {
-        Button(action: onTap) {
-            Image(systemName: icon)
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundColor(.cyberCyan)
-                .frame(width: 34, height: 34)
-                .background(
-                    RoundedRectangle(cornerRadius: 10)
-                        .fill(Color.cyberSurface)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 10)
-                                .stroke(Color.cyberCyan.opacity(0.25), lineWidth: 1)
-                        )
-                )
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(Text(accessibilityLabel))
+        Image(systemName: icon)
+            .font(.system(size: 14, weight: .semibold))
+            .foregroundColor(.cyberCyan)
+            .frame(width: 34, height: 34)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(Color.cyberSurface)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(Color.cyberCyan.opacity(0.25), lineWidth: 1)
+                    )
+            )
+            .accessibilityLabel(Text(accessibilityLabel))
     }
 
     private var accessibilityLabel: String {

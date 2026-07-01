@@ -13,6 +13,11 @@ struct RadioView: View {
     }
 
     var body: some View {
+        // S14 (post-hotfix): Radio is pushed INTO Home's
+        // NavigationStack — no inner NavigationStack wrapper. (An
+        // earlier iteration added one, which crashed on push: iOS
+        // does not allow NavigationStack nested inside another
+        // NavigationStack.)
         ZStack {
             Theme.cyberBackground.ignoresSafeArea()
 
@@ -58,6 +63,8 @@ struct RadioView: View {
                 }
             }
         }
+        .navigationTitle("Radio")
+        .navigationBarTitleDisplayMode(.inline)
         .task {
             viewModel.loadTopStations()
             viewModel.loadTopPodcasts()

@@ -35,7 +35,12 @@ struct WaveformSeekBar: View {
             }
             .drawingGroup()
             .contentShape(Rectangle())
-            .gesture(
+            // S13: use `.highPriorityGesture` so the scrubber wins over
+            // the parent `FullPlayer`'s drag-to-dismiss `.simultaneousGesture`
+            // when the user starts a scrub. Previously, vertical drags on
+            // the waveform could be intercepted by the parent dismiss
+            // gesture depending on the platform's hit-testing.
+            .highPriorityGesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { value in
                         let newProgress = min(max(0, Double(value.location.x / geo.size.width)), 1)
@@ -46,6 +51,24 @@ struct WaveformSeekBar: View {
                         onDragChange?(false)
                     }
             )
+            // S13: a11y — Canvas is opaque to VoiceOver by default.
+            // Expose the waveform as an adjustable element with progress
+            // percentage so users can scrub via VoiceOver swipe up/down.
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Playback position")
+            .accessibilityValue("\(Int(progress * 100)) percent")
+            .accessibilityAdjustableAction { direction in
+                let delta: Double = direction == .increment ? 0.05 : -0.05
+                let newProgress = min(max(0, progress + delta), 1)
+                onSeek(newProgress)
+                onDragChange?(true)
+                // Release the drag state after a brief moment so the
+                // waveform thumb doesn't get stuck in the "dragging"
+                // visual after a VoiceOver scrub.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                    onDragChange?(false)
+                }
+            }
         }
     }
 

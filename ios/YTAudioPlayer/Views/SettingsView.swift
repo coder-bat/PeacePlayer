@@ -2,21 +2,127 @@ import SwiftUI
 
 struct SettingsView: View {
     @StateObject private var favoriteArtists = FavoriteArtistsManager.shared
+    @StateObject private var auth = AuthService.shared
     @State private var showClearCacheConfirmation = false
+    @State private var showSignOutConfirmation = false
+    @State private var showAudioSettings = false  // S13
+    @State private var isSigningOut = false
     @State private var cacheSize: String = "Calculating..."
     @State private var newArtistText: String = ""
 
     var body: some View {
-        // NOTE: No NavigationView here - ContentView already manages navigation
+        // S14: Settings now lives inside Home's NavigationStack when
+        // pushed from the Home header chip. The standard nav bar (with
+        // back button) replaces the previous "sheet that had no nav
+        // chrome and looked like a black bar". The 24pt top spacer is
+        // reduced to 8pt because the nav bar already provides top
+        // padding; the extra 24pt only made sense under a bare sheet.
         ZStack {
             Theme.cyberBackground.ignoresSafeArea()
 
-            // 2026-06-28 (S6): top padding so the first section
-            // clears the top safe area instead of hugging the
-            // status bar / dynamic island.
             VStack(spacing: 0) {
-                Color.clear.frame(height: 24)
+                Color.clear.frame(height: 8)
             List {
+                // MARK: - Account Section (S13)
+                // S13: Account actions belong at the top of Settings, not
+                // buried at the bottom. Currently shows the signed-in
+                // identifier (email if known, userId fallback) and a
+                // destructive Sign Out row. Tapping Sign Out fires a
+                // confirmation, then calls AuthService.signOut() (which
+                // clears Keychain + SyncService.handleSignOut) and
+                // WidgetSyncService.reloadAll() so lock-screen / home
+                // widgets don't show stale Now Playing.
+                Section {
+                    HStack(spacing: 16) {
+                        ZStack {
+                            Circle()
+                                .fill(Theme.cyberCyan.opacity(0.2))
+                                .frame(width: 44, height: 44)
+
+                            Image(systemName: "person.crop.circle.fill")
+                                .font(.system(size: 22))
+                                .foregroundColor(Theme.cyberCyan)
+                        }
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(auth.email ?? auth.userId ?? "Signed In")
+                                .font(.system(size: 17, weight: .semibold))
+                                .foregroundColor(.white)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+
+                            Text("Apple ID")
+                                .font(.caption)
+                                .foregroundColor(.green)
+                        }
+
+                        Spacer()
+                    }
+                    .padding(.vertical, 4)
+                    .listRowBackground(Theme.cyberSurface)
+
+                    Button {
+                        showSignOutConfirmation = true
+                    } label: {
+                        HStack(spacing: 12) {
+                            if isSigningOut {
+                                ProgressView()
+                                    .progressViewStyle(.circular)
+                                    .tint(.red)
+                            } else {
+                                Image(systemName: "rectangle.portrait.and.arrow.right")
+                                    .foregroundColor(.red)
+                            }
+                            Text(isSigningOut ? "Signing Out…" : "Sign Out")
+                                .foregroundColor(.red)
+                        }
+                    }
+                    .disabled(isSigningOut)
+                    .listRowBackground(Theme.cyberSurface)
+                } header: {
+                    Text("Account")
+                        .font(Typography.sectionHeader)
+                        .foregroundColor(Theme.cyberCyan)
+                        .textCase(.uppercase)
+                }
+
+                // MARK: - Audio Section (S13)
+                // S13: Audio settings (Crossfade, Gapless, Adaptive Walk
+                // DJ, Loudness Normalization) were only reachable via a
+                // deep button inside the FullPlayer's more-actions row.
+                // This row surfaces them at the top level of Settings.
+                // AudioSettingsView lives inside FullPlayer.swift but is
+                // already default-internal, so we can present it here
+                // without extracting or duplicating the file.
+                Section {
+                    Button {
+                        showAudioSettings = true
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "slider.horizontal.3")
+                                .foregroundColor(Theme.cyberCyan)
+                                .frame(width: 28)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Audio")
+                                    .foregroundColor(.white)
+                                Text("Crossfade, gapless, loudness")
+                                    .font(.caption)
+                                    .foregroundColor(Theme.cyberDim)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption)
+                                .foregroundColor(Theme.cyberDim)
+                        }
+                    }
+                    .listRowBackground(Theme.cyberSurface)
+                } header: {
+                    Text("Audio")
+                        .font(Typography.sectionHeader)
+                        .foregroundColor(Theme.cyberCyan)
+                        .textCase(.uppercase)
+                }
+
                 // MARK: - Music Sources Section
                 Section {
                     // YouTube (always active)
@@ -50,7 +156,7 @@ struct SettingsView: View {
                     .listRowBackground(Theme.cyberSurface)
                 } header: {
                     Text("Music Sources")
-                        .font(.system(size: 13, weight: .bold, design: .monospaced))
+                        .font(Typography.sectionHeader)
                         .foregroundColor(Theme.cyberCyan)
                         .textCase(.uppercase)
                 }
@@ -144,7 +250,7 @@ struct SettingsView: View {
                         Image(systemName: "music.mic")
                             .foregroundColor(Theme.cyberMagenta)
                         Text("Favorite Artists")
-                            .font(.system(size: 13, weight: .bold, design: .monospaced))
+                            .font(Typography.sectionHeader)
                             .foregroundColor(Theme.cyberCyan)
                             .textCase(.uppercase)
                     }
@@ -187,7 +293,7 @@ struct SettingsView: View {
                     .listRowBackground(Theme.cyberSurface)
                 } header: {
                     Text("Storage")
-                        .font(.system(size: 13, weight: .bold, design: .monospaced))
+                        .font(Typography.sectionHeader)
                         .foregroundColor(Theme.cyberCyan)
                         .textCase(.uppercase)
                 }
@@ -212,7 +318,7 @@ struct SettingsView: View {
                     .listRowBackground(Theme.cyberSurface)
                 } header: {
                     Text("About")
-                        .font(.system(size: 13, weight: .bold, design: .monospaced))
+                        .font(Typography.sectionHeader)
                         .foregroundColor(Theme.cyberCyan)
                         .textCase(.uppercase)
                 }
@@ -221,8 +327,6 @@ struct SettingsView: View {
             .background(Theme.cyberBackground)
             }
         }
-        .navigationTitle("Settings")
-        .navigationBarTitleDisplayMode(.large)
         .confirmationDialog(
             "Clear Cache?",
             isPresented: $showClearCacheConfirmation,
@@ -235,10 +339,52 @@ struct SettingsView: View {
         } message: {
             Text("This will remove all cached artwork and temporary files. Your downloaded music will not be affected.")
         }
+        // S13: Sign Out confirmation — destructive action that requires
+        // explicit user consent. We don't ask for account password since
+        // AuthService.signOut() posts to /auth/signout with the bearer
+        // token (a logout clears the local Keychain + revokes the server
+        // session in one step). After sign-out completes we reload all
+        // widgets so home / lock-screen widgets don't show stale data.
+        .confirmationDialog(
+            "Sign Out?",
+            isPresented: $showSignOutConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Sign Out", role: .destructive) {
+                Task { await performSignOut() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Your downloads stay on this device, but you'll need to sign in again to sync.")
+        }
         .onAppear {
             calculateCacheSize()
         }
         .preferredColorScheme(.dark)
+        // S14: standard nav chrome when pushed into Home's
+        // NavigationStack. `.navigationTitle` shows in the system
+        // nav bar; the back button is auto-provided.
+        .navigationTitle("Settings")
+        .navigationBarTitleDisplayMode(.inline)
+        // S13: Audio settings sheet (reuses AudioSettingsView defined in
+        // FullPlayer.swift — default-internal struct, no extraction
+        // needed).
+        .sheet(isPresented: $showAudioSettings) {
+            AudioSettingsView()
+                .preferredColorScheme(.dark)
+        }
+    }
+
+    // S13: Async sign-out flow. Wraps AuthService.signOut() (which posts
+    // to backend, clears Keychain, and calls SyncService.handleSignOut),
+    // then reloads widget timelines. ContentView observes
+    // auth.isAuthenticated and flips back to LandingView automatically.
+    private func performSignOut() async {
+        isSigningOut = true
+        defer { isSigningOut = false }
+        await AuthService.shared.signOut()
+        WidgetSyncService.reloadAll()
+        HapticManager.medium()
     }
 
     private func calculateCacheSize() {

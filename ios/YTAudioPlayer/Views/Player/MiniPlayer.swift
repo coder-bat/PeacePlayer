@@ -126,6 +126,10 @@ struct MiniPlayer: View {
                             Circle().fill(Theme.cyberCyan.opacity(0.25))
                         )
                 }
+                // S13: expand hit target to 44pt without changing the
+                // visual size — HIG minimum for icon-only buttons.
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
                 .accessibilityLabel(playerState.playbackState.isPlaying ? "Pause" : "Play")
 
                 // Next — 26pt, no background ring.
@@ -138,6 +142,10 @@ struct MiniPlayer: View {
                         .foregroundColor(.white.opacity(0.9))
                         .frame(width: 26, height: 26)
                 }
+                // S13: expand hit target to 44pt without changing the
+                // visual size — HIG minimum for icon-only buttons.
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
                 .accessibilityLabel("Next track")
                 .disabled(!playerState.hasNextTrack)
                 .opacity(playerState.hasNextTrack ? 1 : 0.3)

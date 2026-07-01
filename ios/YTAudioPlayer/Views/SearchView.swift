@@ -26,7 +26,11 @@ struct SearchView: View {
     @FocusState private var isSearchFocused: Bool
 
     var body: some View {
-        NavigationView {
+        // S14: NavigationStack replaces the deprecated NavigationView
+        // so the Search tab's chrome (custom search bar header +
+        // toolbar) is consistent with the rest of the app's iOS 16+
+        // patterns.
+        NavigationStack {
             VStack(spacing: 0) {
                 // Custom header + search bar
                 VStack(spacing: 12) {
@@ -188,7 +192,7 @@ struct SearchView: View {
                     Section(header:
                         HStack {
                             Text("SONGS")
-                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                .font(Typography.eyebrow)
                                 .foregroundColor(.cyberDim)
                             Spacer()
                             Text("\(viewModel.results.count)")

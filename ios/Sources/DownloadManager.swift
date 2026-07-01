@@ -238,10 +238,27 @@ class DownloadManager: ObservableObject {
     
     private var progressTimer: Timer?
     private var downloadDelegate: DownloadProgressDelegate?
+    // S13: stalled-watchdog state. `lastObservedProgress` is updated
+    // every time `handleDownloadProgress` fires; the watchdog timer
+    // ticks every 5s and compares it to the previously-observed value.
+    // Two consecutive unchanged ticks (10s of zero progress) means the
+    // download is stuck — we surface a user-visible error and mark the
+    // task as failed.
+    private var lastObservedProgress: Double = 0
+    private var lastObservedTaskId: UUID?
+    private var stalledTickCount: Int = 0
+    private let stallTickThreshold = 2   // 2 ticks × 5s = 10s stalled
+    private let stallTickInterval: TimeInterval = 5
 
     private func performDownload(_ task: DownloadTask) {
         // Start with a small progress to show activity
         updateProgress(for: task.id, progress: 0.05)
+
+        // S13: reset watchdog state for this new task.
+        lastObservedProgress = 0.05
+        lastObservedTaskId = task.id
+        stalledTickCount = 0
+        startStallWatchdog(taskId: task.id)
 
         // Get stream URL first, then download to local storage
         currentTask = StreamURLCache.shared.getStreamUrl(videoId: task.track.videoId)
@@ -249,6 +266,14 @@ class DownloadManager: ObservableObject {
                 receiveCompletion: { [weak self] completion in
                     switch completion {
                     case .failure(let error):
+                        // S13: stream URL fetch failed → stop the watchdog
+                        // before calling handleDownloadFailure (it will
+                        // also tear down via the failure path, but cancel
+                        // explicitly for clarity).
+                        DispatchQueue.main.async { [weak self] in
+                            self?.progressTimer?.invalidate()
+                            self?.progressTimer = nil
+                        }
                         self?.handleDownloadFailure(task.id, error: "\(error)")
                         self?.isDownloading = false
                         self?.processQueue()
@@ -270,6 +295,52 @@ class DownloadManager: ObservableObject {
             )
     }
 
+    // S13: Start (or restart) the stalled-watchdog timer. Cancels any
+    // existing timer first so we don't double-fire.
+    private func startStallWatchdog(taskId: UUID) {
+        progressTimer?.invalidate()
+        stalledTickCount = 0
+        progressTimer = Timer.scheduledTimer(
+            withTimeInterval: stallTickInterval,
+            repeats: true
+        ) { [weak self] _ in
+            self?.stallWatchdogTick(taskId: taskId)
+        }
+    }
+
+    // S13: Each tick, compare the latest known progress with the
+    // previously-known value. If they're equal AND the task is still
+    // in activeDownloads, count this as a stall tick. After 2 stall
+    // ticks (10s) we surface a toast and fail the task.
+    private func stallWatchdogTick(taskId: UUID) {
+        // Verify the task is still active (not completed/failed/cancelled
+        // via another path).
+        guard activeDownloads.contains(where: { $0.id == taskId }) else {
+            progressTimer?.invalidate()
+            progressTimer = nil
+            return
+        }
+
+        if let currentProgress = activeDownloads.first(where: { $0.id == taskId })?.progress,
+           currentProgress == lastObservedProgress,
+           currentProgress < 1.0 {
+            stalledTickCount += 1
+            if stalledTickCount >= stallTickThreshold {
+                progressTimer?.invalidate()
+                progressTimer = nil
+                let title = activeDownloads.first(where: { $0.id == taskId })?.track.title ?? "Track"
+                ErrorHandler.shared.show(.downloadFailed("\(title) stalled — no progress for 10 seconds."))
+                handleDownloadFailure(taskId, error: "Stalled: no progress for 10s")
+                isDownloading = false
+                processQueue()
+            }
+        } else {
+            // Progress advanced — reset the stall counter.
+            stalledTickCount = 0
+            lastObservedProgress = activeDownloads.first(where: { $0.id == taskId })?.progress ?? 0
+        }
+    }
+
     func handleDownloadProgress(trackId: String, progress: Double) {
         // Thread-safe access to activeDownloads
         stateQueue.async { [weak self] in
@@ -279,6 +350,15 @@ class DownloadManager: ObservableObject {
             }
             let taskId = self.activeDownloads[index].id
             self.updateProgress(for: taskId, progress: progress)
+
+            // S13: real progress arrived → reset the stalled-watchdog.
+            // The stall counter only increments when progress is unchanged
+            // across timer ticks; normal progression keeps it at zero.
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                self.lastObservedProgress = progress
+                self.stalledTickCount = 0
+            }
         }
     }
 
@@ -291,6 +371,14 @@ class DownloadManager: ObservableObject {
             }
             let taskId = self.activeDownloads[index].id
             let track = self.activeDownloads[index].track
+
+            // S13: a successful download means the watchdog is no longer
+            // needed; cancel it so we don't false-positive-stall the next
+            // task that re-uses the timer slot.
+            DispatchQueue.main.async { [weak self] in
+                self?.progressTimer?.invalidate()
+                self?.progressTimer = nil
+            }
 
             // Save to Core Data (can be done on background queue)
             self.saveDownloadToCoreData(track: track, fileURL: fileURL)
@@ -309,6 +397,13 @@ class DownloadManager: ObservableObject {
                 return
             }
             let taskId = self.activeDownloads[index].id
+
+            // S13: failed download → stop the watchdog.
+            DispatchQueue.main.async { [weak self] in
+                self?.progressTimer?.invalidate()
+                self?.progressTimer = nil
+            }
+
             self.handleDownloadFailure(taskId, error: error.localizedDescription)
             self.isDownloading = false
             self.processQueue()

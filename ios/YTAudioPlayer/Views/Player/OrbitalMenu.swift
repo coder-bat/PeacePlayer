@@ -99,6 +99,11 @@ struct OrbitalMenu: View {
         .onTapGesture {
             dismiss()
         }
+        // S13: a11y — VoiceOver users need a label and button trait to
+        // know this large center circle is the dismiss control. 80pt
+        // hit target already exceeds HIG minimum (44pt).
+        .accessibilityLabel("Dismiss orbital menu")
+        .accessibilityAddTraits(.isButton)
     }
 
     private func orbitingIcon(item: OrbitalMenuItem, index: Int) -> some View {
@@ -127,6 +132,12 @@ struct OrbitalMenu: View {
             HapticManager.medium()
             onSelectTab(item.tabTag)
         }
+        // S13: a11y for orbiting icons. VoiceOver users get the
+        // human-readable label (e.g. "Home") instead of the SF Symbol
+        // name ("house.fill").
+        .accessibilityLabel(item.label)
+        .accessibilityHint("Switch to \(item.label)")
+        .accessibilityAddTraits(.isButton)
         .onLongPressGesture(minimumDuration: 0.3, pressing: { pressing in
             if pressing {
                 withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
