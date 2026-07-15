@@ -189,9 +189,16 @@ class PlaylistManager: ObservableObject {
         } else {
             likedTracks.insert(trackId)
             HapticManager.success()
+            // S15: Anti-Algorithm session likes count. The engine
+            // no-ops when not exploring, so it's safe to call from
+            // any like-tap surface. Currently, the only callsite that
+            // wires this is here — the FullPlayer's LikeButton, the
+            // MiniPlayer's heart, and the context-menu "Like" all
+            // funnel through `toggleLike(trackId:)`.
+            AntiAlgorithmEngine.shared.trackLiked(videoId: trackId)
         }
         savePlaylists()
-        
+
         // Refresh favorites playlist if it exists
         if let index = playlists.firstIndex(where: { $0.isLikedSongsPlaylist }) {
             refreshSmartPlaylist(at: index)
