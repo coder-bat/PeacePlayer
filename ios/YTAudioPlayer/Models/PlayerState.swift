@@ -1741,6 +1741,22 @@ class PlayerState: ObservableObject {
     /// `isPlaybackLikelyToKeepUp` observer once the new track is
     /// audibly playing (see setupPlayerObservers).
     private func autoplayNextFromRecentlyPlayed() {
+        // S15: this is called from the AVPlayer KVO observer
+        // (`isPlaybackLikelyToKeepUp` on a background queue) via
+        // `handleTrackCompletion` -> `nextTrack`. Everything inside
+        // mutates @Published properties on `dataManager`,
+        // `currentItem`, etc. SwiftUI requires those mutations to
+        // happen on the main thread, otherwise the runtime emits
+        // 'Publishing changes from background threads is not
+        // allowed' warnings and views can render inconsistent
+        // state. Hop to main before reading or writing any UI
+        // state.
+        DispatchQueue.main.async { [weak self] in
+            self?._autoplayNextFromRecentlyPlayedOnMain()
+        }
+    }
+
+    private func _autoplayNextFromRecentlyPlayedOnMain() {
         let justPlayedId = currentItem?.track.videoId
         let candidates = dataManager.recentlyPlayed
             .filter { $0.videoId != justPlayedId }
