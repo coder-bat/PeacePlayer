@@ -129,10 +129,28 @@ class AudioExtractor:
         # Create safe filename
         title = metadata.get('title', 'Unknown')
         artists = metadata.get('artists', ['Unknown'])
-        
-        safe_title = "".join(c for c in title if c.isalnum() or c in (' ', '-', '_')).strip()
-        safe_artist = "".join(c for c in artists[0] if c.isalnum() or c in (' ', '-', '_')).strip()
-        
+
+        # S15: use a Unicode-aware sanitizer. The previous
+        # `c.isalnum()` check strips all CJK characters (and any
+        # other non-ASCII letter/digit), so a Mandarin / Japanese
+        # / Korean title becomes an empty string and the
+        # download fails the moment the file system rejects an
+        # empty filename. We allow Unicode letters, marks, and
+        # numbers, plus space/hyphen/underscore/parentheses for
+        # common music-title characters. Anything else (control
+        # chars, slashes, colons) is replaced with a hyphen.
+        import re
+        _keep_pattern = re.compile(
+            r"[^\w\s\-\u2014\u2013()\u3000\u3001\u3002\u2026]",
+            re.UNICODE,
+        )
+        safe_title = _keep_pattern.sub('-', title).strip()
+        if not safe_title:
+            safe_title = f"track-{video_id}"
+        safe_artist = _keep_pattern.sub('-', artists[0]).strip() if artists else "Unknown Artist"
+        if not safe_artist:
+            safe_artist = f"artist-{video_id}"
+
         filename = f"{safe_title} - {safe_artist}.m4a"
         output_path = self.output_dir / filename
         
