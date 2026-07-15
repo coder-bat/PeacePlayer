@@ -176,10 +176,10 @@ struct AvatarPickerSheet: View {
                             .padding(.horizontal, 16)
                             .background(
                                 RoundedRectangle(cornerRadius: 12)
-                                    .fill(Color.red.opacity(0.08))
+                                    .fill(Theme.error.opacity(0.08))
                                     .overlay(
                                         RoundedRectangle(cornerRadius: 12)
-                                            .stroke(Color.red.opacity(0.3), lineWidth: 1)
+                                            .stroke(Theme.error.opacity(0.3), lineWidth: 1)
                                     )
                             )
                         }

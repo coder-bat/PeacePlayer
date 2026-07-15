@@ -181,7 +181,7 @@ private struct PlayingContent: View {
 
     private var progressBar: some View {
         Capsule()
-            .fill(Color.white.opacity(0.1))
+            .fill(WidgetTheme.subtleSurface)
             .frame(maxWidth: .infinity)
             .frame(height: 3)
             .overlay(alignment: .leading) {
@@ -211,7 +211,7 @@ private struct PlayingContent: View {
             transportControls
             Spacer(minLength: 8)
             Rectangle()
-                .fill(Color.white.opacity(0.15))
+                .fill(WidgetTheme.softSurface)
                 .frame(width: 0.5, height: 20)
             Spacer(minLength: 8)
             volumeControls
@@ -341,7 +341,7 @@ private struct PlayingContent: View {
     private func vuSegment(index i: Int, filled: Int, total: Int) -> some View {
         let on = i < filled
         let bar = RoundedRectangle(cornerRadius: 1.5)
-            .fill(on ? WidgetTheme.cyberCyan.opacity(0.5 + Double(i) * 0.045) : Color.white.opacity(0.1))
+            .fill(on ? WidgetTheme.cyberCyan.opacity(0.5 + Double(i) * 0.045) : WidgetTheme.subtleSurface)
             .frame(width: 4, height: CGFloat(on ? 7 + i : 5))
         if #available(iOSApplicationExtension 17.0, *) {
             let intent: WidgetSetVolumeIntent = {

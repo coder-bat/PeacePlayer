@@ -307,10 +307,10 @@ struct FullPlayer: View {
                 .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
                 .overlay(
                     RoundedRectangle(cornerRadius: CornerRadius.md)
-                        .stroke(currentTrackIsLiked ? Color.red.opacity(0.55) : Color.clear, lineWidth: currentTrackIsLiked ? 1.5 : 0)
+                        .stroke(currentTrackIsLiked ? Theme.cyberMagenta.opacity(0.55) : Color.clear, lineWidth: currentTrackIsLiked ? 1.5 : 0)
                 )
                 .shadow(
-                    color: currentTrackIsLiked ? Color.red.opacity(likePulse ? 0.45 : 0.22) : .black.opacity(0.3),
+                    color: currentTrackIsLiked ? Theme.cyberMagenta.opacity(likePulse ? 0.45 : 0.22) : .black.opacity(0.3),
                     radius: currentTrackIsLiked ? (likePulse ? 26 : 18) : 20,
                     x: 0,
                     y: 10
@@ -459,7 +459,7 @@ struct FullPlayer: View {
                 .stroke(
                     showingVisualizer
                         ? Color.cyberCyan.opacity(0.4)
-                        : (currentTrackIsLiked ? Color.red.opacity(0.4) : Color.white.opacity(0.06)),
+                        : (currentTrackIsLiked ? Theme.cyberMagenta.opacity(0.4) : Color.white.opacity(0.06)),
                     lineWidth: 1
                 )
         )
@@ -467,7 +467,7 @@ struct FullPlayer: View {
         .shadow(
             color: showingVisualizer
                 ? Color.cyberCyan.opacity(0.25)
-                : (currentTrackIsLiked ? Color.red.opacity(0.2) : Color.black.opacity(0.3)),
+                : (currentTrackIsLiked ? Theme.cyberMagenta.opacity(0.2) : Color.black.opacity(0.3)),
             radius: 12,
             x: 0, y: 4
         )

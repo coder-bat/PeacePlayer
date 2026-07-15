@@ -159,7 +159,7 @@ struct AudiobookDetailView: View {
                     .overlay(
                         Capsule()
                             .strokeBorder(
-                                inLibrary ? Color.red.opacity(0.4) : Theme.cyberCyan.opacity(0.4),
+                                inLibrary ? Theme.cyberMagenta.opacity(0.4) : Theme.cyberCyan.opacity(0.4),
                                 lineWidth: 1
                             )
                     )

@@ -225,7 +225,7 @@ struct MediumResumeView: View {
                         GeometryReader { geo in
                             ZStack(alignment: .leading) {
                                 Capsule()
-                                    .fill(Color.white.opacity(0.1))
+                                    .fill(WidgetTheme.subtleSurface)
                                     .frame(height: 3)
                                 Capsule()
                                     .fill(

@@ -55,10 +55,10 @@ struct SongMemorySheet: View {
                                 .padding(.vertical, 14)
                                 .background(
                                     RoundedRectangle(cornerRadius: 12)
-                                        .fill(Color.red.opacity(0.18))
+                                        .fill(Theme.error.opacity(0.18))
                                         .overlay(
                                             RoundedRectangle(cornerRadius: 12)
-                                                .stroke(Color.red.opacity(0.35), lineWidth: 1)
+                                                .stroke(Theme.error.opacity(0.35), lineWidth: 1)
                                         )
                                 )
                             }

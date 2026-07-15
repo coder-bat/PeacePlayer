@@ -166,7 +166,7 @@ private struct PlayingContent: View {
 
     private var progressBar: some View {
         Capsule()
-            .fill(Color.white.opacity(0.12))
+            .fill(WidgetTheme.subtleSurface)
             .frame(maxWidth: .infinity)
             .frame(height: 3)
             .overlay(alignment: .leading) {

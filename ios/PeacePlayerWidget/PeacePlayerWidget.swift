@@ -229,7 +229,7 @@ struct MediumNowPlayingView: View {
                 GeometryReader { geo in
                     ZStack(alignment: .leading) {
                         RoundedRectangle(cornerRadius: 2)
-                            .fill(Color.white.opacity(0.2))
+                            .fill(WidgetTheme.softSurface)
                             .frame(height: 3)
                         RoundedRectangle(cornerRadius: 2)
                             .fill(WidgetTheme.cyberCyan)

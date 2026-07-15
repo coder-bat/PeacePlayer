@@ -22,8 +22,8 @@ class ShareCardGenerator {
 
             // Draw gradient background
             let gradientColors = [
-                UIColor(red: 0.1, green: 0.1, blue: 0.2, alpha: 1.0).cgColor,
-                UIColor(red: 0.2, green: 0.1, blue: 0.3, alpha: 1.0).cgColor
+                UIColor(red: 0.08, green: 0.08, blue: 0.12, alpha: 1.0).cgColor,    // Theme.cyberSurface
+                UIColor(red: 0.12, green: 0.08, blue: 0.18, alpha: 1.0).cgColor     // darker cyber surface accent
             ]
             let gradient = CGGradient(
                 colorsSpace: CGColorSpaceCreateDeviceRGB(),

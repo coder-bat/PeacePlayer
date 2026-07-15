@@ -144,9 +144,9 @@ struct SleepTimerView: View {
                     .foregroundColor(.red)
                     .frame(maxWidth: .infinity)
                     .padding()
-                    .background(Color.red.opacity(0.15))
+                    .background(Theme.error.opacity(0.15))
                     .cornerRadius(12)
-                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.red.opacity(0.3), lineWidth: 0.5))
+                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.error.opacity(0.3), lineWidth: 0.5))
             }
             .padding(.horizontal, 32)
         }

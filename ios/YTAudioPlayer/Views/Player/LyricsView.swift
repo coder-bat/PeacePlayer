@@ -88,7 +88,7 @@ struct LyricsView: View {
         VStack(spacing: 16) {
             Image(systemName: "exclamationmark.triangle")
                 .font(.system(size: 60))
-                .foregroundColor(.orange)
+                .foregroundColor(Theme.warning)
             
             Text("Couldn't Load Lyrics")
                 .font(.title3)

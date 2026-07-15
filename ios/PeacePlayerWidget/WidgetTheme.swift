@@ -29,4 +29,10 @@ enum WidgetTheme {
     static let subtleText = Color.white.opacity(0.35)
     static let strongText = Color.white.opacity(0.85)
     static let shadowOverlay = Color.black.opacity(0.5)
+
+    // Background tints — subtle white wash for inactive surfaces
+    // and slightly more visible fills for separators / hover.
+    static let subtleSurface = Color.white.opacity(0.1)
+    static let faintSurface = Color.white.opacity(0.06)
+    static let softSurface = Color.white.opacity(0.15)
 }

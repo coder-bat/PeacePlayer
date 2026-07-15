@@ -314,7 +314,7 @@ struct PlaylistsWidgetView: View {
             }
 
             Rectangle()
-                .fill(Color.white.opacity(0.06))
+                .fill(WidgetTheme.faintSurface)
                 .frame(height: 0.5)
                 .padding(.horizontal, 14)
 
@@ -383,7 +383,7 @@ private struct PlaylistRow: View {
 
             if showDivider {
                 Rectangle()
-                    .fill(Color.white.opacity(0.05))
+                    .fill(WidgetTheme.faintSurface)
                     .frame(height: 0.5)
                     .padding(.horizontal, 14)
             }
