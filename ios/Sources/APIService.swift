@@ -25,15 +25,26 @@ enum APIError: Error {
 class APIService {
     static let shared = APIService()
     
-    // ⚠️ ⚠️ ⚠️ CHANGE THIS TO YOUR MAC'S IP ADDRESS ⚠️ ⚠️ ⚠️
-    // Find your IP: run 'make ip' in terminal
-    // Example: "http://192.x.x.x:8181"
+    // S15: the previous code hardcoded the Mac's Tailscale IP
+    // (`100.77.213.42`) as the device-build default, so the app
+    // was non-functional on any other network. Now we read an
+    // optional UserDefaults override (`peaceplayer.api_base_url`,
+    // settable from the Settings screen or by writing
+    // `defaults write com.ytaudioplayer.app peaceplayer.api_base_url http://...`
+    // from a shell). Falls back to the simulator-friendly
+    // localhost and the Tailscale defaults for compatibility.
+    static let baseURLOverrideDefaultsKey = "peaceplayer.api_base_url"
     let baseURL: String = {
+        if let override = UserDefaults.standard.string(forKey: baseURLOverrideDefaultsKey),
+           !override.isEmpty {
+            return override
+        }
         #if targetEnvironment(simulator)
         return "http://localhost:8181"
         #else
-        // Set this to your Mac's Tailscale hostname or local IP
-        // Example: "http://192.168.x.x:8181" or "http://your-machine-name:8181"
+        // Default for device builds: Tailscale IP. Override
+        // with the UserDefaults key above if your Mac is on a
+        // different network.
         return "http://100.77.213.42:8181"
         #endif
     }()

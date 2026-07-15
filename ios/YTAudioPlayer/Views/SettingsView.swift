@@ -9,6 +9,10 @@ struct SettingsView: View {
     @State private var isSigningOut = false
     @State private var cacheSize: String = "Calculating..."
     @State private var newArtistText: String = ""
+    // S15: editable backend host. Persisted to UserDefaults under
+    // APIService.baseURLOverrideDefaultsKey and read on the
+    // next launch (or immediately on save).
+    @State private var serverHostDraft: String = UserDefaults.standard.string(forKey: APIService.baseURLOverrideDefaultsKey) ?? ""
 
     var body: some View {
         // S14: Settings now lives inside Home's NavigationStack when
@@ -296,6 +300,84 @@ struct SettingsView: View {
                         .font(Typography.sectionHeader)
                         .foregroundColor(Theme.cyberCyan)
                         .textCase(.uppercase)
+                }
+
+                // MARK: - Backend Section (S15)
+                // S15: editable override for the backend host.
+                // Persisted via UserDefaults so a Mac on a different
+                // network doesn't require a rebuild. The default
+                // (Tailscale IP) is shown in the current value row
+                // when the field is empty.
+                Section {
+                    HStack {
+                        Label {
+                            Text("Backend Host")
+                        } icon: {
+                            Image(systemName: "server.rack")
+                                .foregroundColor(Theme.cyberCyan)
+                        }
+                        .foregroundColor(.white)
+
+                        Spacer()
+
+                        Text(APIService.shared.baseURL)
+                            .font(.system(size: 13, weight: .medium, design: .monospaced))
+                            .foregroundColor(Theme.cyberCyan.opacity(0.8))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                    .listRowBackground(Theme.cyberSurface)
+
+                    HStack {
+                        Image(systemName: "pencil")
+                            .foregroundColor(Theme.cyberCyan)
+                            .frame(width: 22)
+                        TextField(
+                            "e.g. http://192.168.1.10:8181",
+                            text: $serverHostDraft
+                        )
+                        .keyboardType(.URL)
+                        .autocapitalization(.none)
+                        .autocorrectionDisabled()
+                        .foregroundColor(.white)
+                        if !serverHostDraft.isEmpty {
+                            Button {
+                                serverHostDraft = ""
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundColor(.secondary)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .listRowBackground(Theme.cyberSurface)
+
+                    Button {
+                        let trimmed = serverHostDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if trimmed.isEmpty {
+                            UserDefaults.standard.removeObject(forKey: APIService.baseURLOverrideDefaultsKey)
+                        } else {
+                            UserDefaults.standard.set(trimmed, forKey: APIService.baseURLOverrideDefaultsKey)
+                        }
+                        HapticManager.success()
+                    } label: {
+                        HStack {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundColor(Theme.cyberCyan)
+                            Text("Save (restart app to apply)")
+                                .foregroundColor(.white)
+                        }
+                    }
+                    .listRowBackground(Theme.cyberSurface)
+                } header: {
+                    Text("Backend")
+                        .font(Typography.sectionHeader)
+                        .foregroundColor(Theme.cyberCyan)
+                        .textCase(.uppercase)
+                } footer: {
+                    Text("Override the default backend host. Leave empty to use the built-in default.")
+                        .font(.caption)
+                        .foregroundColor(Theme.tertiaryText)
                 }
 
                 // MARK: - About Section
