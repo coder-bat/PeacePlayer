@@ -33,7 +33,27 @@
 	<string>1</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
-		<key>NSAllowsArbitraryLoads</key>
+		<!-- S17 (CV-4): removed NSAllowsArbitraryLoads=true.
+		     That key was a MITM vector — any URL the user
+		     typed in Settings (LAN IP, Tailscale IP, but
+		     also a malicious public HTTP server) would be
+		     accepted, defeating ATS's HTTPS-only default
+		     on iOS 9+. Instead we now allow ONLY local
+		     networking (LAN + Tailscale / link-local) and
+		     reject public HTTP. This is the iOS-blessed
+		     way to support a personal backend on a
+		     non-public routable address.
+
+		     Production: the backend on the user's Mac is
+		     always on a private address (Tailscale
+		     100.x, LAN 192.168.x, or 10.x). Public
+		     HTTPS-only is enforced for everything else.
+
+		     If a future user does need to point the app
+		     at a remote server, they should either use
+		     HTTPS or add an explicit
+		     NSExceptionDomains entry. -->
+		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
 	<key>NSMotionUsageDescription</key>
