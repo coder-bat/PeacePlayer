@@ -35,9 +35,16 @@
 		3FEE30CDE16A8EBD1B1F97A2 /* ImageCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9640549EB11F8010768D21B8 /* ImageCache.swift */; };
 		DD0F6A4EA6E4C8B49C31A695 /* StreamURLCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E66C354542939670E8FAE52 /* StreamURLCache.swift */; };
 		400280C613F6E73E4B338CC8 /* WidgetTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A5BA9202ABE322C59404BE0 /* WidgetTheme.swift */; };
+		4F8D7434976F48BBBC2984BD /* NowPlayingActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC007E4375C64F688F2719F7 /* NowPlayingActivityAttributes.swift */; };
+		D34732D7FF234A688B6BC012 /* NowPlayingLiveActivityWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7A783AFF778464EB7C3B72C /* NowPlayingLiveActivityWidget.swift */; };
 		401DF3BB8DA7205DAC931D79 /* GestureCoachOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C5E9F809A825611AC8B66A3 /* GestureCoachOverlay.swift */; };
 		73C352705C3B41EAA892E634 /* TrackRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 707BAB3A6A5C431FA9792BF0 /* TrackRow.swift */; };
 		AFCDFB5F387045BB8DDC3850 /* SpotlightService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 218B69801C9B42608F10BD1A /* SpotlightService.swift */; };
+		95F80D2C533C47E8A6A5B964 /* NowPlayingActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC007E4375C64F688F2719F7 /* NowPlayingActivityAttributes.swift */; };
+		39FBB00F5E53400E9F8FFA3E /* LiveActivityManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90547C256CBC4DF2895790D9 /* LiveActivityManager.swift */; };
+		281032BC0B09425A95F52B3C /* BiquadFilter.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9F522B0FA8F4D3AB57B8041 /* BiquadFilter.swift */; };
+		DB9DAAE2A5A74B189474C9C2 /* AudioEqualizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE96AA9F018F4BB79CDA287D /* AudioEqualizer.swift */; };
+		97EF08C3F1CC446BBE2F53C1 /* EqualizerPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0EE29C2DD65945B0AB2974F2 /* EqualizerPanelView.swift */; };
 		415B7004695FF63E57285C3E /* CDUserStats.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD1CDA2632A97CF4AA80E901 /* CDUserStats.swift */; };
 		42341923A20C0120F1C0FD35 /* Audiobook.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8BFAE5836927828B11D8D41 /* Audiobook.swift */; };
 		44B1FC03570C339B92B5259D /* PeacePlayerWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE24218BB5E3D48C193C8663 /* PeacePlayerWidget.swift */; };
@@ -174,6 +181,12 @@
 		0C5E9F809A825611AC8B66A3 /* GestureCoachOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GestureCoachOverlay.swift; sourceTree = "<group>"; };
 		707BAB3A6A5C431FA9792BF0 /* TrackRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrackRow.swift; sourceTree = "<group>"; };
 		218B69801C9B42608F10BD1A /* SpotlightService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpotlightService.swift; sourceTree = "<group>"; };
+		C9F522B0FA8F4D3AB57B8041 /* BiquadFilter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BiquadFilter.swift; sourceTree = "<group>"; };
+		EE96AA9F018F4BB79CDA287D /* AudioEqualizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioEqualizer.swift; sourceTree = "<group>"; };
+		0EE29C2DD65945B0AB2974F2 /* EqualizerPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EqualizerPanelView.swift; sourceTree = "<group>"; };
+		FC007E4375C64F688F2719F7 /* NowPlayingActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NowPlayingActivityAttributes.swift; sourceTree = "<group>"; };
+		90547C256CBC4DF2895790D9 /* LiveActivityManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveActivityManager.swift; sourceTree = "<group>"; };
+		D7A783AFF778464EB7C3B72C /* NowPlayingLiveActivityWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NowPlayingLiveActivityWidget.swift; sourceTree = "<group>"; };
 		0F15FD3F181894856FF634D2 /* PeacePlayerWidgetBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeacePlayerWidgetBundle.swift; sourceTree = "<group>"; };
 		12DF773336B5A83BFF1FC347 /* PlayerState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerState.swift; sourceTree = "<group>"; };
 		16EA893B48AC5117E1F23A9D /* AudiobookDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudiobookDetailView.swift; sourceTree = "<group>"; };
@@ -452,6 +465,9 @@
 				BBE8F43DE06B1E954F4B8253 /* WaveformService.swift */,
 				B50C9E287B0A4F7F51A35D9E /* WidgetSyncService.swift */,
 				218B69801C9B42608F10BD1A /* SpotlightService.swift */,
+				C9F522B0FA8F4D3AB57B8041 /* BiquadFilter.swift */,
+				EE96AA9F018F4BB79CDA287D /* AudioEqualizer.swift */,
+				90547C256CBC4DF2895790D9 /* LiveActivityManager.swift */,
 				67609839B0C75045B46184AD /* YTAudioPlayer.xcdatamodeld */,
 				3EE2B3910804FD509343D69F /* Entities */,
 				88677468B2C682823B6E6BBB /* DebugBridge */,
@@ -488,7 +504,9 @@
 			children = (
 				DD294748DED4ED3AD0D85677 /* Info.plist */,
 				6CAA199DFC071428915082C9 /* LibraryWidgets.swift */,
+				FC007E4375C64F688F2719F7 /* NowPlayingActivityAttributes.swift */,
 				CCA4035534F1C659AA5290B2 /* NowPlayingFullWidget.swift */,
+				D7A783AFF778464EB7C3B72C /* NowPlayingLiveActivityWidget.swift */,
 				5668E156B653F13002526708 /* PeacePlayerWidget.entitlements */,
 				FE24218BB5E3D48C193C8663 /* PeacePlayerWidget.swift */,
 				0F15FD3F181894856FF634D2 /* PeacePlayerWidgetBundle.swift */,
@@ -527,6 +545,7 @@
 				2649617A9D406FC9ADE4F5BD /* GenrePickerSheet.swift */,
 				0C5E9F809A825611AC8B66A3 /* GestureCoachOverlay.swift */,
 				707BAB3A6A5C431FA9792BF0 /* TrackRow.swift */,
+				0EE29C2DD65945B0AB2974F2 /* EqualizerPanelView.swift */,
 				B2A9468FFD7CCB3F04EED038 /* LikeButton.swift */,
 				00CA580AB7F5354A0D5782EA /* SongMemoryBadge.swift */,
 				0AD7FD93A65608ABFCFB8FFC /* UndoToastView.swift */,
@@ -704,6 +723,8 @@
 				400280C613F6E73E4B338CC8 /* WidgetTheme.swift in Sources */,
 				7A1B2C3D4E5F60718293A4E8 /* VinylNowPlayingWidget.swift in Sources */,
 				7A1B2C3D4E5F60718293A4C6 /* VinylRecordView.swift in Sources */,
+				4F8D7434976F48BBBC2984BD /* NowPlayingActivityAttributes.swift in Sources */,
+				D34732D7FF234A688B6BC012 /* NowPlayingLiveActivityWidget.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -748,6 +769,11 @@
 				401DF3BB8DA7205DAC931D79 /* GestureCoachOverlay.swift in Sources */,
 				73C352705C3B41EAA892E634 /* TrackRow.swift in Sources */,
 				AFCDFB5F387045BB8DDC3850 /* SpotlightService.swift in Sources */,
+				281032BC0B09425A95F52B3C /* BiquadFilter.swift in Sources */,
+				DB9DAAE2A5A74B189474C9C2 /* AudioEqualizer.swift in Sources */,
+				97EF08C3F1CC446BBE2F53C1 /* EqualizerPanelView.swift in Sources */,
+				95F80D2C533C47E8A6A5B964 /* NowPlayingActivityAttributes.swift in Sources */,
+				39FBB00F5E53400E9F8FFA3E /* LiveActivityManager.swift in Sources */,
 				89F62BF1FA5DAA7E3F82BC5E /* GestureEngine.swift in Sources */,
 				0B97B073B2BCBE37732CD3C4 /* HapticManager.swift in Sources */,
 				49739B1EA039770A8495E401 /* HapticSymphonyEngine.swift in Sources */,

@@ -6,6 +6,7 @@ struct SettingsView: View {
     @State private var showClearCacheConfirmation = false
     @State private var showSignOutConfirmation = false
     @State private var showAudioSettings = false  // S13
+    @State private var showEqualizer = false  // S15: real 10-band EQ
     @State private var isSigningOut = false
     @State private var cacheSize: String = "Calculating..."
     @State private var newArtistText: String = ""
@@ -13,6 +14,18 @@ struct SettingsView: View {
     // APIService.baseURLOverrideDefaultsKey and read on the
     // next launch (or immediately on save).
     @State private var serverHostDraft: String = UserDefaults.standard.string(forKey: APIService.baseURLOverrideDefaultsKey) ?? ""
+    // S15: 10-band EQ status line for the Settings row.
+    @ObservedObject private var eq = AudioEqualizer.shared
+
+    /// One-line status for the EQ row in the Audio section.
+    /// Shows the active preset when the EQ is on, otherwise
+    /// "Off".
+    private var eqStatusLine: String {
+        if !eq.isEnabled { return "Off" }
+        let preset = eq.preset.rawValue
+        if preset == "Custom" { return "On · Custom" }
+        return "On · \(preset)"
+    }
 
     var body: some View {
         // S14: Settings now lives inside Home's NavigationStack when
@@ -110,6 +123,44 @@ struct SettingsView: View {
                                 Text("Audio")
                                     .foregroundColor(.white)
                                 Text("Crossfade, gapless, loudness")
+                                    .font(.caption)
+                                    .foregroundColor(Theme.cyberDim)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption)
+                                .foregroundColor(Theme.cyberDim)
+                        }
+                    }
+                    .listRowBackground(Theme.cyberSurface)
+                    // S15: real EQ panel — 10-band parametric EQ with
+                    // 8 presets (Flat / Bass Boost / Treble Boost /
+                    // Vocal / Electronic / Hip-Hop / Rock / Acoustic)
+                    // and per-band sliders. Biquad cascade applied
+                    // in real time to the audio output via the
+                    // visualizer tap.
+                    Button {
+                        showEqualizer = true
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "slider.vertical.3")
+                                .foregroundColor(Theme.cyberMagenta)
+                                .frame(width: 28)
+                            VStack(alignment: .leading, spacing: 2) {
+                                HStack(spacing: 6) {
+                                    Text("Equalizer")
+                                        .foregroundColor(.white)
+                                    if AudioEqualizer.shared.isEnabled {
+                                        Text("ON")
+                                            .font(.system(size: 9, weight: .bold, design: .monospaced))
+                                            .foregroundColor(.black)
+                                            .padding(.horizontal, 5)
+                                            .padding(.vertical, 2)
+                                            .background(Theme.cyberCyan)
+                                            .clipShape(Capsule())
+                                    }
+                                }
+                                Text(eqStatusLine)
                                     .font(.caption)
                                     .foregroundColor(Theme.cyberDim)
                             }
@@ -453,6 +504,11 @@ struct SettingsView: View {
         // needed).
         .sheet(isPresented: $showAudioSettings) {
             AudioSettingsView()
+                .preferredColorScheme(.dark)
+        }
+        // S15: 10-band parametric EQ panel.
+        .sheet(isPresented: $showEqualizer) {
+            EqualizerPanelView()
                 .preferredColorScheme(.dark)
         }
     }

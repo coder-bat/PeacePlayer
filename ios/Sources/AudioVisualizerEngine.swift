@@ -64,6 +64,17 @@ final class AudioVisualizerEngine: ObservableObject {
     private let scratchCapacity: Int = 16384
     private var monoScratch: [Float] = Array(repeating: 0, count: 16384)
 
+    // S15: 10-band parametric EQ biquad cascade. State is
+    // allocated once (no per-sample allocations) and updated
+    // when the user changes a band. Coefficients and state are
+    // per-band. The cascade runs on every sample in the visualizer
+    // tap (which is the same tap feeding the audio output) so
+    // modifying the samples in-place affects the speaker output.
+    private var eqEnabled: Bool = false
+    private var eqBands: [BiquadFilter] = []
+    private var eqBandGains: [Double] = Array(repeating: 0, count: 10)
+    private let eqLock = NSLock()
+
     // Update timer (~30fps)
     private var displayTimer: Timer?
 
@@ -76,6 +87,11 @@ final class AudioVisualizerEngine: ObservableObject {
         fftSetup = vDSP_create_fftsetup(log2n, FFTRadix(kFFTRadix2))
         // ringBuffer and monoScratch are already sized in their
         // property declarations; no reserveCapacity needed.
+
+        // S15: build the 10-band biquad cascade once. Coefficients
+        // are recomputed when `applyEQSettings` is called; this
+        // initial pass uses the flat (0 dB) curve.
+        rebuildEQBands()
     }
 
     deinit {
@@ -297,14 +313,25 @@ final class AudioVisualizerEngine: ObservableObject {
 
     /// S15: real-time-safe interleaved-to-mono ingestion. Mixes
     /// `count` interleaved frames of `channels` channels into the
-    /// pre-allocated `monoScratch`, then copies the result into
-    /// the ring buffer. No allocations on the hot path; the lock
-    /// scope is just the two index updates plus the wrap-aware
-    /// copy.
+    /// pre-allocated `monoScratch`, optionally runs the EQ
+    /// cascade, then copies the result into the ring buffer.
+    /// No allocations on the hot path; the lock scope is just
+    /// the two index updates plus the wrap-aware copy.
+    ///
+    /// EQ note: when EQ is enabled, this function also writes
+    /// the EQ'd mono back into the source buffer (broadcast to
+    /// all channels). That's the only way for the EQ to
+    /// actually affect the audio output — the visualizer tap is
+    /// on the same MTAudioProcessingTap that feeds the speakers,
+    /// and modifying the in-flight buffer modifies the output.
+    ///
+    /// `source` is `UnsafeMutablePointer<Float>` because the
+    /// audio tap callback's `mData` is mutable, and the EQ
+    /// path writes back to the same buffer.
     fileprivate func ingestInterleaved(
         count: Int,
         channels: Int,
-        source: UnsafePointer<Float>
+        source: UnsafeMutablePointer<Float>
     ) {
         // Clamp defensively — if a tap ever produced more frames
         // than the scratch, drop the excess rather than overflow.
@@ -328,6 +355,36 @@ final class AudioVisualizerEngine: ObservableObject {
             }
         }
 
+        // Apply the EQ cascade to the mono mix. When EQ is
+        // disabled (or all gains are 0 dB) the cascade is
+        // effectively a pass-through, but we still iterate
+        // through the bands to keep the code path simple.
+        if eqEnabled {
+            // Snapshot the biquad state under the lock. Each
+            // biquad has its own state (z1, z2) so we want
+            // consistency across the cascade for this batch of
+            // samples.
+            eqLock.lock()
+            for frame in 0..<n {
+                var sample = monoScratch[frame]
+                for i in 0..<eqBands.count {
+                    sample = eqBands[i].process(sample)
+                }
+                monoScratch[frame] = sample
+            }
+            eqLock.unlock()
+
+            // Write the EQ'd mono back to the source buffer
+            // (broadcast to all channels). This is the only
+            // way for the EQ to affect the audio output.
+            for frame in 0..<n {
+                let s = monoScratch[frame]
+                for ch in 0..<channels {
+                    source[frame * channels + ch] = s
+                }
+            }
+        }
+
         ringLock.lock()
         // Copy monoScratch[0..<n] into ringBuffer at ringTail,
         // wrapping if needed. If the copy would overwrite unread
@@ -341,6 +398,57 @@ final class AudioVisualizerEngine: ObservableObject {
             }
         }
         ringLock.unlock()
+    }
+
+    // MARK: - EQ integration
+
+    /// Update the EQ biquad cascade from a snapshot of
+    /// per-band gains. Called by `AudioEqualizer` whenever the
+    /// user changes a band. No-op when EQ is disabled (the
+    /// cascade still exists with flat 0 dB coefficients, which
+    // is a passthrough).
+    func applyEQSettings(enabled: Bool, gains: [Double]) {
+        eqLock.lock()
+        defer { eqLock.unlock() }
+        eqEnabled = enabled
+        if gains.count == eqBands.count {
+            eqBandGains = gains
+            for i in 0..<eqBands.count {
+                eqBands[i].gainDb = gains[i]
+            }
+        }
+    }
+
+    /// Build (or rebuild) the 10-band biquad cascade. Coefficients
+    /// are computed for the current `eqBandGains` array, which
+    /// is the canonical per-band state.
+    private func rebuildEQBands() {
+        eqLock.lock()
+        defer { eqLock.unlock() }
+        if eqBands.isEmpty {
+            // Initial build
+            for i in 0..<AudioEqualizer.bandFrequencies.count {
+                let filterType = AudioEqualizer.bandType(at: i)
+                let freq = AudioEqualizer.bandFrequencies[i]
+                var band = BiquadFilter(
+                    type: filterType,
+                    frequency: freq,
+                    sampleRate: sampleRate,
+                    q: (filterType == .peaking) ? 1.0 : 0.707
+                )
+                if i < eqBandGains.count {
+                    band.gainDb = eqBandGains[i]
+                }
+                eqBands.append(band)
+            }
+        } else {
+            // Subsequent: just update gains
+            for i in 0..<eqBands.count {
+                if i < eqBandGains.count {
+                    eqBands[i].gainDb = eqBandGains[i]
+                }
+            }
+        }
     }
 }
 
@@ -412,6 +520,6 @@ private func tapProcess(
     engine.ingestInterleaved(
         count: frameCount,
         channels: channelCount,
-        source: floatData
+        source: UnsafeMutablePointer(floatData)
     )
 }

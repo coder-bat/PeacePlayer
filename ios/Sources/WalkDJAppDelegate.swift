@@ -31,6 +31,14 @@ final class WalkDJAppDelegate: NSObject, UIApplicationDelegate, UNUserNotificati
             SpotlightService.shared.start()
         }
 
+        // S15: start the Live Activity manager. Subscribes to
+        // PlayerState; auto-starts / -updates / -ends the
+        // Now Playing activity as the user changes tracks,
+        // plays, and pauses. iOS 16.2+ only.
+        if #available(iOS 16.2, *) {
+            _ = LiveActivityManager.shared
+        }
+
         return true
     }
 

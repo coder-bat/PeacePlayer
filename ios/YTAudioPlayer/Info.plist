@@ -38,6 +38,13 @@
 	</dict>
 	<key>NSMotionUsageDescription</key>
 	<string>Adaptive Walk DJ detects when you are walking so it can suggest a song at the right moment.</string>
+	<!-- S15: enable Live Activities for the Now Playing Lock
+	     Screen / Dynamic Island / StandBy integration. iOS 16.1+
+	     only; the API is gated at the call site. -->
+	<key>NSSupportsLiveActivities</key>
+	<true/>
+	<key>NSSupportsLiveActivitiesFrequentUpdates</key>
+	<true/>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>audio</string>
