@@ -24,6 +24,7 @@
 		AAAA00000000000000000001 /* OrbitalMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = AAAA00000000000000000002 /* OrbitalMenu.swift */; };
 		17E37B566853BA3E3477D5E9 /* Podcast.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E3A88A80AAC57024D2E8EDC /* Podcast.swift */; };
 		1AC5D2294272E30DF4857304 /* PeacePlayerWidgetIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56AF7CCCA582C56C371F11A0 /* PeacePlayerWidgetIntents.swift */; };
+		5C0E0000000000000000C001 /* ControlWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C0E0000000000000000C002 /* ControlWidget.swift */; };
 		1D7074E03ED46E71BA83F90C /* CDDownloadedTrack.swift in Sources */ = {isa = PBXBuildFile; fileRef = 785DCEDCD8EB51E04FA7944C /* CDDownloadedTrack.swift */; };
 		219061230F75037D452AA0B5 /* YTAudioPlayer.xcdatamodeld in Sources */ = {isa = PBXBuildFile; fileRef = 67609839B0C75045B46184AD /* YTAudioPlayer.xcdatamodeld */; };
 		221BFC7A742EBC84E62CB20A /* LibraryWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CAA199DFC071428915082C9 /* LibraryWidgets.swift */; };
@@ -229,6 +230,7 @@
 		7A1B2C3D4E5F60718293A4D7 /* VinylNowPlayingWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VinylNowPlayingWidget.swift; sourceTree = "<group>"; };
 		7A1B2C3D4E5F60718293A4B5 /* VinylRecordView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VinylRecordView.swift; sourceTree = "<group>"; };
 		56AF7CCCA582C56C371F11A0 /* PeacePlayerWidgetIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeacePlayerWidgetIntents.swift; sourceTree = "<group>"; };
+		5C0E0000000000000000C002 /* ControlWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ControlWidget.swift; sourceTree = "<group>"; };
 		56CE1E3E13C142FD71EAE1CE /* ResumeWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResumeWidget.swift; sourceTree = "<group>"; };
 		580361D396ED3D52EB48EFFF /* ShareCardGenerator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareCardGenerator.swift; sourceTree = "<group>"; };
 		5B6BD0831D78C2100A4B96E6 /* CachedAsyncImage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CachedAsyncImage.swift; sourceTree = "<group>"; };
@@ -523,6 +525,7 @@
 			isa = PBXGroup;
 			children = (
 				DD294748DED4ED3AD0D85677 /* Info.plist */,
+				5C0E0000000000000000C002 /* ControlWidget.swift */,
 				6CAA199DFC071428915082C9 /* LibraryWidgets.swift */,
 				FC007E4375C64F688F2719F7 /* NowPlayingActivityAttributes.swift */,
 				CCA4035534F1C659AA5290B2 /* NowPlayingFullWidget.swift */,
@@ -735,6 +738,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				5C0E0000000000000000C001 /* ControlWidget.swift in Sources */,
 				221BFC7A742EBC84E62CB20A /* LibraryWidgets.swift in Sources */,
 				14461908F534167F8F408F53 /* NowPlayingFullWidget.swift in Sources */,
 				44B1FC03570C339B92B5259D /* PeacePlayerWidget.swift in Sources */,

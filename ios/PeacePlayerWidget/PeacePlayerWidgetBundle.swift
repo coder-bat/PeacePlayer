@@ -28,5 +28,16 @@ struct PeacePlayerWidgetBundle: WidgetBundle {
         if #available(iOS 16.1, *) {
             NowPlayingLiveActivityWidget()
         }
+        // S17-E: iOS 18 Control Center / Lock Screen / Action Button
+        // widgets. Reuses the existing transport AppIntents, so there's
+        // no new command surface — just a new presentation surface.
+        // Three separate ControlWidgets (one per transport action) so
+        // the user can pin any subset. See ControlWidget.swift for why
+        // we don't bundle them into one widget.
+        if #available(iOS 18.0, *) {
+            PeacePlayerControlWidget()
+            PeacePlayerControlWidgetSkipNext()
+            PeacePlayerControlWidgetSkipPrevious()
+        }
     }
 }
