@@ -81,14 +81,12 @@ struct AvatarPickerSheet: View {
                         }
                         .padding(.vertical, 8)
                         .padding(.horizontal, 14)
-                        .background(
+                        .background(Theme.cyberSurface)
+                        .overlay(
                             RoundedRectangle(cornerRadius: 12)
-                                .fill(Theme.cyberSurface)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 12)
-                                        .stroke(Theme.cyberCyan.opacity(0.2), lineWidth: 1)
-                                )
+                                .stroke(Theme.cyberCyan.opacity(0.2), lineWidth: 1)
                         )
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
 
                         // Display name input
                         VStack(alignment: .leading, spacing: 6) {

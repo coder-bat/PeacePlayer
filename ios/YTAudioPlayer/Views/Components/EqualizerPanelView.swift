@@ -123,6 +123,7 @@ struct EqualizerPanelView: View {
                             lineWidth: 1
                         )
                 )
+                .neonGlow(isSelected ? .cyan : .dim, opacity: isSelected ? 0.5 : 0)
         }
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
     }
