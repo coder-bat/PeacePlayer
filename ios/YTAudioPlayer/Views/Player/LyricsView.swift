@@ -148,7 +148,7 @@ struct LyricsView: View {
                     Spacer(minLength: 100)
                 }
             }
-            .onChange(of: currentLineIndex) { newIndex in
+            .onChange(of: currentLineIndex) { _, newIndex in
                 withAnimation(reduceMotion ? .none : .easeOut(duration: 0.3)) {
                     proxy.scrollTo(newIndex, anchor: .center)
                 }

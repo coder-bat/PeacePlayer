@@ -169,7 +169,7 @@ struct FullPlayer: View {
                     QueueView()
                 }
             }
-            .onChange(of: playerState.showQueue) { shouldShow in
+            .onChange(of: playerState.showQueue) { _, shouldShow in
                 if shouldShow {
                     // Small delay so the full player finishes its entry animation first
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
@@ -225,7 +225,7 @@ struct FullPlayer: View {
                 colorExtractionTask?.cancel()
                 colorExtractionTask = nil
             }
-            .onChange(of: playerState.currentItem?.track.videoId) { _ in
+            .onChange(of: playerState.currentItem?.track.videoId) { _, _ in
                 extractDominantColor()
                 isTrackInfoExpanded = false
             }

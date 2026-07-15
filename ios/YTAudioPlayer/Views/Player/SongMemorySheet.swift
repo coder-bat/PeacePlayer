@@ -107,7 +107,7 @@ struct SongMemorySheet: View {
                 noteText = existingMemory?.noteText ?? ""
                 didLoadMemory = true
             }
-            .onChange(of: noteText) { newValue in
+            .onChange(of: noteText) { _, newValue in
                 if newValue.count > noteLimit {
                     noteText = String(newValue.prefix(noteLimit))
                 }

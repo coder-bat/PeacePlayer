@@ -46,7 +46,7 @@ struct YTAudioPlayerApp: App {
                     handleDeepLink(url)
                 }
         }
-        .onChange(of: scenePhase) { phase in
+        .onChange(of: scenePhase) { _, phase in
             // UserDefaults fallback: execute any command written while app was suspended
             if phase == .active {
                 if let cmd = SharedNowPlayingState.readAndClearCommand() {

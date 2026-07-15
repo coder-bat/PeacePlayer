@@ -180,7 +180,7 @@ struct ContentView: View {
         // sheets from ContentView — HomeView's NavigationStack pushes
         // these destinations directly. Swipe-from-edge back gesture
         // works automatically.
-        .onChange(of: playerState.showQueue) { shouldShow in
+        .onChange(of: playerState.showQueue) { _, shouldShow in
             if shouldShow && !showFullPlayer {
                 withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
                     showFullPlayer = true

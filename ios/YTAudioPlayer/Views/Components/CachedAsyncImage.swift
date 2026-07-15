@@ -40,7 +40,7 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
         .onAppear {
             loadImage()
         }
-        .onChange(of: url) { _ in
+        .onChange(of: url) { _, _ in
             cancellable?.cancel()
             image = nil
             isLoaded = false

@@ -126,10 +126,10 @@ struct SearchView: View {
             .onDisappear {
                 UITableView.appearance().backgroundColor = .systemGroupedBackground
             }
-            .onChange(of: downloadManager.completedDownloads.count) { _ in
+            .onChange(of: downloadManager.completedDownloads.count) { _, _ in
                 viewModel.refreshDownloadedIds()
             }
-            .onChange(of: viewModel.searchText) { newValue in
+            .onChange(of: viewModel.searchText) { _, newValue in
                 searchDebounceTask?.cancel()
                 if newValue.isEmpty {
                     if viewModel.hasSearched {
