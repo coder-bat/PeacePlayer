@@ -21,7 +21,7 @@ struct TimeCapsuleSheet: View {
     private let maxDate = Calendar.current.date(byAdding: .year, value: 5, to: Date())!
 
     var body: some View {
-        NavigationView {
+        NavigationStack {
             ZStack {
                 Color.black.ignoresSafeArea()
 

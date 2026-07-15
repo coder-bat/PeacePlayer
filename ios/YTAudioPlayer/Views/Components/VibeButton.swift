@@ -311,7 +311,7 @@ struct VibePickerSheet: View {
     ]
 
     var body: some View {
-        NavigationView {
+        NavigationStack {
             ZStack {
                 Theme.cyberBackground.ignoresSafeArea()
 

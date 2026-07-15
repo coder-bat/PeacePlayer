@@ -13,7 +13,7 @@ struct QueueView: View {
     @State private var showClearConfirmation = false
 
     var body: some View {
-        NavigationView {
+        NavigationStack {
             ZStack {
                 Theme.cyberBackground.ignoresSafeArea()
 

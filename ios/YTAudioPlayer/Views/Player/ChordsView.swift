@@ -21,7 +21,7 @@ struct ChordsView: View {
     @State private var matchLabel: String?
 
     var body: some View {
-        NavigationView {
+        NavigationStack {
             ZStack {
                 Color.black.ignoresSafeArea()
 

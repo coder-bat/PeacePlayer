@@ -14,7 +14,7 @@ struct GenrePickerSheet: View {
     @Environment(\.dismiss) private var dismiss
     
     var body: some View {
-        NavigationView {
+        NavigationStack {
             List {
                 ForEach(genres, id: \.self) { genre in
                     Button(action: {

@@ -21,7 +21,7 @@ struct LyricsView: View {
     @State private var cancellables = Set<AnyCancellable>()
     
     var body: some View {
-        NavigationView {
+        NavigationStack {
             ZStack {
                 // Background
                 Color.black.ignoresSafeArea()

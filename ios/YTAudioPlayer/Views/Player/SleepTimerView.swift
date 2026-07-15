@@ -74,7 +74,7 @@ struct SleepTimerView: View {
     @Environment(\.accessibilityReduceMotion) var reduceMotion
 
     var body: some View {
-        NavigationView {
+        NavigationStack {
             ZStack {
                 Theme.cyberBackground.ignoresSafeArea()
 
