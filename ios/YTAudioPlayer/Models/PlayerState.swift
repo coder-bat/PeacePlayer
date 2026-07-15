@@ -952,9 +952,14 @@ class PlayerState: ObservableObject {
             guard let self = self else { return }
 
             // Restore playback state
+            // S17-E: `player.play()` followed by `player.rate = 1.0`
+            // has a 1-frame race where the player starts at rate 0
+            // and only ramps to 1.0 on the next runloop tick — the
+            // user can hear the gap. `playImmediately(atRate:)` is
+            // the atomic single-call form that AVFoundation now
+            // recommends. (CrossfadeManager already uses it.)
             if wasPlaying {
-                player.play()
-                player.rate = 1.0
+                player.playImmediately(atRate: 1.0)
             }
 
             // Update current item with new URL
