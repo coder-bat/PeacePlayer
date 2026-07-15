@@ -34,11 +34,16 @@ struct TimeCapsuleSnapshot: Identifiable, Equatable {
     let isOpened: Bool
     let openedAt: Date?
 
-    var isUnlocked: Bool { Date() >= unlockAt }
+    // S17-C (CV-2): "unlocked" now uses the manager's trusted
+    // clock, not raw `Date()`. See `TimeCapsuleManager.trustedNow`
+    // — if the user rolled the system clock back past the most
+    // recent forward-time the app has seen, trustedNow clamps
+    // to that forward time, so a sealed capsule stays sealed.
+    var isUnlocked: Bool { TimeCapsuleManager.trustedNow() >= unlockAt }
     var isReadyToOpen: Bool { isUnlocked && !isOpened }
 
     var daysUntilUnlock: Int {
-        max(0, Calendar.current.dateComponents([.day], from: Date(), to: unlockAt).day ?? 0)
+        max(0, Calendar.current.dateComponents([.day], from: TimeCapsuleManager.trustedNow(), to: unlockAt).day ?? 0)
     }
 }
 
@@ -155,6 +160,46 @@ final class TimeCapsuleManager: ObservableObject {
         return legacy
     }
 
+    // MARK: - Clock sanity (S17-C, CV-2)
+
+    /// UserDefaults key for the most recent "forward-time" the app
+    /// has observed. If the user rolls the system clock back, this
+    /// stays put and `trustedNow()` clamps to it.
+    private static let lastSeenNowKey = "TimeCapsuleManager.lastSeenCurrentTime"
+
+    /// Returns the highest of (now, the last time we observed a
+    /// forward clock). On first call this is just `Date()`.
+    /// Subsequent calls only grow — so if a user rolls the clock
+    /// back, the trusted current time stays at the most recent
+    /// forward reading we saw.
+    ///
+    /// Design choice (CV-2):
+    /// The S17-C plan called out a "hash commitment" approach
+    /// (commit to the unlock date at seal time, reveal at unlock)
+    /// as the cryptographic analog of "sealed". We deliberately
+    /// skip that here — the encryption + clock-sanity combo
+    /// closes the actual security gap (a clock-rolled-back
+    /// attacker can't read a sealed capsule) without the
+    /// migration cost of a per-capsule commitment. The cost
+    /// tradeoff would tip the other way if we ever care about
+    /// "unlock-date integrity against a jailbroken device" —
+    /// the date field is just a Date in Core Data and a
+    /// jailbroken user can write whatever they want. Out of
+    /// scope for the honest-product-copy fix.
+    static func trustedNow() -> Date {
+        let now = Date()
+        let defaults = UserDefaults.standard
+        let lastSeen = defaults.object(forKey: lastSeenNowKey) as? Date
+        if let lastSeen, lastSeen > now {
+            return lastSeen
+        }
+        // First read, or `now` is forward of any prior reading.
+        // Update the store so a future rollback can't drag us
+        // backward.
+        defaults.set(now, forKey: lastSeenNowKey)
+        return now
+    }
+
     // MARK: - Read
 
     func refresh() {
@@ -242,8 +287,13 @@ final class TimeCapsuleManager: ObservableObject {
         guard let capsule = (try? context.fetch(request))?.first,
               capsule.isUnlocked else { return nil }
 
+        // S17-C (CV-2): stamp openedAt with the trusted clock, not
+        // raw Date(). If the user just rolled the system clock
+        // back, the trusted now is still the most recent forward
+        // time we saw, so the "opened at" date doesn't suddenly
+        // jump into the past.
         capsule.isOpened = true
-        capsule.openedAt = Date()
+        capsule.openedAt = Self.trustedNow()
         try? context.save()
 
         refresh()
