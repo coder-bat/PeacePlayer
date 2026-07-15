@@ -22,7 +22,13 @@ class StreamURLCache {
     private let cacheDirectory: URL
     private let diskLock = NSLock()
 
-    private var activeFetches: [String: AnyCancellable] = [:]
+    /// In-flight fetches. The publisher is shared across concurrent
+    /// callers; the cancellable retains the upstream so the
+    /// `.share()` doesn't get torn down when all subscribers go away.
+    /// S17 (CV-1): previously stored the cancellable and returned a
+    /// brand-new `APIService.shared.getStreamUrl(...)` call, which
+    /// defeated the entire dedup.
+    private var activeFetches: [String: ActiveFetch] = [:]
     // C-2026-06-28: was NSLock. The synchronous .sink() on a Just
     // publisher at line 102 fires receiveCompletion immediately on
     // the subscribing thread, and the completion handler at line 95
@@ -82,7 +88,14 @@ class StreamURLCache {
         defer { activeFetchLock.unlock() }
 
         if activeFetches[videoId] == nil {
-            let fetch = APIService.shared.getStreamUrl(
+            // S17 (CV-1): return the SHARED publisher, not a fresh
+            // APIService call. The old code stored the cached
+            // pipeline in `activeFetches` and then returned a brand
+            // new `APIService.shared.getStreamUrl(...)` call,
+            // defeating the entire purpose of the dedup. Every
+            // playback hit the backend directly, causing 429 storms
+            // under any normal listening session.
+            let shared = APIService.shared.getStreamUrl(
                 videoId: videoId,
                 preferM4A: preferM4A,
                 quality: quality
@@ -103,16 +116,22 @@ class StreamURLCache {
             )
             .share()
             .eraseToAnyPublisher()
-            .sink(receiveCompletion: { _ in }, receiveValue: { _ in })
 
-            activeFetches[videoId] = fetch
+            // `.sink(...)` keeps the upstream publisher alive even
+            // with no other subscribers; this is the standard
+            // Combine pattern for "fire-and-forget, but also multicast
+            // to late subscribers". `activeFetches` retains both the
+            // publisher (to give to concurrent callers) and the
+            // cancellable (to keep the upstream alive until the
+            // publisher's `receiveCompletion` runs and removes it).
+            let retainer = shared.sink(receiveCompletion: { _ in }, receiveValue: { _ in })
+            activeFetches[videoId] = ActiveFetch(publisher: shared, cancellable: retainer)
+            return shared
         }
 
-        return APIService.shared.getStreamUrl(
-            videoId: videoId,
-            preferM4A: preferM4A,
-            quality: quality
-        )
+        // Cache miss but another caller is already in flight — return
+        // the shared publisher so they get the result too.
+        return activeFetches[videoId]!.publisher
     }
 
     /// Fire-and-forget prefetch that warms the backend cache via `/prefetch`.
@@ -194,6 +213,19 @@ class StreamURLCache {
 }
 
 // MARK: - Wrapper
+
+/// Holds the shared publisher + the retainer subscription for an
+/// in-flight stream URL fetch. S17 (CV-1) — see `getStreamUrl`
+/// comment for the dedup story.
+private final class ActiveFetch {
+    let publisher: AnyPublisher<StreamInfo, APIError>
+    let cancellable: AnyCancellable
+
+    init(publisher: AnyPublisher<StreamInfo, APIError>, cancellable: AnyCancellable) {
+        self.publisher = publisher
+        self.cancellable = cancellable
+    }
+}
 
 private final class StreamInfoWrapper: NSObject, Codable {
     let streamInfo: StreamInfo
