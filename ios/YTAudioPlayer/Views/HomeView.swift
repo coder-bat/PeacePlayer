@@ -233,6 +233,14 @@ struct HomeView: View {
                 path.append(.radio)
             }
         }
+        // S15: OrbitalMenu's "Radio" item (which used to silently
+        // set selectedTab = 5) now posts `.openRadioView`. Push
+        // the same destination.
+        .onReceive(NotificationCenter.default.publisher(for: .openRadioView)) { _ in
+            if !path.contains(.radio) {
+                path.append(.radio)
+            }
+        }
     }
 
     // MARK: - Header

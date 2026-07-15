@@ -579,6 +579,14 @@ struct ContentView_Previews: PreviewProvider {
 extension Notification.Name {
     static let switchTab = Notification.Name("switchTab")
     static let startSongRadio = Notification.Name("startSongRadio")
+    // S15: posted by the OrbitalMenu's "Radio" item (which used
+    // to silently fail because tab 5 doesn't exist). HomeView
+    // listens and pushes its Radio destination onto the
+    // NavigationStack.
+    static let openRadioView = Notification.Name("openRadioView")
+    // S15: posted by the OrbitalMenu's "Queue" item. HomeView /
+    // ContentView listens and opens the queue sheet.
+    static let openQueue = Notification.Name("openQueue")
     // 2026-06-28 (S8): posted by the home page's NowPlayingHero
     // when the user taps the resume block. ContentView listens
     // and opens the full player.

@@ -34,9 +34,18 @@ struct OrbitalMenu: View {
     private let items: [OrbitalMenuItem] = [
         OrbitalMenuItem(icon: "house.fill",        label: "Home",      tabTag: 0),
         OrbitalMenuItem(icon: "magnifyingglass",   label: "Search",   tabTag: 1),
-        OrbitalMenuItem(icon: "music.note.list",   label: "Queue",    tabTag: 2),
+        // S15: tabTag 2 was "Queue" (TabView tag 2 doesn't exist;
+        // tapping was a no-op). Re-route to a notification that
+        // HomeView handles by opening its Queue sheet. The icon
+        // and label are unchanged so the menu's visual design is
+        // identical.
+        OrbitalMenuItem(icon: "music.note.list",   label: "Queue",    tabTag: -1),
         OrbitalMenuItem(icon: "music.note.house.fill", label: "Library", tabTag: 3),
-        OrbitalMenuItem(icon: "radio.fill",        label: "Radio",    tabTag: 5),
+        // S15: tabTag 5 was "Radio" (no tab 5 in TabView). Now
+        // posts a notification that HomeView handles by pushing
+        // the Radio destination on its NavigationStack (matches
+        // the path used by the Song Radio context-menu handler).
+        OrbitalMenuItem(icon: "radio.fill",        label: "Radio",    tabTag: -1),
     ]
 
     private let orbitRadius: CGFloat = 120
@@ -133,7 +142,27 @@ struct OrbitalMenu: View {
         )
         .onTapGesture {
             HapticManager.medium()
-            onSelectTab(item.tabTag)
+            // S15: items with tabTag < 0 (Queue, Radio) are no
+            // longer real tabs. Post the matching notification so
+            // HomeView can route the user to the right place.
+            if item.tabTag < 0 {
+                switch item.label {
+                case "Queue":
+                    NotificationCenter.default.post(
+                        name: .openQueue,
+                        object: nil
+                    )
+                case "Radio":
+                    NotificationCenter.default.post(
+                        name: .openRadioView,
+                        object: nil
+                    )
+                default:
+                    break
+                }
+            } else {
+                onSelectTab(item.tabTag)
+            }
         }
         // S13: a11y for orbiting icons. VoiceOver users get the
         // human-readable label (e.g. "Home") instead of the SF Symbol

@@ -137,10 +137,12 @@ struct SearchView: View {
                         viewModel.activeFilter = .all
                     }
                 } else if newValue.count >= 2 {
-                    // Debounce: wait 3s after the user stops typing before searching.
-                    // Ignore single-character queries to avoid noisy results.
+                    // S15: reduce the debounce from 3s to 300ms —
+                    // Apple Music / Spotify use 200-500ms; 3s felt
+                    // broken because the user typed a full query and
+                    // saw nothing happen for 3 seconds.
                     searchDebounceTask = Task {
-                        try? await Task.sleep(nanoseconds: 3_000_000_000)
+                        try? await Task.sleep(nanoseconds: 300_000_000)
                         guard !Task.isCancelled else { return }
                         await MainActor.run {
                             viewModel.search(query: newValue)

@@ -180,8 +180,17 @@ struct SleepTimerView: View {
             }) {
                 HStack {
                     Image(systemName: "music.note")
-                    Text("End of Track")
-                        .font(.headline)
+                    // S15: clarify the label. "End of Track" used
+                    // to be ambiguous (the current track? the
+                    // queue? the album?). Now the subtitle tells
+                    // the user exactly what will happen.
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("End of Current Track")
+                            .font(.headline)
+                        Text("Stops playback when this track finishes")
+                            .font(.caption)
+                            .foregroundColor(.cyberDim)
+                    }
                 }
                 .foregroundColor(.cyberCyan)
                 .frame(maxWidth: .infinity)

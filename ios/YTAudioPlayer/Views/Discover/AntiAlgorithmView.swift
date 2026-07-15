@@ -110,7 +110,14 @@ struct AntiAlgorithmView: View {
                 .background(Theme.cyberYellow)
                 .cornerRadius(14)
             }
-            .disabled(tasteProfile?.artists.isEmpty ?? true)
+            // S15: don't disable the button silently. New users
+            // (no listening history) saw a grayed-out button with
+            // no explanation. Now the button is always tappable;
+            // when there's no taste profile, tapping it shows a
+            // banner that explains what to do (play a few tracks
+            // first). The engine's startExplorationSession will
+            // still fail safely if there's nothing to go on.
+            .disabled(false)
         }
     }
 
