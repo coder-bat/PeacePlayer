@@ -57,7 +57,7 @@ struct AddToPlaylistSheet: View {
                         if isCreatingNew {
                             HStack {
                                 TextField("Playlist Name", text: $newPlaylistName)
-                                    .foregroundColor(.white)
+                                    .textFieldStyle(.neon)
                                     .submitLabel(.done)
                                     .autocorrectionDisabled()
                                     .onSubmit { createPlaylist() }

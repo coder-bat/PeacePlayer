@@ -98,17 +98,7 @@ struct AvatarPickerSheet: View {
                                 .tracking(1.5)
 
                             TextField("Your name", text: $draftName)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 12)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 10)
-                                        .fill(Theme.cyberSurface)
-                                        .overlay(
-                                            RoundedRectangle(cornerRadius: 10)
-                                                .stroke(Theme.cyberCyan.opacity(0.4), lineWidth: 1)
-                                        )
-                                )
-                                .foregroundColor(.white)
+                                .textFieldStyle(.neon)
                                 .autocorrectionDisabled()
                                 .textInputAutocapitalization(.words)
                         }

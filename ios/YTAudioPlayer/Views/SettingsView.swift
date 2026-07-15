@@ -268,21 +268,11 @@ struct SettingsView: View {
                                 .font(.system(size: 13, weight: .bold))
                                 .foregroundColor(Theme.cyberCyan)
                             TextField("Add artist or genre...", text: $newArtistText)
-                                .foregroundColor(.white)
+                                .textFieldStyle(.neon)
                                 .autocorrectionDisabled()
                                 .textInputAutocapitalization(.words)
                                 .onSubmit { addArtist() }
                         }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 10)
-                        .background(
-                            RoundedRectangle(cornerRadius: 10)
-                                .fill(Theme.cyberBackground)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 10)
-                                        .stroke(Theme.cyberCyan.opacity(0.4), lineWidth: 1)
-                                )
-                        )
 
                         Button {
                             addArtist()
@@ -387,10 +377,10 @@ struct SettingsView: View {
                             "e.g. http://192.168.1.10:8181",
                             text: $serverHostDraft
                         )
+                        .textFieldStyle(.neon)
                         .keyboardType(.URL)
                         .autocapitalization(.none)
                         .autocorrectionDisabled()
-                        .foregroundColor(.white)
                         if !serverHostDraft.isEmpty {
                             Button {
                                 serverHostDraft = ""

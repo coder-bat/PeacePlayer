@@ -12,6 +12,9 @@
 		0730E5C7A56C5148472385A9 /* PersistenceController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C0720B82757B56EF9C11BD3 /* PersistenceController.swift */; };
 		09D5D6AB590AAF6EA2FA0ED7 /* PlaybackQueueManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDBEFAC6083380091688C4A7 /* PlaybackQueueManager.swift */; };
 		0B97B073B2BCBE37732CD3C4 /* HapticManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9548F5CB54970A655782346A /* HapticManager.swift */; };
+		28DF76AC203346C597CCDD60 /* NeonCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4351C542CFB1451AB51961AE /* NeonCard.swift */; };
+		584C06D177B943A898029C3C /* NeonGlow.swift in Sources */ = {isa = PBXBuildFile; fileRef = B95C35B56C744A38BCB1640D /* NeonGlow.swift */; };
+		B197F4B5725148579AE70D40 /* NeonTextField.swift in Sources */ = {isa = PBXBuildFile; fileRef = F49B36AD7200419A930B580A /* NeonTextField.swift */; };
 		0BD64E5C60DB9B0C94498DF4 /* MainContainerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3981584A595276084E907877 /* MainContainerView.swift */; };
 		0C684DD7C8633A9C17BF88EA /* AdaptiveWalkDJManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7AA9786473E2C2E65D4458E8 /* AdaptiveWalkDJManager.swift */; };
 		11931C1F74A295B6A7F1212A /* AntiAlgorithmView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64C125691DE8E29DA4DF1FFA /* AntiAlgorithmView.swift */; };
@@ -45,6 +48,7 @@
 		281032BC0B09425A95F52B3C /* BiquadFilter.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9F522B0FA8F4D3AB57B8041 /* BiquadFilter.swift */; };
 		DB9DAAE2A5A74B189474C9C2 /* AudioEqualizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE96AA9F018F4BB79CDA287D /* AudioEqualizer.swift */; };
 		97EF08C3F1CC446BBE2F53C1 /* EqualizerPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0EE29C2DD65945B0AB2974F2 /* EqualizerPanelView.swift */; };
+		894401ECD1384B4493EF7B22 /* OnboardingCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = B573CC6176794E4FACA79555 /* OnboardingCard.swift */; };
 		415B7004695FF63E57285C3E /* CDUserStats.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD1CDA2632A97CF4AA80E901 /* CDUserStats.swift */; };
 		42341923A20C0120F1C0FD35 /* Audiobook.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8BFAE5836927828B11D8D41 /* Audiobook.swift */; };
 		44B1FC03570C339B92B5259D /* PeacePlayerWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE24218BB5E3D48C193C8663 /* PeacePlayerWidget.swift */; };
@@ -184,6 +188,7 @@
 		C9F522B0FA8F4D3AB57B8041 /* BiquadFilter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BiquadFilter.swift; sourceTree = "<group>"; };
 		EE96AA9F018F4BB79CDA287D /* AudioEqualizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioEqualizer.swift; sourceTree = "<group>"; };
 		0EE29C2DD65945B0AB2974F2 /* EqualizerPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EqualizerPanelView.swift; sourceTree = "<group>"; };
+		B573CC6176794E4FACA79555 /* OnboardingCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingCard.swift; sourceTree = "<group>"; };
 		FC007E4375C64F688F2719F7 /* NowPlayingActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NowPlayingActivityAttributes.swift; sourceTree = "<group>"; };
 		90547C256CBC4DF2895790D9 /* LiveActivityManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveActivityManager.swift; sourceTree = "<group>"; };
 		D7A783AFF778464EB7C3B72C /* NowPlayingLiveActivityWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NowPlayingLiveActivityWidget.swift; sourceTree = "<group>"; };
@@ -247,6 +252,9 @@
 		93B4300DF1688D223A2697AE /* Playlist.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Playlist.swift; sourceTree = "<group>"; };
 		94360F35720B73822E1A2CD7 /* NeuralFreqVisualizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeuralFreqVisualizer.swift; sourceTree = "<group>"; };
 		9548F5CB54970A655782346A /* HapticManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HapticManager.swift; sourceTree = "<group>"; };
+		4351C542CFB1451AB51961AE /* NeonCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeonCard.swift; sourceTree = "<group>"; };
+		B95C35B56C744A38BCB1640D /* NeonGlow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeonGlow.swift; sourceTree = "<group>"; };
+		F49B36AD7200419A930B580A /* NeonTextField.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeonTextField.swift; sourceTree = "<group>"; };
 		AAAA00000000000000000002 /* OrbitalMenu.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrbitalMenu.swift; sourceTree = "<group>"; };
 		9640549EB11F8010768D21B8 /* ImageCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageCache.swift; sourceTree = "<group>"; };
 		3E66C354542939670E8FAE52 /* StreamURLCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamURLCache.swift; sourceTree = "<group>"; };
@@ -318,6 +326,9 @@
 			isa = PBXGroup;
 			children = (
 				9548F5CB54970A655782346A /* HapticManager.swift */,
+				4351C542CFB1451AB51961AE /* NeonCard.swift */,
+				B95C35B56C744A38BCB1640D /* NeonGlow.swift */,
+				F49B36AD7200419A930B580A /* NeonTextField.swift */,
 				F26DE8F2D8B762F09FFAD4C5 /* ShimmerModifier.swift */,
 				51554D239E59D64D0D95EDD0 /* Theme.swift */,
 				F89C2506A14768CB685B2A7C /* ViewExtensions.swift */,
@@ -546,6 +557,7 @@
 				0C5E9F809A825611AC8B66A3 /* GestureCoachOverlay.swift */,
 				707BAB3A6A5C431FA9792BF0 /* TrackRow.swift */,
 				0EE29C2DD65945B0AB2974F2 /* EqualizerPanelView.swift */,
+				B573CC6176794E4FACA79555 /* OnboardingCard.swift */,
 				B2A9468FFD7CCB3F04EED038 /* LikeButton.swift */,
 				00CA580AB7F5354A0D5782EA /* SongMemoryBadge.swift */,
 				0AD7FD93A65608ABFCFB8FFC /* UndoToastView.swift */,
@@ -772,10 +784,14 @@
 				281032BC0B09425A95F52B3C /* BiquadFilter.swift in Sources */,
 				DB9DAAE2A5A74B189474C9C2 /* AudioEqualizer.swift in Sources */,
 				97EF08C3F1CC446BBE2F53C1 /* EqualizerPanelView.swift in Sources */,
+				894401ECD1384B4493EF7B22 /* OnboardingCard.swift in Sources */,
 				95F80D2C533C47E8A6A5B964 /* NowPlayingActivityAttributes.swift in Sources */,
 				39FBB00F5E53400E9F8FFA3E /* LiveActivityManager.swift in Sources */,
 				89F62BF1FA5DAA7E3F82BC5E /* GestureEngine.swift in Sources */,
 				0B97B073B2BCBE37732CD3C4 /* HapticManager.swift in Sources */,
+				28DF76AC203346C597CCDD60 /* NeonCard.swift in Sources */,
+				584C06D177B943A898029C3C /* NeonGlow.swift in Sources */,
+				B197F4B5725148579AE70D40 /* NeonTextField.swift in Sources */,
 				49739B1EA039770A8495E401 /* HapticSymphonyEngine.swift in Sources */,
 				8D1FF1D194532CA52F63F4A2 /* HistoryView.swift in Sources */,
 				C3A812D628A613B24F1EEC30 /* HomeView.swift in Sources */,

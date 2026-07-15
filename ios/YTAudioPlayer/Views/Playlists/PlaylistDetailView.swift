@@ -961,8 +961,8 @@ struct RenamePlaylistSheet: View {
                 Form {
                     Section {
                         TextField("NEW_NAME", text: $name)
+                            .textFieldStyle(.neon)
                             .font(.system(size: 16, design: .monospaced))
-                            .foregroundColor(.white)
                     }
                     .listRowBackground(Theme.cyberSurface)
                 }
