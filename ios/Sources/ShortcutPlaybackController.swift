@@ -40,6 +40,39 @@ final class ShortcutPlaybackController {
             }
             PlaylistManager.shared.refreshSmartPlaylists()
             PlaylistManager.shared.playPlaylist(playlist.id)
+        case .pause:
+            PlayerState.shared.pause()
+        case .resume:
+            PlayerState.shared.resume()
+        case .togglePlayPause:
+            PlayerState.shared.togglePlayPause()
+        case .skipForward:
+            PlayerState.shared.skipForward()
+        case .skipBackward:
+            PlayerState.shared.skipBackward()
+        case .likeCurrentTrack:
+            // Operates on whatever is currently playing. If nothing is
+            // playing, the call is a no-op (toggleLike on an empty
+            // id just no-ops in PlaylistManager).
+            if let videoId = PlayerState.shared.currentItem?.track.videoId, !videoId.isEmpty {
+                if !PlaylistManager.shared.isLiked(trackId: videoId) {
+                    PlaylistManager.shared.toggleLike(trackId: videoId)
+                }
+            }
+        case .unlikeCurrentTrack:
+            if let videoId = PlayerState.shared.currentItem?.track.videoId, !videoId.isEmpty {
+                if PlaylistManager.shared.isLiked(trackId: videoId) {
+                    PlaylistManager.shared.toggleLike(trackId: videoId)
+                }
+            }
+        case .startSongRadio:
+            // S16: start a song radio from the current track. The
+            // notification observer in ContentView picks it up and
+            // pushes the Radio view.
+            if let track = PlayerState.shared.currentItem?.track {
+                NotificationCenter.default.post(name: .startSongRadio, object: track)
+                HapticManager.light()
+            }
         }
     }
 

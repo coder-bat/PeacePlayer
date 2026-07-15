@@ -106,6 +106,18 @@ struct ShortcutPlaybackCommand: Codable {
         case shuffleLibrary
         case playRecentlyPlayed
         case playPlaylist
+        // S16: transport + library toggles. These don't take any
+        // parameters — they act on whatever the player is currently
+        // doing — so the dispatch is a thin wrapper over PlayerState
+        // and PlaylistManager.
+        case pause
+        case resume
+        case togglePlayPause
+        case skipForward
+        case skipBackward
+        case likeCurrentTrack
+        case unlikeCurrentTrack
+        case startSongRadio
     }
 
     let action: Action
@@ -114,6 +126,14 @@ struct ShortcutPlaybackCommand: Codable {
 
     static let shuffleLibrary = ShortcutPlaybackCommand(action: .shuffleLibrary, playlistName: nil, playlistId: nil)
     static let playRecentlyPlayed = ShortcutPlaybackCommand(action: .playRecentlyPlayed, playlistName: nil, playlistId: nil)
+    static let pause = ShortcutPlaybackCommand(action: .pause, playlistName: nil, playlistId: nil)
+    static let resume = ShortcutPlaybackCommand(action: .resume, playlistName: nil, playlistId: nil)
+    static let togglePlayPause = ShortcutPlaybackCommand(action: .togglePlayPause, playlistName: nil, playlistId: nil)
+    static let skipForward = ShortcutPlaybackCommand(action: .skipForward, playlistName: nil, playlistId: nil)
+    static let skipBackward = ShortcutPlaybackCommand(action: .skipBackward, playlistName: nil, playlistId: nil)
+    static let likeCurrentTrack = ShortcutPlaybackCommand(action: .likeCurrentTrack, playlistName: nil, playlistId: nil)
+    static let unlikeCurrentTrack = ShortcutPlaybackCommand(action: .unlikeCurrentTrack, playlistName: nil, playlistId: nil)
+    static let startSongRadio = ShortcutPlaybackCommand(action: .startSongRadio, playlistName: nil, playlistId: nil)
 
     static func playPlaylist(name: String, id: String? = nil) -> ShortcutPlaybackCommand {
         ShortcutPlaybackCommand(action: .playPlaylist, playlistName: name, playlistId: id)
