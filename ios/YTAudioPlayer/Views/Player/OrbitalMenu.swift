@@ -28,6 +28,8 @@ struct OrbitalMenu: View {
     @State private var itemOffsets: [CGSize] = []
 
     @Environment(\.accessibilityReduceMotion) var reduceMotion
+    // S15: respect accessibilityReduceTransparency
+    @Environment(\.accessibilityReduceTransparency) var reduceTransparency
 
     private let items: [OrbitalMenuItem] = [
         OrbitalMenuItem(icon: "house.fill",        label: "Home",      tabTag: 0),
@@ -87,7 +89,8 @@ struct OrbitalMenu: View {
     private var centerPiece: some View {
         ZStack {
             Circle()
-                .fill(.ultraThinMaterial)
+                // S15: respect accessibilityReduceTransparency
+                .fill(reduceTransparency ? AnyShapeStyle(Theme.cyberSurface) : AnyShapeStyle(.ultraThinMaterial))
                 .frame(width: 80, height: 80)
 
             Image(systemName: "xmark")

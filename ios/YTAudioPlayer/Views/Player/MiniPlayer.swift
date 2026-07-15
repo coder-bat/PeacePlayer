@@ -27,6 +27,10 @@ struct MiniPlayer: View {
     @State private var isDragging = false
     @GestureState private var dragState = CGSize.zero
     @Environment(\.accessibilityReduceMotion) var reduceMotion
+    // S15: respect the user's accessibility setting so the
+    // reduce-transparency user gets an opaque surface, not a
+    // half-transparent blur.
+    @Environment(\.accessibilityReduceTransparency) var reduceTransparency
     
     var body: some View {
         // 2026-06-28 (S7d): in compact mode, the mini player draws
@@ -287,7 +291,7 @@ struct MiniPlayer: View {
         .padding(.vertical, 10)
         .frame(maxWidth: .infinity)
         .frame(height: 64)
-        .background(Rectangle().fill(.ultraThinMaterial))
+        .background(Rectangle().fill(reduceTransparency ? AnyShapeStyle(Theme.cyberSurface) : AnyShapeStyle(.ultraThinMaterial)))
         .overlay(alignment: .top) {
             // Playback progress bar (hidden for live radio)
             if playerState.contentType != .liveRadio {
@@ -388,6 +392,8 @@ struct ArtworkView: View {
     let isPlaying: Bool
     var isLoading: Bool = false
     @State private var isLoaded = false
+    // S15: respect accessibilityReduceTransparency
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     
     var body: some View {
         ZStack {
@@ -431,7 +437,8 @@ struct ArtworkView: View {
                     CyberPlayingBars()
                         .frame(width: 16, height: 16)
                         .padding(4)
-                        .background(.ultraThinMaterial)
+                        // S15: respect accessibilityReduceTransparency
+                        .background(reduceTransparency ? AnyShapeStyle(Theme.cyberSurface) : AnyShapeStyle(.ultraThinMaterial))
                         .cornerRadius(4)
                 }
             }
@@ -445,6 +452,10 @@ struct ArtworkView: View {
 struct CyberPlayingBars: View {
     @State private var animate = false
     @Environment(\.accessibilityReduceMotion) var reduceMotion
+    // S15: respect the user's accessibility setting so the
+    // reduce-transparency user gets an opaque surface, not a
+    // half-transparent blur.
+    @Environment(\.accessibilityReduceTransparency) var reduceTransparency
 
     var body: some View {
         HStack(spacing: 2) {

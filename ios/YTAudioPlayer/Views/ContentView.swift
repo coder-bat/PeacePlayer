@@ -15,6 +15,10 @@ struct ContentView: View {
     // false; the main UI shows when it's true. bootstrap() is called
     // from init() in YTAudioPlayerApp.swift before ContentView mounts.
     @StateObject private var auth = AuthService.shared
+    // S15: respect the user's accessibility setting so the
+    // reduce-transparency user gets an opaque surface, not a
+    // half-transparent blur.
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @State private var selectedTab = 0
     @State private var showFullPlayer = false
     @State private var showRestorePrompt = false
@@ -425,6 +429,9 @@ struct BottomBar: View {
 struct CyberpunkTabBar: View {
     @Binding var selectedTab: Int
 
+    // S15: respect accessibilityReduceTransparency
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
     private struct TabDef {
         let icon: String
         let label: String
@@ -464,9 +471,16 @@ struct CyberpunkTabBar: View {
         .frame(width: 180, height: 60)  // fixed-size floating pill (S7d: 56→60 to match mini player)
         .background(
             ZStack {
-                // Glass blur
+                // S15: respect accessibilityReduceTransparency.
+                // The previous code stacked an `.ultraThinMaterial`
+                // blur on top of a `cyberSurface.opacity(0.78)` tint
+                // — the tint was opaque, defeating the user's
+                // reduce-transparency preference. When the setting
+                // is on we drop the blur and let the tint be the
+                // single (opaque) surface; otherwise we keep the
+                // blur.
                 Capsule()
-                    .fill(.ultraThinMaterial)
+                    .fill(reduceTransparency ? AnyShapeStyle(Theme.cyberSurface) : AnyShapeStyle(.ultraThinMaterial))
                 // Dark cyberpunk tint
                 Capsule()
                     .fill(Color.cyberSurface.opacity(0.78))

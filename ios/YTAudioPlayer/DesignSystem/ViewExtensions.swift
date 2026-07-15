@@ -195,10 +195,19 @@ extension String {
 // MARK: - Blur Background
 struct BlurBackground: ViewModifier {
     let style: UIBlurEffect.Style
-    
+
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
     func body(content: Content) -> some View {
         content
-            .background(.ultraThinMaterial)
+            // S15: respect the user's accessibility setting.
+            // iOS's `.ultraThinMaterial` honors reduceTransparency
+            // automatically at the OS level, but the project's
+            // cyberpunk overlay (a separate `cyberSurface.opacity(0.78)`
+            // tint on top) doesn't. The user with reduce-transparency
+            // on saw a layer they explicitly disabled. Fall back to
+            // the opaque `Theme.cyberSurface` when the setting is on.
+            .background(reduceTransparency ? AnyShapeStyle(Theme.cyberSurface) : AnyShapeStyle(.ultraThinMaterial))
     }
 }
 

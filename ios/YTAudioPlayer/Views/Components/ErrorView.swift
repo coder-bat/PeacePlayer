@@ -83,6 +83,11 @@ struct ErrorView: View {
     let onRetry: () -> Void
     let onSecondary: (() -> Void)?
     let onDismiss: (() -> Void)?
+
+    // S15: respect the user's accessibility setting so the
+    // reduce-transparency user gets an opaque surface, not a
+    // half-transparent blur.
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     
     init(
         type: ErrorType,
@@ -226,6 +231,9 @@ struct ErrorToast: View {
     let message: String
     @Binding var isShowing: Bool
 
+    // S15: respect accessibilityReduceTransparency
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
     var body: some View {
         VStack {
             Spacer()
@@ -241,7 +249,8 @@ struct ErrorToast: View {
                 Spacer()
             }
             .padding()
-            .background(.ultraThinMaterial)
+            // S15: respect accessibilityReduceTransparency.
+            .background(reduceTransparency ? AnyShapeStyle(Theme.cyberSurface) : AnyShapeStyle(.ultraThinMaterial))
             .cornerRadius(CornerRadius.md)
             .padding(.horizontal, Spacing.md)
             .padding(.bottom, 100)
