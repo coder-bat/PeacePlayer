@@ -257,20 +257,26 @@ class YouTubeSource: MusicSource {
     var isAvailable: Bool { true }
 
     func search(query: String) async throws -> [UnifiedTrack] {
+        // S15: see UnifiedTrack.swift for the rationale — same
+        // `.store(in: &Set<AnyCancellable>())` bug. The inline Set
+        // was deallocated, the subscription cancelled, and the
+        // continuation never resumed, hanging the YouTube search.
         return try await withCheckedThrowingContinuation { continuation in
-            APIService.shared.search(query: query, limit: 20)
+            var cancellable: AnyCancellable?
+            cancellable = APIService.shared.search(query: query, limit: 20)
                 .sink(
                     receiveCompletion: { completion in
                         if case .failure(let error) = completion {
                             continuation.resume(throwing: error)
                         }
+                        cancellable?.cancel()
                     },
                     receiveValue: { tracks in
                         let unified = tracks.map { $0.toUnifiedTrack }
                         continuation.resume(returning: unified)
+                        cancellable?.cancel()
                     }
                 )
-                .store(in: &Set<AnyCancellable>())
         }
     }
 

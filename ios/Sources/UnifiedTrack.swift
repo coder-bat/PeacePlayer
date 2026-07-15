@@ -240,13 +240,26 @@ enum UnifiedTrackError: Error {
 // MARK: - Private Helpers
 
 private func generateYouTubeQueueItem(for track: Track) async throws -> QueueItem {
+    // S15: The previous `.store(in: &Set<AnyCancellable>())` was
+    // allocating a Set inline, which is deallocated the moment
+    // `withCheckedThrowingContinuation`'s closure returns — the
+    // subscription is cancelled, and the continuation never resumes,
+    // hanging the play path forever (YouTube + Plex sources).
+    //
+    // Fix: keep the cancellable in a local var and capture it from
+    // the sink closures, so the subscription stays alive until the
+    // publisher completes or fails. The closures hold a strong
+    // reference to the cancellable, breaking the cycle only when
+    // the publisher terminates.
     return try await withCheckedThrowingContinuation { continuation in
-        StreamURLCache.shared.getStreamUrl(videoId: track.videoId)
+        var cancellable: AnyCancellable?
+        cancellable = StreamURLCache.shared.getStreamUrl(videoId: track.videoId)
             .sink(
                 receiveCompletion: { completion in
                     if case .failure(let error) = completion {
                         continuation.resume(throwing: error)
                     }
+                    cancellable?.cancel()
                 },
                 receiveValue: { streamInfo in
                     let item = QueueItem(
@@ -255,9 +268,9 @@ private func generateYouTubeQueueItem(for track: Track) async throws -> QueueIte
                         source: .stream
                     )
                     continuation.resume(returning: item)
+                    cancellable?.cancel()
                 }
             )
-            .store(in: &Set<AnyCancellable>())
     }
 }
 
