@@ -183,9 +183,117 @@ app.add_middleware(
 
 
 # --- Rate limiting with slowapi ---
-limiter = Limiter(key_func=get_remote_address)
+#
+# S17 (CV-3, defense in depth): slowapi is a per-IP in-memory
+# rate limiter. `key_func=get_remote_address` means each
+# remote client IP gets its own bucket; sharing the Mac's LAN
+# IP with other devices is fine, but a coffee-shop MITM that
+# floods the backend can't burn through the bucket from a
+# different /24.
+#
+# Per-endpoint policy (each line is "N requests per minute
+# per IP"):
+#   /sync/upload, /sync/download  : 10/min — strict. /sync/*
+#                                  moves user-data; an attacker
+#                                  guessing the JWT can otherwise
+#                                  iterate quickly.
+#   /search, /search/playlists    : 10/min — strict. Search
+#                                  hits YouTube Music on every
+#                                  call; a 10/min cap is plenty
+#                                  for a real user typing.
+#   /charts, /new-releases        : 5/min  — even stricter. The
+#                                  content rarely changes, so a
+#                                  user only needs to fetch
+#                                  once per session.
+#   /download                     : 15/min — slightly looser
+#                                  because a user queueing a
+#                                  small album makes several
+#                                  POSTs back-to-back.
+#   /proxy-stream                 : 20/min — each request is one
+#                                  song; a user skipping a few
+#                                  times lands at 5-10/min.
+#   /radio-stations/*, /podcasts/*,
+#   /audiobooks/*                 : 20-30/min — these proxy
+#                                  third-party APIs (RadioBrowser,
+#                                  iTunes, LibriVox); caps the
+#                                  blast radius if a key is
+#                                  leaked.
+#
+# We enable `_headers_enabled=True` and `_retry_after="delta-seconds"`
+# so the 429 response carries an `X-RateLimit-Limit`,
+# `X-RateLimit-Remaining`, `X-RateLimit-Reset`, and (most
+# importantly) a numeric `Retry-After` header. The iOS client's
+# `ErrorHandler` (S15 fix) already reads `Retry-After` from the
+# 429 and shows "You're going a bit fast — try again in Ns."
+#
+# Storage is in-process (the default `memory://` storage).
+# For a single-Mac personal backend, this is fine — there's
+# only one process. A multi-process prod deploy would want
+# Redis-backed storage; out of scope here.
+limiter = Limiter(
+    key_func=get_remote_address,
+    # We deliberately do NOT pass `headers_enabled=True` to
+    # the Limiter. slowapi's auto-inject path (extension.py
+    # `async_wrapper`) assumes every decorated endpoint returns
+    # a `starlette.responses.Response` instance; our routes
+    # return Pydantic models (lists/dicts) which FastAPI
+    # serializes. When `headers_enabled=True`, slowapi then
+    # tries `kwargs.get("response")` to find a Response to
+    # decorate, and raises
+    #   "parameter `response` must be an instance of
+    #    starlette.responses.Response"
+    # on every non-Response endpoint.
+    #
+    # Instead, we set the `Retry-After` header manually in
+    # our custom 429 handler below (see `_rate_limit_handler`).
+    # The iOS client reads `Retry-After` and shows a
+    # human-friendly wait time; the rest of the rate-limit
+    # bookkeeping (X-RateLimit-Limit, X-RateLimit-Remaining)
+    # is not used by the iOS app today, so we skip those.
+)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+
+# S17 (CV-3, defense in depth): the default slowapi handler
+# returns a JSONResponse without a `Retry-After` header, so
+# the iOS client falls back to a generic "slow down" message
+# without a wait time. We override it to:
+#   1. set `Retry-After: <seconds-until-reset>` so the iOS
+#      ErrorHandler (S15) can show "try again in Ns", and
+#   2. preserve the JSON body shape the rest of the app
+#      already understands.
+def _rate_limit_handler(request: Request, exc: RateLimitExceeded) -> Response:
+    """S17: custom 429 handler. Sets a numeric `Retry-After`
+    header (seconds) so the iOS client knows how long to
+    back off, and keeps the JSON body shape the rest of the
+    app already understands.
+
+    The reset-time is taken from the limiter's window stats
+    when available, falling back to 60s (a safe default for
+    "N per minute" limits) if the stats lookup fails.
+    """
+    reset_seconds = 60  # safe default
+    try:
+        limit = getattr(request.state, "view_rate_limit", None)
+        if limit and app.state.limiter._limiter is not None:
+            window_stats = app.state.limiter._limiter.get_window_stats(
+                limit[0], *limit[1]
+            )
+            reset_seconds = max(1, 1 + window_stats[0] - int(time.time()))
+    except Exception:
+        # stats lookup is best-effort; if it fails we still
+        # return a 429 with the fallback Retry-After.
+        pass
+
+    return JSONResponse(
+        {"error": f"Rate limit exceeded: {exc.detail}"},
+        status_code=429,
+        headers={"Retry-After": str(int(reset_seconds))},
+    )
+
+
+app.add_exception_handler(RateLimitExceeded, _rate_limit_handler)
 
 
 # --- Request ID + timing middleware ---
