@@ -199,8 +199,23 @@ struct LikeCurrentTrackIntent: AppIntent, ForegroundContinuableIntent {
 
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let videoId = PlayerState.shared.currentItem?.track.videoId ?? ""
-        let alreadyLiked = !videoId.isEmpty && PlaylistManager.shared.isLiked(trackId: videoId)
+        let hasTrack = !videoId.isEmpty
 
+        // S17-A (regression 07 P0-1): be honest about state in both
+        // the pre- and post-dialog. The old code unconditionally
+        // said "Liking this song" in the pre-dialog even when there
+        // was no track, and the post-dialog lied about the result
+        // when the execute path no-op'd. Match pre and post.
+        if !hasTrack {
+            try await requestToContinueInForeground(
+                IntentDialog("Nothing is playing in Peace Player.")
+            ) {
+                // No-op: there's nothing to like.
+            }
+            return .result(dialog: "Nothing is playing in Peace Player.")
+        }
+
+        let alreadyLiked = PlaylistManager.shared.isLiked(trackId: videoId)
         try await requestToContinueInForeground(
             IntentDialog(alreadyLiked ? "Already liked in Peace Player." : "Liking this song in Peace Player.")
         ) {
@@ -217,11 +232,26 @@ struct StartSongRadioIntent: AppIntent, ForegroundContinuableIntent {
 
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let hasTrack = PlayerState.shared.currentItem?.track.videoId.isEmpty == false
+
+        // S17-A (regression 07 P0-2): pre- and post-dialog now match.
+        // The old code unconditionally said "Starting song radio" in
+        // the pre-dialog regardless, then the post-dialog correctly
+        // distinguished the no-track case — making the pre-dialog a
+        // lie. Now the pre-dialog tells the truth first.
+        if !hasTrack {
+            try await requestToContinueInForeground(
+                IntentDialog("Play a track first, then try again.")
+            ) {
+                // No-op: no track to start a radio from.
+            }
+            return .result(dialog: "Play a track first, then try again.")
+        }
+
         try await requestToContinueInForeground(
             IntentDialog("Starting song radio in Peace Player.")
         ) {
             ShortcutPlaybackController.shared.execute(.startSongRadio)
         }
-        return .result(dialog: hasTrack ? "Started song radio in Peace Player." : "Play a track first, then try again.")
+        return .result(dialog: "Started song radio in Peace Player.")
     }
 }
