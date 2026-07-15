@@ -172,6 +172,14 @@ final class PersistenceController: ObservableObject {
         //      the choice calls `wipeAndReload()` or
         //      `backupAndReload()` below.
         //   3. On success: loadState = .ready.
+        //
+        // The `MigrationFailureAlert.shared` reference forces
+        // the alert singleton to initialize, which registers
+        // the NotificationCenter listener before any load
+        // callback can fire. Without it, the listener would
+        // only register on first access from a SwiftUI view,
+        // which is too late on cold launch.
+        _ = MigrationFailureAlert.shared
         loadPersistentStores()
     }
 
