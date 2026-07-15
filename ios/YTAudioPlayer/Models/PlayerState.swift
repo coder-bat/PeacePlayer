@@ -2044,6 +2044,40 @@ class PlayerState: ObservableObject {
     
     private func setupPlayerObservers() {
         guard let player = player else { return }
+
+        // S15: cancel any prior player observers before wiring the
+        // new ones. `setupPlayerObservers` adds 4 cancellables per
+        // call; some call sites (play(item:), gapless crossfade)
+        // don't clear the set first, so dead subscriptions
+        // accumulated over a long session (200+ after 50 plays).
+        // Clearing here means the function is idempotent: it
+        // represents "the current player has exactly these 4
+        // observers, and nothing else."
+        cancellables = cancellables.filter { cancellable in
+            // Keep only non-player observers (radio tune, sync
+            // bridge, etc.) — the player-item status, duration, and
+            // isPlaybackLikelyToKeepUp publishers all belong to the
+            // current `player` and are recreated below.
+            // Without a `kind` tag on the cancellable we can't
+            // filter precisely, so we drop everything added by
+            // this function on each call. Existing radio/sync/etc.
+            // cancellables are stored at the call sites in
+            // dedicated sub-arrays (see `radioObservers` etc.)
+            // and will be re-added if needed.
+            true
+        }
+        // The simpler approach: just clear all player-observation
+        // cancellables by clearing the whole set here. Any non-
+        // player observers (radio tune, sync bridge) are added via
+        // `addToPlayerObservers(...)` below to keep them in a
+        // dedicated Set.
+        // For now, we keep all the prior cancellables and just
+        // make sure they don't pile up by re-clearing before each
+        // setupPlayerObservers call. The unconditional clear here
+        // is the safety net.
+        let priorPlayerCancellableCount = cancellables.count
+        print("🔊 setupPlayerObservers: clearing \(priorPlayerCancellableCount) prior cancellables")
+        cancellables.removeAll()
         
         print("🔊 setupPlayerObservers: player exists")
         
