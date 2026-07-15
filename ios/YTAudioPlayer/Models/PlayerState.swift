@@ -289,9 +289,17 @@ class PlayerState: ObservableObject {
     //
     // We use arrays (not Sets) because NSObjectProtocol is not Hashable.
     // Cardinality is small (3 + 3 + 1) so linear scans are fine.
-    private var audioSessionObserverTokens: [NSObjectProtocol] = []
+    // S16: audio-session observer tokens moved to AudioSessionController.
+    // The 3 session notifications (interruption / route change / media
+    // services reset) now live in the controller. The player-item
+    // observers below are unrelated to the audio session.
     private var playerItemObserverTokens: [NSObjectProtocol] = []
     private var memoryWarningToken: NSObjectProtocol?
+
+    /// S16: extracted audio-session lifecycle (master plan §8.1 focused
+    /// split). Owns AVAudioSession config + the 3 session notification
+    /// observers; routes 2 callback points back to PlayerState.
+    private let audioSessionController = AudioSessionController()
 
     // Adaptive quality switching
     private var qualityUpgradeTimer: Timer?
@@ -369,15 +377,19 @@ class PlayerState: ObservableObject {
     // MARK: - Initialization
 
     private init() {
-        // S15: don't set the audio session active in init. The
-        // previous code called `setupAudioSession()` which did
-        // `setActive(true)`. On a cold launch with no playback
-        // intent, that activated the audio session for nothing and
-        // could fight with the system if another app just
-        // released the session. Now we only configure the category
-        // (cheap) and defer `setActive(true)` to the first `play()`.
-        setupAudioSessionCategoryOnly()
-        setupAudioSessionObservers()
+        // S16: audio-session setup is delegated to the controller.
+        // The controller configures the category, registers the
+        // 3 notification observers, and exposes an `activate()`
+        // method that's called from the first `play(track:)`.
+        // S15 already moved `setActive(true)` off init; the
+        // controller preserves that fix.
+        audioSessionController.onInterruptionShouldResume = { [weak self] in
+            self?.resumeFromInterruption()
+        }
+        audioSessionController.onMediaServicesReset = { [weak self] in
+            self?.handleMediaServicesResetRestart()
+        }
+        audioSessionController.setup()
         restoreQueue()
 
         // C-2 fix: register memory warning via token (so we can clean up
@@ -489,134 +501,28 @@ class PlayerState: ObservableObject {
     // reading `dataManager.recentlyPlayed.first?.playbackProgress`
     // directly when the user taps the resume hero on Home.
 
-    // MARK: - Audio Session
+    // MARK: - Audio Session Callbacks
+    //
+    // S16: the audio-session lifecycle (category, activation, 3
+    // notification observers) moved to `AudioSessionController`.
+    // These two methods are the only callbacks that route back
+    // into PlayerState. Both are called on the main queue.
 
-    /// S15: cheap session category setup. Called once at init.
-    /// Does NOT activate the session — that's deferred to
-    /// `activateAudioSessionIfNeeded()` which is called from the
-    /// first `play()`.
-    private func setupAudioSessionCategoryOnly() {
-        do {
-            let session = AVAudioSession.sharedInstance()
-            try session.setCategory(
-                .playback,
-                mode: .default,
-                options: [.allowAirPlay, .allowBluetooth]
-            )
-        } catch {
-            print("❌ Audio session category setup failed: \(error)")
-        }
+    /// Called by AudioSessionController after an interruption ends
+    /// with `.shouldResume`. The controller has already re-activated
+    /// the session; we just need to resume the AVPlayer.
+    private func resumeFromInterruption() {
+        player?.play()
+        player?.rate = playbackRate
     }
 
-    /// S15: activate the session on first play. Idempotent — AVAudioSession
-    /// ignores repeat activations. The previous code activated
-    /// at init; the new code waits until the user actually
-    /// requests playback.
-    private func activateAudioSessionIfNeeded() {
-        do {
-            try AVAudioSession.sharedInstance().setActive(true)
-        } catch {
-            print("❌ Audio session activation failed: \(error)")
-        }
-    }
-
-    private func setupAudioSession() {
-        setupAudioSessionCategoryOnly()
-        activateAudioSessionIfNeeded()
-    }
-
-    private func setupAudioSessionObservers() {
-        // C-2 fix: token-based observer registration. These observers must
-        // remain active for the lifetime of the PlayerState singleton — the
-        // previous selector-based overloads were being stripped by the
-        // `removeObserver(self)` call in playRadioStation / playPodcastEpisode
-        // / playAudiobookChapter / removeTimeObserver.
-        audioSessionObserverTokens.append(
-            NotificationCenter.default.addObserver(
-                forName: AVAudioSession.interruptionNotification,
-                object: AVAudioSession.sharedInstance(),
-                queue: .main
-            ) { [weak self] notification in
-                self?.handleAudioSessionInterruption(notification)
-            }
-        )
-        audioSessionObserverTokens.append(
-            NotificationCenter.default.addObserver(
-                forName: AVAudioSession.routeChangeNotification,
-                object: AVAudioSession.sharedInstance(),
-                queue: .main
-            ) { [weak self] notification in
-                self?.handleAudioSessionRouteChange(notification)
-            }
-        )
-        audioSessionObserverTokens.append(
-            NotificationCenter.default.addObserver(
-                forName: AVAudioSession.mediaServicesWereResetNotification,
-                object: nil,
-                queue: .main
-            ) { [weak self] notification in
-                self?.handleMediaServicesReset(notification)
-            }
-        )
-    }
-
-    private func handleAudioSessionInterruption(_ notification: Notification) {
-        guard let userInfo = notification.userInfo,
-              let typeValue = userInfo[AVAudioSessionInterruptionTypeKey] as? UInt,
-              let type = AVAudioSession.InterruptionType(rawValue: typeValue) else { return }
-
-        switch type {
-        case .began:
-            print("🔇 Audio interruption began")
-            DispatchQueue.main.async { [weak self] in
-                self?.player?.pause()
-            }
-        case .ended:
-            guard let optionsValue = userInfo[AVAudioSessionInterruptionOptionKey] as? UInt else { return }
-            let options = AVAudioSession.InterruptionOptions(rawValue: optionsValue)
-
-            if options.contains(.shouldResume) {
-                print("🔊 Audio interruption ended, resuming playback")
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
-                    do {
-                        try AVAudioSession.sharedInstance().setActive(true)
-                    } catch {
-                        print("❌ Failed to reactivate audio session: \(error)")
-                    }
-                    self?.player?.play()
-                    self?.player?.rate = self?.playbackRate ?? 1.0
-                }
-            }
-        @unknown default:
-            break
-        }
-    }
-
-    private func handleAudioSessionRouteChange(_ notification: Notification) {
-        guard let userInfo = notification.userInfo,
-              let reasonValue = userInfo[AVAudioSessionRouteChangeReasonKey] as? UInt,
-              let reason = AVAudioSession.RouteChangeReason(rawValue: reasonValue) else { return }
-
-        switch reason {
-        case .newDeviceAvailable, .oldDeviceUnavailable:
-            print("🎧 Audio route changed, ensuring session is active")
-            do {
-                try AVAudioSession.sharedInstance().setActive(true)
-            } catch {
-                print("❌ Failed to activate audio session after route change: \(error)")
-            }
-        default:
-            break
-        }
-    }
-
-    private func handleMediaServicesReset(_ notification: Notification) {
-        print("🔄 Media services were reset, rebuilding audio session and player")
-        setupAudioSession()
+    /// Called by AudioSessionController 0.5s after a media-services
+    /// reset. The controller has already re-applied the category
+    /// and re-activated the session. We need to rebuild the
+    /// current AVPlayerItem by re-entering `play(item:)`.
+    private func handleMediaServicesResetRestart() {
         if let current = currentItem {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-                self?.play(item: current, addToQueue: false)
-            }
+            play(item: current, addToQueue: false)
         }
     }
 
@@ -684,7 +590,8 @@ class PlayerState: ObservableObject {
         // and through pause/resume cycles. Doing this here instead
         // of in init means a cold launch with no playback intent
         // doesn't reserve the audio hardware.
-        activateAudioSessionIfNeeded()
+        // S16: delegated to the controller.
+        audioSessionController.activate()
         // C-5 fix: use the reconciliation helper instead of raw FileManager.fileExists.
         // This handles the case where CDDownloadedTrack has a stale row but the
         // file is missing on disk (user deleted via Files.app, etc.).
@@ -1328,8 +1235,9 @@ class PlayerState: ObservableObject {
         playbackClock.reset()
         contentType = .track
 
-        // Re-register audio session observers after cleanup for next playback
-        setupAudioSessionObservers()
+        // S16: audio-session observers live in AudioSessionController
+        // for the lifetime of the app. No need to re-register here
+        // — the controller's setup() already ran in init.
 
         print("✅ Player stopped and observers cleaned up")
     }
