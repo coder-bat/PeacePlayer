@@ -222,6 +222,17 @@ struct HomeView: View {
             AvatarPickerSheet()
         }
         .addToPlaylistSheet(isPresented: $showAddToPlaylistSheet, track: selectedTrack)
+        // S15: when "Start Radio" fires from any track-row context
+        // menu, ContentView kicks off playback and switches to the
+        // Home tab. Push RadioView onto this NavigationStack so the
+        // user actually sees the radio. (Previously the destination
+        // was unreachable from outside — ContentView tried to switch
+        // to a non-existent tab 5.)
+        .onReceive(NotificationCenter.default.publisher(for: .startSongRadio)) { _ in
+            if !path.contains(.radio) {
+                path.append(.radio)
+            }
+        }
     }
 
     // MARK: - Header

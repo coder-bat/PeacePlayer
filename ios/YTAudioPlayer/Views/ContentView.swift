@@ -134,8 +134,17 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .startSongRadio)) { notification in
             if let track = notification.object as? Track {
                 radioViewModel.startSongRadio(from: track)
+                // S15: there is no Radio tab in the TabView (Home=0,
+                // Search=1, Library=3), so `selectedTab = 5` was a
+                // no-op — the user stayed on the Library tab with
+                // no visible feedback that song radio had started.
+                // Switch to Home (0) so the user is in a context
+                // that can see playback; HomeView's `.onReceive`
+                // below also pushes its `HomeDestination.radio`
+                // onto its own NavigationStack, which is where
+                // RadioView actually lives.
                 withAnimation(.spring(response: 0.28, dampingFraction: 0.72)) {
-                    selectedTab = 5
+                    selectedTab = 0
                 }
             }
         }
