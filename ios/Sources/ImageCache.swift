@@ -22,6 +22,10 @@ class ImageCache {
     private let cacheDirectory: URL
     
     private var cancellables = Set<AnyCancellable>()
+    // S15: dedicated Set for preloads so they can be cleared when
+    // the preloads complete. Previously they piled up in `cancellables`
+    // forever.
+    private var preloadCancellables = Set<AnyCancellable>()
     private var activeDownloads: [URL: AnyCancellable] = [:]
     private var cleanupTimer: Timer?
 
@@ -76,7 +80,7 @@ class ImageCache {
         PlayCrashDiagnostics.log(.artwork, "ImageCache.image(for:) key=\(key as String) memoryCheck=in_progress")
         #endif
 
-        // Check memory cache first
+        // Check memory cache first (sync, fast)
         if let image = memoryCache.object(forKey: key) {
             #if DEBUG
             PlayCrashDiagnostics.log(.artwork, "ImageCache HIT (memory) for key=\(key as String)")
@@ -84,64 +88,106 @@ class ImageCache {
             return Just(image).eraseToAnyPublisher()
         }
 
-        // Check disk cache
-        if let image = loadFromDisk(key: key) {
-            memoryCache.setObject(image, forKey: key, cost: image.cacheCost)
-            #if DEBUG
-            PlayCrashDiagnostics.log(.artwork, "ImageCache HIT (disk) for key=\(key as String)")
-            #endif
-            return Just(image).eraseToAnyPublisher()
+        // S15: disk read + JPEG decode used to run synchronously
+        // on the main thread (called from SwiftUI views). A 2MB
+        // artwork JPEG took 50-100ms of main-thread stall on first
+        // display. Move the disk check + decode to a background
+        // utility queue; deliver the result to the subscriber on
+        // main. The download path also moved off the main receive
+        // for the same reason.
+        return Deferred { [weak self] () -> AnyPublisher<UIImage?, Never> in
+            guard let self = self else {
+                return Just(nil).eraseToAnyPublisher()
+            }
+
+            // Try disk cache (sync file read + decode, but on the
+            // background queue because of the upstream `subscribe(on:)`).
+            if let image = self.loadFromDisk(key: key) {
+                self.memoryCache.setObject(image, forKey: key, cost: image.cacheCost)
+                #if DEBUG
+                PlayCrashDiagnostics.log(.artwork, "ImageCache HIT (disk) for key=\(key as String)")
+                #endif
+                return Just(image).eraseToAnyPublisher()
+            }
+
+            // Download if not already downloading
+            if self.activeDownloads[url] == nil {
+                let download = URLSession.shared.dataTaskPublisher(for: url)
+                    .map { UIImage(data: $0.data) }
+                    .catch { _ in Just(nil) }
+                    // S15: keep the download pipeline off main.
+                    // Decoding + caching + disk save all happen on
+                    // URLSession's background queue now; only the
+                    // final delivery to subscribers hops to main.
+                    .handleEvents(receiveOutput: { [weak self] image in
+                        guard let self = self, let image = image else { return }
+
+                        // Store in memory cache
+                        self.memoryCache.setObject(image, forKey: key, cost: image.cacheCost)
+
+                        // Store in disk cache on a background queue
+                        // (JPEG encoding + file write can stall).
+                        DispatchQueue.global(qos: .utility).async {
+                            self.saveToDisk(image: image, key: key)
+                        }
+
+                        // Remove from active downloads
+                        self.activeDownloads.removeValue(forKey: url)
+                    })
+                    .share()
+                    .eraseToAnyPublisher()
+                    .sink { _ in }
+
+                self.activeDownloads[url] = download
+            }
+
+            // Return placeholder while loading
+            return Just(nil).eraseToAnyPublisher()
         }
-        
-        // Download if not already downloading
-        if activeDownloads[url] == nil {
-            let download = URLSession.shared.dataTaskPublisher(for: url)
-                .map { UIImage(data: $0.data) }
-                .catch { _ in Just(nil) }
-                .receive(on: DispatchQueue.main)
-                .handleEvents(receiveOutput: { [weak self] image in
-                    guard let self = self, let image = image else { return }
-                    
-                    // Store in memory cache
-                    self.memoryCache.setObject(image, forKey: key, cost: image.cacheCost)
-                    
-                    // Store in disk cache
-                    self.saveToDisk(image: image, key: key)
-                    
-                    // Remove from active downloads
-                    self.activeDownloads.removeValue(forKey: url)
-                })
-                .share()
-                .eraseToAnyPublisher()
-                .sink { _ in }
-            
-            activeDownloads[url] = download
-        }
-        
-        // Return placeholder while loading
-        return Just(nil).eraseToAnyPublisher()
+        .subscribe(on: DispatchQueue.global(qos: .userInitiated))
+        .receive(on: DispatchQueue.main)
+        .eraseToAnyPublisher()
     }
     
     /// Preload images for upcoming tracks
     func preloadImages(urls: [URL]) {
-        urls.forEach { url in
-            _ = image(for: url)
-                .sink(receiveValue: { _ in })
-                .store(in: &cancellables)
+        // S15: store the cancellable in a dedicated Set (not the
+        // generic `cancellables`) and clear it when the preloads
+        // complete, so we don't accumulate dead subscriptions.
+        let group = DispatchGroup()
+        for url in urls {
+            group.enter()
+            let cancellable = image(for: url)
+                .sink(receiveValue: { _ in
+                    group.leave()
+                })
+            preloadCancellables.insert(cancellable)
+        }
+        group.notify(queue: .main) { [weak self] in
+            self?.preloadCancellables.removeAll()
         }
     }
     
     /// Clear all caches
     func clearCache() {
         memoryCache.removeAllObjects()
-        
-        do {
-            let contents = try fileManager.contentsOfDirectory(at: cacheDirectory, includingPropertiesForKeys: nil)
-            for file in contents {
-                try? fileManager.removeItem(at: file)
+
+        // S15: disk-cache eviction used to run synchronously on the
+        // main thread (memory warning path). Move it to a utility
+        // queue so the warning handler returns immediately.
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            guard let self = self else { return }
+            do {
+                let contents = try self.fileManager.contentsOfDirectory(
+                    at: self.cacheDirectory,
+                    includingPropertiesForKeys: nil
+                )
+                for file in contents {
+                    try? self.fileManager.removeItem(at: file)
+                }
+            } catch {
+                print("❌ Failed to clear disk cache: \(error)")
             }
-        } catch {
-            print("❌ Failed to clear disk cache: \(error)")
         }
     }
     
