@@ -104,21 +104,41 @@ struct AntiAlgorithmView: View {
                     Text("Start Exploring")
                         .fontWeight(.semibold)
                 }
-                .foregroundColor(.black)
+                .foregroundColor(hasTasteProfile ? .black : Theme.cyberDim)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 16)
-                .background(Theme.cyberYellow)
+                .background(hasTasteProfile ? Theme.cyberYellow : Theme.cyberSurface)
                 .cornerRadius(14)
             }
-            // S15: don't disable the button silently. New users
-            // (no listening history) saw a grayed-out button with
-            // no explanation. Now the button is always tappable;
-            // when there's no taste profile, tapping it shows a
-            // banner that explains what to do (play a few tracks
-            // first). The engine's startExplorationSession will
-            // still fail safely if there's nothing to go on.
-            .disabled(false)
+            // S17-A (flow 11 P0-001): the previous "always tappable
+            // with a banner" approach still left a dead end — the
+            // spinner ran for ~500ms, the engine's startExploration
+            // returned nothing, and the user was back at the start
+            // view with no feedback. Now the button is disabled
+            // (and visually distinct) when there's no taste profile,
+            // and the caption below tells the user what to do.
+            .disabled(!hasTasteProfile)
+            .accessibilityHint(hasTasteProfile
+                ? "Starts a song radio just outside your listening history"
+                : "Play a few tracks first to build your taste profile")
+            // S17-A: explicit caption when the button is disabled.
+            // This replaces the silent spinner-cycle dead end.
+            if !hasTasteProfile {
+                Text("Play a few tracks first to build your taste profile.")
+                    .font(.caption)
+                    .foregroundColor(Theme.cyberDim)
+                    .multilineTextAlignment(.center)
+                    .padding(.top, 4)
+            }
         }
+    }
+
+    /// S17-A: derived from `tasteProfile`. `true` when there's
+    /// at least one artist we can use as a seed for the
+    /// exploration session.
+    private var hasTasteProfile: Bool {
+        guard let profile = tasteProfile else { return false }
+        return !profile.artists.isEmpty
     }
 
     // MARK: - Loading
