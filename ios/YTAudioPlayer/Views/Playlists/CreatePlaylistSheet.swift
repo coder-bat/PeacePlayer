@@ -67,20 +67,10 @@ struct CreatePlaylistSheet: View {
                             .tracking(1.5)
 
                         TextField("Playlist Name", text: $name)
+                            .textFieldStyle(NeonTextFieldStyle(focused: focusedField == .name))
                             .focused($focusedField, equals: .name)
                             .submitLabel(.next)
                             .autocorrectionDisabled()
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 12)
-                            .background(
-                                RoundedRectangle(cornerRadius: 10)
-                                    .fill(Theme.cyberSurface)
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 10)
-                                            .stroke(Theme.cyberCyan.opacity(0.4), lineWidth: 1)
-                                    )
-                            )
-                            .foregroundColor(.white)
                             .onSubmit { focusedField = .description }
                     }
 
@@ -92,20 +82,10 @@ struct CreatePlaylistSheet: View {
                             .tracking(1.5)
 
                         TextField("Add a description", text: $description)
+                            .textFieldStyle(NeonTextFieldStyle(focused: focusedField == .description))
                             .focused($focusedField, equals: .description)
                             .submitLabel(.done)
                             .autocorrectionDisabled()
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 12)
-                            .background(
-                                RoundedRectangle(cornerRadius: 10)
-                                    .fill(Theme.cyberSurface)
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 10)
-                                            .stroke(Theme.cyberCyan.opacity(0.4), lineWidth: 1)
-                                    )
-                            )
-                            .foregroundColor(.white)
                             .onSubmit { createPlaylist() }
                     }
 
