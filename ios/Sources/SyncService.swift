@@ -277,7 +277,6 @@ final class SyncService: NSObject, ObservableObject {
                 playlist.trackOrder = remotePlaylist.trackIds
                 playlist.modifiedAt = Date(timeIntervalSince1970: TimeInterval(remotePlaylist.modifiedAt))
             }
-            }
 
             // 4. History — most-recent playedAt wins per videoId
             for remoteEntry in remote.history {
@@ -325,3 +324,4 @@ final class SyncService: NSObject, ObservableObject {
             }
         }
     }
+}
