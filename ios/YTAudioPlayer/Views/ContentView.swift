@@ -160,6 +160,14 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .openFullPlayer)) { _ in
             showFullPlayer = true
         }
+        // S17-A (flow 11 P0-003): OrbitalMenu's "Queue" item posts
+        // .openQueue; route it through the existing showQueue flow
+        // (the FullPlayer observes playerState.showQueue and presents
+        // its QueueView sheet). The old code had no observer — the
+        // notification was a dead control.
+        .onReceive(NotificationCenter.default.publisher(for: .openQueue)) { _ in
+            playerState.showQueue = true
+        }
         // S13: Library's empty-state CTA posts this so we surface the
         // Search tab. Search is tag 1 in the TabView (Home=0, Search=1,
         // Library=3 — the gap is for future tabs).
