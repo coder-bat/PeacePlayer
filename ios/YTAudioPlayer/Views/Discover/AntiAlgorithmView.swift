@@ -13,7 +13,7 @@ struct AntiAlgorithmView: View {
     @State private var tasteProfile: (artists: [(String, Int)], seedCount: Int)?
 
     var body: some View {
-        NavigationView {
+        NavigationStack {
             ZStack {
                 Color.black.ignoresSafeArea()
 

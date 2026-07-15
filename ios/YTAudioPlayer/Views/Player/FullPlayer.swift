@@ -1381,7 +1381,7 @@ struct AudioSettingsView: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        NavigationView {
+        NavigationStack {
             ZStack {
                 Theme.cyberBackground.ignoresSafeArea()
 
@@ -1645,7 +1645,7 @@ struct ShareSheet: View {
     @State private var isGenerating = false
     
     var body: some View {
-        NavigationView {
+        NavigationStack {
             VStack(spacing: 24) {
                 // Preview Card
                 if let card = generatedCard {
@@ -1803,7 +1803,7 @@ struct QRCodeView: View {
     @State private var qrImage: UIImage?
     
     var body: some View {
-        NavigationView {
+        NavigationStack {
             VStack(spacing: 24) {
                 if let qr = qrImage {
                     Image(uiImage: qr)

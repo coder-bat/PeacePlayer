@@ -76,7 +76,7 @@ struct PlaylistDetailView: View {
     }
 
     var body: some View {
-        NavigationView {
+        NavigationStack {
             ZStack(alignment: .top) {
                 // Cyberpunk background
                 Theme.cyberBackground
@@ -953,7 +953,7 @@ struct RenamePlaylistSheet: View {
     }
 
     var body: some View {
-        NavigationView {
+        NavigationStack {
             ZStack {
                 Theme.cyberBackground
                     .ignoresSafeArea()

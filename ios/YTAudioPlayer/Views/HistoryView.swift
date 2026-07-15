@@ -18,7 +18,7 @@ struct HistoryView: View {
     @State private var showClearConfirmation = false
 
     var body: some View {
-        NavigationView {
+        NavigationStack {
             ZStack {
                 Color.cyberBackground
                     .ignoresSafeArea()

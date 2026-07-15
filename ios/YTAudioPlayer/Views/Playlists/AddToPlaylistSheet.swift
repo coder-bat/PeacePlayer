@@ -23,7 +23,7 @@ struct AddToPlaylistSheet: View {
     }
     
     var body: some View {
-        NavigationView {
+        NavigationStack {
             ZStack {
                 Theme.cyberBackground.ignoresSafeArea()
 

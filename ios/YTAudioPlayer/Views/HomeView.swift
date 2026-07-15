@@ -14,7 +14,7 @@ struct AllRecentlyPlayedView: View {
     @StateObject private var viewModel = HomeViewModel()
 
     var body: some View {
-        NavigationView {
+        NavigationStack {
             ZStack {
                 Color.cyberBackground.ignoresSafeArea()
 

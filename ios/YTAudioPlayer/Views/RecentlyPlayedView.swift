@@ -15,7 +15,7 @@ struct RecentlyPlayedView: View {
     @State private var cancellables = Set<AnyCancellable>()
     
     var body: some View {
-        NavigationView {
+        NavigationStack {
             List {
                 ForEach(dataManager.recentlyPlayed) { track in
                     RecentlyPlayedRow(

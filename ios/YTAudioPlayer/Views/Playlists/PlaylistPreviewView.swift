@@ -21,7 +21,7 @@ struct PlaylistPreviewView: View {
     @State private var clonedPlaylistId: UUID?
     
     var body: some View {
-        NavigationView {
+        NavigationStack {
             Group {
                 if isLoading {
                     PlaylistLoadingView()
