@@ -55,6 +55,12 @@ struct FullPlayer: View {
     @State private var showAntiAlgorithm = false
     @State private var showChords = false
     @State private var showGestureHints = false
+    // S16: explicit user-triggered re-entry to the gesture coach.
+    // showGestureHints is the auto-show-on-first-launch flag;
+    // showGestureCoach is the user-tapped "?" button flag. They
+    // share the same overlay; the only difference is that
+    // tapping the "?" doesn't set hasSeenGestureHints.
+    @State private var showGestureCoach = false
     @State private var playbackSpeed: Float = 1.0
     @State private var isPulsing = false
     @AppStorage("hasSeenGestureHints") private var hasSeenGestureHints = false
@@ -105,6 +111,20 @@ struct FullPlayer: View {
                         withAnimation(reduceMotion ? .none : .easeOut(duration: 0.3)) {
                             showGestureHints = false
                             hasSeenGestureHints = true
+                        }
+                    }
+                }
+
+                // S16: user-triggered gesture coach re-entry.
+                // Tapping the "?" button in the more-actions grid
+                // flips showGestureCoach on. The dismiss handler
+                // does NOT set hasSeenGestureHints — that flag
+                // only governs the auto-show-on-first-launch
+                // behavior.
+                if showGestureCoach {
+                    GestureCoachOverlay {
+                        withAnimation(reduceMotion ? .none : .easeOut(duration: 0.3)) {
+                            showGestureCoach = false
                         }
                     }
                 }
@@ -931,104 +951,143 @@ private struct ProgressSection: View {
     
     // MARK: - More Actions Row (Lyrics, Memory, Audio, Share, AirPlay)
     private var moreActionsRow: some View {
-        HStack(spacing: 0) {
-            // Lyrics
-            MoreActionButton(
-                icon: "text.quote",
-                title: "Lyrics",
-                action: {
-                    HapticManager.light()
-                    showLyrics = true
-                }
-            )
-
-            // Guitar Chords
-            MoreActionButton(
-                icon: "guitars",
-                title: "Chords",
-                action: {
-                    HapticManager.light()
-                    showChords = true
-                }
-            )
-
-            MoreActionButton(
-                icon: songMemoryManager.hasMemory(for: playerState.currentItem?.track) ? "sparkles.rectangle.stack.fill" : "square.and.pencil",
-                title: "Memory",
-                action: {
-                    HapticManager.light()
-                    showSongMemory = true
-                }
-            )
-
-            // Haptic Symphony
-            if CHHapticEngine.capabilitiesForHardware().supportsHaptics {
+        // S16: redesign from a single unlabeled HStack of 7 icons to
+        // a labeled 2-row grid. The previous layout was 7 icons of
+        // 22pt with no labels in a single row — completely
+        // invisible to VoiceOver before S15, and visually
+        // indistinguishable to a new user. The new layout has 8
+        // cells (4×2) with icon-on-top, label-on-bottom, matching
+        // the iOS Music app's more-actions sheet pattern.
+        VStack(spacing: 4) {
+            HStack(spacing: 0) {
+                // Lyrics
                 MoreActionButton(
-                    icon: hapticEngine.isActive ? "waveform.path.ecg.rectangle.fill" : "waveform.path.ecg.rectangle",
-                    title: "Haptic",
+                    icon: "text.quote",
+                    title: "Lyrics",
                     action: {
                         HapticManager.light()
-                        if hapticEngine.isActive {
-                            hapticEngine.stop()
-                        } else {
-                            hapticEngine.start()
+                        showLyrics = true
+                    }
+                )
+
+                // Guitar Chords
+                MoreActionButton(
+                    icon: "guitars",
+                    title: "Chords",
+                    action: {
+                        HapticManager.light()
+                        showChords = true
+                    }
+                )
+
+                MoreActionButton(
+                    icon: songMemoryManager.hasMemory(for: playerState.currentItem?.track) ? "sparkles.rectangle.stack.fill" : "square.and.pencil",
+                    title: "Memory",
+                    action: {
+                        HapticManager.light()
+                        showSongMemory = true
+                    }
+                )
+
+                // Haptic Symphony — only on devices with haptic
+                // hardware. Skip the cell entirely if not supported.
+                if CHHapticEngine.capabilitiesForHardware().supportsHaptics {
+                    MoreActionButton(
+                        icon: hapticEngine.isActive ? "waveform.path.ecg.rectangle.fill" : "waveform.path.ecg.rectangle",
+                        title: hapticEngine.isActive ? "Haptic On" : "Haptic",
+                        action: {
+                            HapticManager.light()
+                            if hapticEngine.isActive {
+                                hapticEngine.stop()
+                            } else {
+                                hapticEngine.start()
+                            }
                         }
+                    )
+                } else {
+                    // Placeholder cell so the 4-column grid stays
+                    // balanced on devices without haptic hardware.
+                    Color.clear.frame(maxWidth: .infinity)
+                }
+            }
+
+            HStack(spacing: 0) {
+                // Time Capsule — tap = bury a new capsule (default,
+                // most common). Long-press surfaces a context menu
+                // with "Open Vault" as the secondary action —
+                // matches the new confirmation copy in
+                // TimeCapsuleSheet.sealedConfirmation and gives the
+                // vault a real, reachable path from the player.
+                MoreActionButton(
+                    icon: "hourglass",
+                    title: "Capsule",
+                    action: {
+                        HapticManager.light()
+                        showTimeCapsule = true
+                    }
+                )
+                .contextMenu {
+                    Button {
+                        HapticManager.light()
+                        showTimeCapsule = true
+                    } label: {
+                        Label("Bury New Capsule", systemImage: "hourglass.badge.plus")
+                    }
+                    Button {
+                        HapticManager.light()
+                        showTimeCapsuleVault = true
+                    } label: {
+                        Label("Open Vault", systemImage: "tray.full")
+                    }
+                }
+
+                // Audio Settings
+                MoreActionButton(
+                    icon: "waveform",
+                    title: "Audio",
+                    action: {
+                        HapticManager.light()
+                        showAudioSettings = true
+                    }
+                )
+
+                // Share
+                MoreActionButton(
+                    icon: "square.and.arrow.up",
+                    title: "Share",
+                    action: {
+                        HapticManager.light()
+                        showShareSheet = true
+                    }
+                )
+
+                // Gesture Coach re-entry (S16). The first time
+                // the user opens the player, the coach is shown
+                // automatically. The "?" button is how they
+                // re-open it after dismissing — the master plan
+                // call-out for this row was "Gesture Coach: no
+                // re-entry" and this fixes it.
+                MoreActionButton(
+                    icon: "questionmark.circle",
+                    title: "Gestures",
+                    action: {
+                        HapticManager.light()
+                        showGestureCoach = true
                     }
                 )
             }
 
-            // Time Capsule
-            // S15: tap = bury a new capsule (default, most common).
-            // Long-press surfaces a context menu with "Open Vault" as
-            // the secondary action — matches the new confirmation
-            // copy in TimeCapsuleSheet.sealedConfirmation and gives
-            // the vault a real, reachable path from the player.
-            MoreActionButton(
-                icon: "hourglass",
-                title: "Capsule",
-                action: {
-                    HapticManager.light()
-                    showTimeCapsule = true
-                }
-            )
-            .contextMenu {
-                Button {
-                    HapticManager.light()
-                    showTimeCapsule = true
-                } label: {
-                    Label("Bury New Capsule", systemImage: "hourglass.badge.plus")
-                }
-                Button {
-                    HapticManager.light()
-                    showTimeCapsuleVault = true
-                } label: {
-                    Label("Open Vault", systemImage: "tray.full")
-                }
+            // AirPlay sits on its own row at the bottom — it's a
+            // system control (MPVolumeView family) and the AVKit
+            // route-picker doesn't compose well into the 4-column
+            // grid above.
+            HStack {
+                Spacer()
+                AirPlayButton()
+                    .frame(width: 44, height: 44)
+                Spacer()
             }
-
-            // Audio Settings
-            MoreActionButton(
-                icon: "waveform",
-                title: "Audio",
-                action: {
-                    HapticManager.light()
-                    showAudioSettings = true
-                }
-            )
-
-            // Share
-            MoreActionButton(
-                icon: "square.and.arrow.up",
-                title: "Share",
-                action: {
-                    HapticManager.light()
-                    showShareSheet = true
-                }
-            )
-
-            // AirPlay / Output Device
-            AirPlayButton()
-                .frame(maxWidth: .infinity)
+            .padding(.top, 2)
         }
         .padding(.horizontal, 12)
     }
@@ -1164,11 +1223,19 @@ struct MoreActionButton: View {
 
     var body: some View {
         Button(action: action) {
-            Image(systemName: icon)
-                .font(.system(size: 22))
-                .foregroundColor(.white)
-                .frame(maxWidth: .infinity)
-                .frame(height: 44)
+            VStack(spacing: 6) {
+                Image(systemName: icon)
+                    .font(.system(size: 22, weight: .medium))
+                    .foregroundColor(.white)
+                Text(title)
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .foregroundColor(.white.opacity(0.7))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 60)
+            .contentShape(Rectangle())
         }
         // S15: add a11y label, hint, and button trait. The
         // `title` is already passed in by every call site, so
