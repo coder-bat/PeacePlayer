@@ -56,7 +56,11 @@ struct HistoryView: View {
                     let count = viewModel.historyItems.count
                     viewModel.clearHistory()
                     // TODO: True undo requires re-creating CoreData entries; showing confirmation toast for now
-                    undoService.registerUndo(message: "Cleared \(count) history item(s)") {}
+                    undoService.registerUndo(
+                        message: "Cleared \(count) history item\(count == 1 ? "" : "s")",
+                        restore: nil,
+                        showUndoButton: false
+                    )
                 }
                 Button("Cancel", role: .cancel) {}
             } message: {
@@ -139,8 +143,15 @@ struct HistoryView: View {
                     onDelete: {
                         let itemTitle = item.track.title
                         viewModel.deleteHistoryItem(item)
-                        // TODO: True undo requires re-creating CoreData entry; showing confirmation toast for now
-                        undoService.registerUndo(message: "Removed \"\(itemTitle)\"") {}
+                        // S15: History single-delete is destructive
+                        // (the play record is gone). No working
+                        // restore yet, so the toast is a
+                        // confirmation only — no fake Undo button.
+                        UndoService.shared.registerUndo(
+                            message: "Removed \"\(itemTitle)\"",
+                            restore: nil,
+                            showUndoButton: false
+                        )
                     },
                     onPlayNext: {
                         HapticManager.light()

@@ -13,30 +13,39 @@ struct UndoToastView: View {
     var body: some View {
         if let action = undoService.currentUndo {
             HStack(spacing: 12) {
-                Image(systemName: "arrow.uturn.backward.circle.fill")
+                // S15: pick an icon that matches the action's
+                // capability. With-Undo shows the classic
+                // `arrow.uturn.backward.circle.fill`; confirmation-
+                // only shows a checkmark so the user reads it as
+                // "done", not "you can revert this".
+                Image(systemName: action.showUndoButton
+                      ? "arrow.uturn.backward.circle.fill"
+                      : "checkmark.circle.fill")
                     .font(.system(size: 18))
                     .foregroundColor(Theme.cyberCyan)
-                
+
                 Text(action.message)
                     .font(.system(size: 14, weight: .medium))
                     .foregroundColor(.white)
                     .lineLimit(1)
-                
+
                 Spacer()
-                
-                Button(action: {
-                    HapticManager.medium()
-                    undoService.executeUndo()
-                }) {
-                    Text("Undo")
-                        .font(.system(size: 14, weight: .bold))
-                        .foregroundColor(Theme.cyberCyan)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(
-                            Capsule()
-                                .fill(Theme.cyberCyan.opacity(0.15))
-                        )
+
+                if action.showUndoButton {
+                    Button(action: {
+                        HapticManager.medium()
+                        undoService.executeUndo()
+                    }) {
+                        Text("Undo")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundColor(Theme.cyberCyan)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(
+                                Capsule()
+                                    .fill(Theme.cyberCyan.opacity(0.15))
+                            )
+                    }
                 }
             }
             .padding(.horizontal, 16)

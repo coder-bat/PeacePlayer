@@ -167,8 +167,15 @@ struct LibraryView: View {
                     viewModel.deleteTracks(ids)
                     selectedTracks.removeAll()
                     isEditing = false
-                    // TODO: True undo requires re-downloading files; showing confirmation toast for now
-                    undoService.registerUndo(message: "Deleted \(count) track(s)") {}
+                    // S15: Library multi-delete is destructive (files
+                    // are removed from disk). No working restore, so
+                    // the toast is a confirmation only — no Undo
+                    // button (previously the button was a lie).
+                    UndoService.shared.registerUndo(
+                        message: "Deleted \(count) track\(count == 1 ? "" : "s")",
+                        restore: nil,
+                        showUndoButton: false
+                    )
                 }
             } message: {
                 Text("This will permanently remove the selected tracks from your library.")
@@ -321,8 +328,15 @@ struct LibraryView: View {
                             HapticManager.medium()
                             let trackName = track.title
                             viewModel.deleteTracks([track.videoId])
-                            // TODO: True undo requires re-downloading files; showing confirmation toast for now
-                            undoService.registerUndo(message: "Deleted \"\(trackName)\"") {}
+                            // S15: Library single-delete is destructive
+                            // (file is removed from disk). No working
+                            // restore yet, so the toast is a
+                            // confirmation only — no fake Undo button.
+                            UndoService.shared.registerUndo(
+                                message: "Deleted \"\(trackName)\"",
+                                restore: nil,
+                                showUndoButton: false
+                            )
                         }
                     )
                 }
@@ -378,8 +392,15 @@ struct LibraryView: View {
                             HapticManager.medium()
                             let trackName = track.title
                             viewModel.deleteTracks([track.videoId])
-                            // TODO: True undo requires re-downloading files; showing confirmation toast for now
-                            undoService.registerUndo(message: "Deleted \"\(trackName)\"") {}
+                            // S15: Library single-delete is destructive
+                            // (file is removed from disk). No working
+                            // restore yet, so the toast is a
+                            // confirmation only — no fake Undo button.
+                            UndoService.shared.registerUndo(
+                                message: "Deleted \"\(trackName)\"",
+                                restore: nil,
+                                showUndoButton: false
+                            )
                         }
                     )
             }
