@@ -51,6 +51,12 @@ class UnifiedLibraryViewModel: ObservableObject {
     private let registry = MusicSourceRegistry.shared
     private var allTracks: [UnifiedTrack] = []
 
+    // S15: long-running Tasks the VM owns (loadLibrary, etc.).
+    // Tracked here so the deinit can cancel them — previously
+    // they were fire-and-forget and would touch @Published
+    // properties on a dismissed view model.
+    private var inflightTasks: [Task<Void, Never>] = []
+
     // MARK: - Computed Properties
 
     var availableSources: [LibrarySourceFilter] {
@@ -129,22 +135,43 @@ class UnifiedLibraryViewModel: ObservableObject {
         isLoading = true
         errorMessage = nil
 
-        Task {
+        // S15: track the load task so the deinit can cancel it.
+        let task = Task { [weak self] in
+            guard let self = self else { return }
             do {
                 // Load from all sources
-                allTracks = await registry.allTracksFromAllSources()
+                self.allTracks = await self.registry.allTracksFromAllSources()
+
+                // Bail if the view model was dismissed while we were
+                // loading. Without this check the continuation
+                // touches @Published properties on a freed object.
+                if Task.isCancelled { return }
 
                 // Calculate stats (for downloaded tracks)
-                calculateStats()
+                self.calculateStats()
 
                 // Apply initial filters
-                applyFilters()
+                self.applyFilters()
 
-                isLoading = false
+                self.isLoading = false
             } catch {
-                errorMessage = error.localizedDescription
-                isLoading = false
+                if !Task.isCancelled {
+                    self.errorMessage = error.localizedDescription
+                    self.isLoading = false
+                }
             }
+        }
+        inflightTasks.append(task)
+    }
+
+    deinit {
+        // S15: cancel any outstanding load tasks. They capture
+        // `[weak self]` so they don't keep the view model alive,
+        // but without cancellation they would still touch
+        // @Published properties if the work completed after the
+        // view model was dismissed.
+        for task in inflightTasks {
+            task.cancel()
         }
     }
 

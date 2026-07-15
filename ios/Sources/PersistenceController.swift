@@ -80,6 +80,18 @@ struct PersistenceController {
             container.persistentStoreDescriptions.first!.url = URL(fileURLWithPath: "/dev/null")
         }
 
+        // S15: tell Core Data to add the persistent store on a
+        // background queue, not the main thread. The default
+        // behaviour runs the SQLite open + WAL replay on the
+        // caller's queue; with `shouldAddStoreAsynchronously =
+        // true`, the heavy work happens off-main. viewContext is
+        // still available immediately — fetches block on first
+        // access until the store is ready, same as before, but the
+        // first-frame launch path is no longer gated on disk I/O.
+        for description in container.persistentStoreDescriptions {
+            description.shouldAddStoreAsynchronously = true
+        }
+
         // C-2026-06-17: The 2026-06-17 .xcdatamodel change (customClassName
         // [String] -> NSArray on the four Transformable attributes) makes
         // the pre-existing on-disk store incompatible. Core Data

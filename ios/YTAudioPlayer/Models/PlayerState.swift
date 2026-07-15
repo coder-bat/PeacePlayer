@@ -358,9 +358,16 @@ class PlayerState: ObservableObject {
     }
     
     // MARK: - Initialization
-    
+
     private init() {
-        setupAudioSession()
+        // S15: don't set the audio session active in init. The
+        // previous code called `setupAudioSession()` which did
+        // `setActive(true)`. On a cold launch with no playback
+        // intent, that activated the audio session for nothing and
+        // could fight with the system if another app just
+        // released the session. Now we only configure the category
+        // (cheap) and defer `setActive(true)` to the first `play()`.
+        setupAudioSessionCategoryOnly()
         setupAudioSessionObservers()
         restoreQueue()
 
@@ -474,15 +481,39 @@ class PlayerState: ObservableObject {
     // directly when the user taps the resume hero on Home.
 
     // MARK: - Audio Session
-    
-    private func setupAudioSession() {
+
+    /// S15: cheap session category setup. Called once at init.
+    /// Does NOT activate the session — that's deferred to
+    /// `activateAudioSessionIfNeeded()` which is called from the
+    /// first `play()`.
+    private func setupAudioSessionCategoryOnly() {
         do {
             let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playback, mode: .default, options: [.allowAirPlay, .allowBluetooth])
-            try session.setActive(true)
+            try session.setCategory(
+                .playback,
+                mode: .default,
+                options: [.allowAirPlay, .allowBluetooth]
+            )
         } catch {
-            print("❌ Audio session setup failed: \(error)")
+            print("❌ Audio session category setup failed: \(error)")
         }
+    }
+
+    /// S15: activate the session on first play. Idempotent — AVAudioSession
+    /// ignores repeat activations. The previous code activated
+    /// at init; the new code waits until the user actually
+    /// requests playback.
+    private func activateAudioSessionIfNeeded() {
+        do {
+            try AVAudioSession.sharedInstance().setActive(true)
+        } catch {
+            print("❌ Audio session activation failed: \(error)")
+        }
+    }
+
+    private func setupAudioSession() {
+        setupAudioSessionCategoryOnly()
+        activateAudioSessionIfNeeded()
     }
 
     private func setupAudioSessionObservers() {
@@ -639,6 +670,12 @@ class PlayerState: ObservableObject {
         #if DEBUG
         PlayCrashDiagnostics.log(.playback, "play(track:) ENTRY videoId=\(track.videoId) title=\(track.title) currentItem.videoId=\(currentItem?.track.videoId ?? "nil") playbackState=\(playbackState)")
         #endif
+        // S15: activate the audio session on the first play call.
+        // Idempotent; the session stays active for subsequent plays
+        // and through pause/resume cycles. Doing this here instead
+        // of in init means a cold launch with no playback intent
+        // doesn't reserve the audio hardware.
+        activateAudioSessionIfNeeded()
         // C-5 fix: use the reconciliation helper instead of raw FileManager.fileExists.
         // This handles the case where CDDownloadedTrack has a stale row but the
         // file is missing on disk (user deleted via Files.app, etc.).
