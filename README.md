@@ -19,7 +19,24 @@ The iPhone connects to your Mac over your local network (WiFi or Tailscale).
 
 ## Quick Start
 
-### 1. Start the backend
+### 1. Configure the backend secrets
+
+The backend refuses to start without a strong `PEACEPLAYER_JWT_SECRET`
+(it signs the session JWTs the iOS app uses to authenticate to
+user-data endpoints). Copy the example file and fill in a real value:
+
+```bash
+cp backend/.env.example backend/.env
+# Generate a high-entropy secret:
+python3 -c "import secrets; print(secrets.token_urlsafe(48))"
+# Paste the result into backend/.env as PEACEPLAYER_JWT_SECRET=...
+```
+
+`backend/.env` is gitignored. For the launchd-managed service, the
+env var is set in the plist (`~/Library/LaunchAgents/com.peaceplayer.backend.plist`)
+and the file is not consulted.
+
+### 2. Start the backend
 
 The backend runs automatically as a macOS background service (`com.peaceplayer.backend`) — it starts on login and restarts if it crashes. No manual start needed after initial setup.
 
@@ -35,7 +52,7 @@ launchctl load ~/Library/LaunchAgents/com.peaceplayer.backend.plist
 
 The service plist is at `~/Library/LaunchAgents/com.peaceplayer.backend.plist`.
 
-### 2. (Optional) Authenticate for full library access
+### 3. (Optional) Authenticate for full library access
 
 ```bash
 make auth     # Follow prompts to connect your Google account
@@ -55,6 +72,11 @@ To find your IP:
 ```bash
 make ip
 ```
+
+Or, after launching the app once, open **Settings → Backend Host** and
+type the new URL there — the change takes effect immediately (no app
+restart needed) and there's a "Test connection" button to confirm the
+backend is reachable.
 
 ### 4. Build and run
 

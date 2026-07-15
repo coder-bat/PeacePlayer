@@ -4,7 +4,7 @@ HTTP interface for iOS client to access extraction capabilities.
 Works with or without authentication.
 """
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, Response, Query, Path as APIPath
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, Response, Query, Path as APIPath, Depends
 from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -27,6 +27,16 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import httpx
+
+# S17 (CV-3): load backend/.env at import time so dev runs
+# pick up PEACEPLAYER_JWT_SECRET (and other vars) from a file
+# rather than requiring shell exports. In production the
+# launchd plist sets the env directly and this becomes a
+# no-op (the file doesn't exist on the production host).
+from dotenv import load_dotenv
+_env_path = Path(__file__).parent / ".env"
+if _env_path.exists():
+    load_dotenv(_env_path, override=False)
 
 from ytm_client import YTMusicClient, get_client, reset_client
 from extractor import AudioExtractor, get_extractor
@@ -111,6 +121,27 @@ def success_response(data):
 
 def error_response(message, code=None):
     return {"data": None, "error": {"message": message, "code": code}}
+
+
+# --- S17 (CV-3): auth dependency for user-data endpoints ---
+# Previously the backend only required auth on /sync/* and
+# /auth/signout — every other endpoint (search, stream,
+# library, radio, podcasts, audiobooks) was open. After the
+# Track 12 security review we close that gap. The plan
+# keeps the sign-in flow (/auth/apple, /auth/refresh) and the
+# health check (/health) open; everything else requires a
+# valid session JWT minted by /auth/apple.
+#
+# Use as `user: dict = Depends(require_session_user)` on the
+# endpoint signature. FastAPI will pass `request: Request`
+# via the type annotation.
+def require_session_user(request: Request) -> dict:
+    user = current_user_from_request(request.headers.get("Authorization"))
+    if not user:
+        # Match the /sync/* 401 detail for consistency in the
+        # iOS ErrorHandler (S15: it preserves the body for 4xx).
+        raise HTTPException(status_code=401, detail="unauthorized")
+    return user
 
 # --- Thread safety for ytmusic client ---
 ytmusic_lock = asyncio.Lock()
@@ -466,7 +497,7 @@ async def sync_download(request: Request):
 
 @app.get("/cache/stats")
 @limiter.limit("15/minute")
-async def cache_stats(request: Request):
+async def cache_stats(request: Request, user: dict = Depends(require_session_user),):
     """Get stream URL cache statistics."""
     cache = get_cache()
     return cache.get_stats()
@@ -474,7 +505,7 @@ async def cache_stats(request: Request):
 
 @app.post("/cache/clear")
 @limiter.limit("15/minute")
-async def cache_clear(request: Request):
+async def cache_clear(request: Request, user: dict = Depends(require_session_user),):
     """Clear the stream URL cache."""
     cache = get_cache()
     cache.clear()
@@ -484,7 +515,7 @@ async def cache_clear(request: Request):
 # Search endpoint
 @app.post("/search", response_model=List[TrackResponse])
 @limiter.limit("10/minute")
-async def search(query: SearchQuery, request: Request):
+async def search(query: SearchQuery, request: Request, user: dict = Depends(require_session_user),):
     """Search YouTube Music for tracks."""
     cache_key = f"{query.query}:{query.limit}"
     cached = search_cache.get(cache_key)
@@ -510,7 +541,7 @@ async def search(query: SearchQuery, request: Request):
 # Playlist search endpoint
 @app.post("/search/playlists", response_model=List[PlaylistResponse])
 @limiter.limit("10/minute")
-async def search_playlists(query: SearchQuery, request: Request):
+async def search_playlists(query: SearchQuery, request: Request, user: dict = Depends(require_session_user),):
     """Search YouTube Music for playlists."""
     try:
         client = get_client()
@@ -525,7 +556,7 @@ async def search_playlists(query: SearchQuery, request: Request):
 # Get playlist details endpoint
 @app.get("/playlist/{playlist_id}", response_model=PlaylistDetailsResponse)
 @limiter.limit("15/minute")
-async def get_playlist(playlist_id: str, request: Request, limit: int = Query(default=100, ge=1, le=200)):
+async def get_playlist(playlist_id: str, request: Request, limit: int = Query(default=100, ge=1, le=200), user: dict = Depends(require_session_user),):
     """Get full playlist details including tracks."""
     try:
         client = get_client()
@@ -546,7 +577,7 @@ async def get_playlist(playlist_id: str, request: Request, limit: int = Query(de
 # Stream endpoint
 @app.get("/stream/{video_id}", response_model=StreamResponse)
 @limiter.limit("20/minute")
-async def stream_audio(video_id: str, request: Request):
+async def stream_audio(video_id: str, request: Request, user: dict = Depends(require_session_user),):
     """Get streaming URL for a video. Uses caching."""
     try:
         cache = get_cache()
@@ -584,7 +615,7 @@ async def stream_audio(video_id: str, request: Request):
 # Proxy stream endpoint - streams through backend to avoid IP issues
 @app.api_route("/proxy-stream/{video_id:path}", methods=["GET", "HEAD"])
 @limiter.limit("20/minute")
-async def proxy_stream_audio(video_id: str, request: Request, quality: str = "high"):
+async def proxy_stream_audio(video_id: str, request: Request, quality: str = "high", user: dict = Depends(require_session_user),):
     """
     Proxy stream audio through backend.
     This avoids IP-mismatch issues between backend and iOS client.
@@ -769,7 +800,7 @@ async def proxy_stream_audio(video_id: str, request: Request, quality: str = "hi
 # Prefetch endpoint - fire-and-forget cache warming
 @app.post("/prefetch/{video_id}")
 @limiter.limit("60/minute")
-async def prefetch_stream(video_id: str, background_tasks: BackgroundTasks, request: Request):
+async def prefetch_stream(video_id: str, background_tasks: BackgroundTasks, request: Request, user: dict = Depends(require_session_user),):
     """
     Fire-and-forget endpoint to warm the stream URL cache.
     Returns 202 Accepted immediately; extraction runs in background.
@@ -803,7 +834,7 @@ async def _prefetch_worker(video_id: str):
 # Download endpoint
 @app.post("/download", response_model=DownloadResponse)
 @limiter.limit("15/minute")
-async def download_track(download_req: DownloadRequest, request: Request):
+async def download_track(download_req: DownloadRequest, request: Request, user: dict = Depends(require_session_user),):
     """
     Download and convert track to local M4A file.
     Works in both authenticated and guest mode.
@@ -848,7 +879,7 @@ async def download_track(download_req: DownloadRequest, request: Request):
 # Library listing
 @app.get("/library")
 @limiter.limit("15/minute")
-async def list_library(request: Request):
+async def list_library(request: Request, user: dict = Depends(require_session_user),):
     """
     List all downloaded tracks in local library.
     Returns wrapped in {tracks: [...]} for iOS compatibility.
@@ -876,7 +907,7 @@ async def list_library(request: Request):
 # Library delete endpoint
 @app.delete("/library/{filename}")
 @limiter.limit("15/minute")
-async def delete_library_file(filename: str, request: Request):
+async def delete_library_file(filename: str, request: Request, user: dict = Depends(require_session_user),):
     """
     Delete a file from the library.
     """
@@ -900,7 +931,7 @@ async def delete_library_file(filename: str, request: Request):
 # Waveform endpoint
 @app.get("/waveform/{video_id}")
 @limiter.limit("15/minute")
-async def get_waveform(video_id: str, request: Request):
+async def get_waveform(video_id: str, request: Request, user: dict = Depends(require_session_user),):
     """
     Return pre-computed waveform peaks (200 normalized floats) for a video ID.
     Checks a disk cache first, then generates from a downloaded M4A file.
@@ -969,7 +1000,7 @@ async def get_waveform(video_id: str, request: Request):
 # Local file streaming
 @app.get("/local-play/{filename}")
 @limiter.limit("15/minute")
-async def local_play(filename: str, request: Request):
+async def local_play(filename: str, request: Request, user: dict = Depends(require_session_user),):
     """
     Stream a local M4A file.
     Supports HTTP range requests for seeking.
@@ -1006,7 +1037,7 @@ async def local_play(filename: str, request: Request):
 # Thumbnail proxy
 @app.get("/thumbnail")
 @limiter.limit("30/minute")
-async def proxy_thumbnail(url: str, request: Request):
+async def proxy_thumbnail(url: str, request: Request, user: dict = Depends(require_session_user),):
     """Proxy thumbnail image. Only allows YouTube thumbnail domains."""
     try:
         from urllib.parse import urlparse
@@ -1040,7 +1071,7 @@ async def proxy_thumbnail(url: str, request: Request):
 # Lyrics endpoint
 @app.get("/lyrics/{video_id}")
 @limiter.limit("15/minute")
-async def get_lyrics(video_id: str, request: Request):
+async def get_lyrics(video_id: str, request: Request, user: dict = Depends(require_session_user),):
     """Get lyrics for a track if available."""
     try:
         client = get_client()
@@ -1062,7 +1093,7 @@ async def get_lyrics(video_id: str, request: Request):
 # Radio/Autoplay
 @app.get("/radio/{video_id}")
 @limiter.limit("15/minute")
-async def get_radio(video_id: str, request: Request):
+async def get_radio(video_id: str, request: Request, user: dict = Depends(require_session_user),):
     """Get radio playlist based on track."""
     try:
         client = get_client()
@@ -1077,7 +1108,7 @@ async def get_radio(video_id: str, request: Request):
 # Authenticated-only endpoints
 @app.get("/liked-songs")
 @limiter.limit("15/minute")
-async def get_liked_songs(request: Request):
+async def get_liked_songs(request: Request, user: dict = Depends(require_session_user),):
     """
     Get user's liked songs (authenticated only).
     """
@@ -1099,7 +1130,7 @@ async def get_liked_songs(request: Request):
 
 @app.get("/playlists")
 @limiter.limit("15/minute")
-async def get_playlists(request: Request):
+async def get_playlists(request: Request, user: dict = Depends(require_session_user),):
     """
     Get user's playlists (authenticated only).
     """
@@ -1122,7 +1153,7 @@ async def get_playlists(request: Request):
 # Charts / Trending
 @app.get("/charts")
 @limiter.limit("5/minute")
-async def get_charts(request: Request):
+async def get_charts(request: Request, user: dict = Depends(require_session_user),):
     """Get trending charts from YouTube Music."""
     cached = trending_cache.get("charts")
     if cached is not None:
@@ -1177,7 +1208,7 @@ async def get_charts(request: Request):
 
 @app.get("/new-releases")
 @limiter.limit("5/minute")
-async def get_new_releases(request: Request):
+async def get_new_releases(request: Request, user: dict = Depends(require_session_user),):
     """Get new releases from YouTube Music."""
     cached = trending_cache.get("new-releases")
     if cached is not None:
@@ -1262,7 +1293,7 @@ def _format_station(s: dict) -> dict:
 
 @app.get("/radio-stations/search")
 @limiter.limit("30/minute")
-async def search_radio_stations(query: str, limit: int = 20, request: Request = None):
+async def search_radio_stations(query: str, limit: int = 20, request: Request = None, user: dict = Depends(require_session_user),):
     """Search internet radio stations."""
     try:
         async with httpx.AsyncClient(timeout=10) as client:
@@ -1283,7 +1314,7 @@ async def search_radio_stations(query: str, limit: int = 20, request: Request = 
 
 @app.get("/radio-stations/genre/{tag}")
 @limiter.limit("30/minute")
-async def get_radio_by_genre(tag: str, limit: int = 30, request: Request = None):
+async def get_radio_by_genre(tag: str, limit: int = 30, request: Request = None, user: dict = Depends(require_session_user),):
     """Get radio stations by genre tag."""
     try:
         async with httpx.AsyncClient(timeout=10) as client:
@@ -1304,7 +1335,7 @@ async def get_radio_by_genre(tag: str, limit: int = 30, request: Request = None)
 
 @app.get("/radio-stations/top")
 @limiter.limit("30/minute")
-async def get_top_radio_stations(limit: int = 30, request: Request = None):
+async def get_top_radio_stations(limit: int = 30, request: Request = None, user: dict = Depends(require_session_user),):
     """Get top radio stations by click count."""
     try:
         async with httpx.AsyncClient(timeout=10) as client:
@@ -1325,7 +1356,7 @@ async def get_top_radio_stations(limit: int = 30, request: Request = None):
 
 @app.get("/radio-stations/trending")
 @limiter.limit("30/minute")
-async def get_trending_radio_stations(limit: int = 30, request: Request = None):
+async def get_trending_radio_stations(limit: int = 30, request: Request = None, user: dict = Depends(require_session_user),):
     """Get recently changed/trending radio stations."""
     try:
         async with httpx.AsyncClient(timeout=10) as client:
@@ -1346,7 +1377,7 @@ async def get_trending_radio_stations(limit: int = 30, request: Request = None):
 
 @app.post("/radio-stations/{stationuuid}/click")
 @limiter.limit("60/minute")
-async def register_radio_click(stationuuid: str, request: Request):
+async def register_radio_click(stationuuid: str, request: Request, user: dict = Depends(require_session_user),):
     """Register a click for a radio station (updates popularity)."""
     try:
         async with httpx.AsyncClient(timeout=10) as client:
@@ -1399,7 +1430,7 @@ def _parse_duration(text: str) -> int:
 
 @app.get("/podcasts/search")
 @limiter.limit("30/minute")
-async def search_podcasts(query: str, limit: int = 20, request: Request = None):
+async def search_podcasts(query: str, limit: int = 20, request: Request = None, user: dict = Depends(require_session_user),):
     """Search podcasts via iTunes Search API."""
     try:
         async with httpx.AsyncClient(timeout=10) as client:
@@ -1420,7 +1451,7 @@ async def search_podcasts(query: str, limit: int = 20, request: Request = None):
 
 @app.get("/podcasts/episodes")
 @limiter.limit("20/minute")
-async def get_podcast_episodes(feedUrl: str, limit: int = 50, request: Request = None):
+async def get_podcast_episodes(feedUrl: str, limit: int = 50, request: Request = None, user: dict = Depends(require_session_user),):
     """Fetch and parse podcast RSS feed for episodes."""
     try:
         async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
@@ -1486,7 +1517,7 @@ async def get_podcast_episodes(feedUrl: str, limit: int = 50, request: Request =
 
 @app.get("/podcasts/top")
 @limiter.limit("20/minute")
-async def get_top_podcasts(genre: str = "", limit: int = 20, request: Request = None):
+async def get_top_podcasts(genre: str = "", limit: int = 20, request: Request = None, user: dict = Depends(require_session_user),):
     """Get top podcasts, optionally filtered by genre."""
     try:
         params = {"media": "podcast", "limit": limit}
@@ -1554,8 +1585,7 @@ async def get_top_audiobooks(
     limit: int = 20,
     offset: int = 0,
     language: str = "English",
-    request: Request = None,
-):
+    request: Request = None, user: dict = Depends(require_session_user),):
     """Browse top audiobooks from the LibriVox catalog."""
     try:
         params = {"format": "json", "limit": limit, "offset": offset}
@@ -1593,8 +1623,7 @@ async def get_top_audiobooks(
 async def search_audiobooks(
     query: str = Query(..., min_length=1, max_length=200),
     limit: int = Query(20, ge=1, le=50),
-    request: Request = None,
-):
+    request: Request = None, user: dict = Depends(require_session_user),):
     """Search audiobooks via Archive.org's LibriVox collection."""
     try:
         params = {
@@ -1658,8 +1687,7 @@ async def search_audiobooks(
 async def get_audiobooks_by_genre(
     genre: str = APIPath(..., min_length=1, max_length=100),
     limit: int = Query(20, ge=1, le=50),
-    request: Request = None,
-):
+    request: Request = None, user: dict = Depends(require_session_user),):
     """Browse audiobooks by genre from the LibriVox catalog."""
     try:
         params = {"format": "json", "genre": genre, "limit": limit}
@@ -1693,8 +1721,7 @@ async def get_audiobook_chapters(
     book_id: str,
     limit: int = Query(200, ge=1, le=500),
     rssUrl: str = None,
-    request: Request = None,
-):
+    request: Request = None, user: dict = Depends(require_session_user),):
     """Fetch chapters for an audiobook from its LibriVox RSS feed or Archive.org metadata."""
     try:
         # SSRF protection: validate rssUrl domain if provided
@@ -1832,7 +1859,7 @@ async def get_audiobook_chapters(
 # --- Guitar Chords ---
 @app.get("/chords")
 @limiter.limit("30/minute")
-async def get_chords(request: Request, title: str = Query(...), artist: str = Query("")):
+async def get_chords(request: Request, title: str = Query(...), artist: str = Query(""), user: dict = Depends(require_session_user),):
     """Search Songsterr for guitar chords/tabs matching a song title and artist."""
     query = f"{title} {artist}".strip()
     try:
@@ -1939,6 +1966,23 @@ def cleanup_waveform_cache(cache_dir=None):
 async def startup_event():
     """Run startup tasks."""
     cleanup_waveform_cache()
+    # S17 (CV-3): confirm at startup that the JWT secret is
+    # configured. We don't log the secret itself (it's a
+    # secret) but we log its length so an operator can spot a
+    # blank or short value at a glance. apple_auth.py
+    # already raises on import if the env var is missing —
+    # this is a belt-and-braces confirmation that we're using
+    # the configured secret and not a fallback.
+    secret = os.environ.get("PEACEPLAYER_JWT_SECRET", "")
+    if secret:
+        logger.info(
+            f"JWT secret loaded from env ({len(secret)} chars). "
+            "Session JWTs use this key."
+        )
+    else:
+        # Should be unreachable — apple_auth.py raises on
+        # import if the var is missing.
+        logger.warning("PEACEPLAYER_JWT_SECRET is empty!")
     logger.info("Server started")
 
 
