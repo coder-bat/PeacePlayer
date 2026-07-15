@@ -39,6 +39,7 @@
 		400280C613F6E73E4B338CC8 /* WidgetTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A5BA9202ABE322C59404BE0 /* WidgetTheme.swift */; };
 		401DF3BB8DA7205DAC931D79 /* GestureCoachOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C5E9F809A825611AC8B66A3 /* GestureCoachOverlay.swift */; };
 		73C352705C3B41EAA892E634 /* TrackRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 707BAB3A6A5C431FA9792BF0 /* TrackRow.swift */; };
+		AFCDFB5F387045BB8DDC3850 /* SpotlightService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 218B69801C9B42608F10BD1A /* SpotlightService.swift */; };
 		401F1454DBCDFB60684B60BA /* RecentlyPlayedSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6291733A4960D1A161F05229 /* RecentlyPlayedSection.swift */; };
 		415B7004695FF63E57285C3E /* CDUserStats.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD1CDA2632A97CF4AA80E901 /* CDUserStats.swift */; };
 		42341923A20C0120F1C0FD35 /* Audiobook.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8BFAE5836927828B11D8D41 /* Audiobook.swift */; };
@@ -178,6 +179,7 @@
 		0BFC375ECD06E998CB697145 /* QueueRestorer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueueRestorer.swift; sourceTree = "<group>"; };
 		0C5E9F809A825611AC8B66A3 /* GestureCoachOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GestureCoachOverlay.swift; sourceTree = "<group>"; };
 		707BAB3A6A5C431FA9792BF0 /* TrackRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrackRow.swift; sourceTree = "<group>"; };
+		218B69801C9B42608F10BD1A /* SpotlightService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpotlightService.swift; sourceTree = "<group>"; };
 		0F15FD3F181894856FF634D2 /* PeacePlayerWidgetBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeacePlayerWidgetBundle.swift; sourceTree = "<group>"; };
 		12DF773336B5A83BFF1FC347 /* PlayerState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerState.swift; sourceTree = "<group>"; };
 		16EA893B48AC5117E1F23A9D /* AudiobookDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudiobookDetailView.swift; sourceTree = "<group>"; };
@@ -461,6 +463,7 @@
 				538A97384F4577D3971EDB4D /* WalkDJAppDelegate.swift */,
 				BBE8F43DE06B1E954F4B8253 /* WaveformService.swift */,
 				B50C9E287B0A4F7F51A35D9E /* WidgetSyncService.swift */,
+				218B69801C9B42608F10BD1A /* SpotlightService.swift */,
 				67609839B0C75045B46184AD /* YTAudioPlayer.xcdatamodeld */,
 				3EE2B3910804FD509343D69F /* Entities */,
 				88677468B2C682823B6E6BBB /* DebugBridge */,
@@ -763,6 +766,7 @@
 				8AEBC8B304E47DC0CCE29413 /* GenrePickerSheet.swift in Sources */,
 				401DF3BB8DA7205DAC931D79 /* GestureCoachOverlay.swift in Sources */,
 				73C352705C3B41EAA892E634 /* TrackRow.swift in Sources */,
+				AFCDFB5F387045BB8DDC3850 /* SpotlightService.swift in Sources */,
 				89F62BF1FA5DAA7E3F82BC5E /* GestureEngine.swift in Sources */,
 				0B97B073B2BCBE37732CD3C4 /* HapticManager.swift in Sources */,
 				49739B1EA039770A8495E401 /* HapticSymphonyEngine.swift in Sources */,

@@ -24,6 +24,13 @@ final class WalkDJAppDelegate: NSObject, UIApplicationDelegate, UNUserNotificati
         // Core Data and never appear in the Library.
         BackgroundDownloadService.shared.bootstrap()
 
+        // S15: start Spotlight donation so the currently-playing
+        // track is searchable from the iOS home screen / Lock
+        // Screen / Siri Suggestions.
+        Task { @MainActor in
+            SpotlightService.shared.start()
+        }
+
         return true
     }
 
