@@ -14,8 +14,22 @@ struct SettingsView: View {
     // APIService.baseURLOverrideDefaultsKey and read on the
     // next launch (or immediately on save).
     @State private var serverHostDraft: String = UserDefaults.standard.string(forKey: APIService.baseURLOverrideDefaultsKey) ?? ""
+    // S17 (CV-4): "Test connection" button state. .idle = no
+    // test yet, .testing = request in flight, .ok = 200 with
+    // latency, .error = non-200 or transport failure. The Task
+    // is held in `connectionTestTask` so the view can cancel it
+    // on disappear.
+    @State private var connectionTest: ConnectionTestState = .idle
+    @State private var connectionTestTask: Task<Void, Never>?
     // S15: 10-band EQ status line for the Settings row.
     @ObservedObject private var eq = AudioEqualizer.shared
+
+    private enum ConnectionTestState: Equatable {
+        case idle
+        case testing
+        case ok(latencyMs: Int)
+        case error(String)
+    }
 
     /// One-line status for the EQ row in the Audio section.
     /// Shows the active preset when the EQ is on, otherwise
@@ -25,6 +39,81 @@ struct SettingsView: View {
         let preset = eq.preset.rawValue
         if preset == "Custom" { return "On · Custom" }
         return "On · \(preset)"
+    }
+
+    /// S17 (CV-4): title for the "Test connection" button
+    /// depends on the current state. idle → "Test connection",
+    /// testing → "Testing…", ok → "OK · Nms", error →
+    /// "Failed: <message>". Capped at 40 chars so the row
+    /// doesn't reflow on a long error.
+    private var connectionTestButtonTitle: String {
+        switch connectionTest {
+        case .idle:
+            return "Test connection"
+        case .testing:
+            return "Testing…"
+        case .ok(let ms):
+            return "OK · \(ms)ms"
+        case .error(let msg):
+            let trimmed = msg.count > 40 ? String(msg.prefix(40)) + "…" : msg
+            return "Failed: \(trimmed)"
+        }
+    }
+
+    /// S17 (CV-4): do a GET /health with a 5s timeout. The
+    /// result is recorded in `connectionTest`. We
+    /// deliberately do NOT add the Bearer token so the test
+    /// reflects reachability, not auth state — GET /health is
+    /// intentionally open (no auth) on the backend.
+    private func runConnectionTest() {
+        connectionTestTask?.cancel()
+        connectionTest = .testing
+
+        let urlString = APIService.shared.baseURL + "/health"
+        guard let url = URL(string: urlString) else {
+            connectionTest = .error("Invalid URL")
+            return
+        }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 5
+        request.httpMethod = "GET"
+
+        connectionTestTask = Task { @MainActor in
+            let started = Date()
+            do {
+                let (_, response) = try await URLSession.shared.data(for: request)
+                if Task.isCancelled { return }
+                guard let http = response as? HTTPURLResponse else {
+                    connectionTest = .error("Not HTTP")
+                    return
+                }
+                let latency = Int(Date().timeIntervalSince(started) * 1000)
+                if http.statusCode == 200 {
+                    connectionTest = .ok(latencyMs: latency)
+                    HapticManager.success()
+                } else {
+                    connectionTest = .error("HTTP \(http.statusCode)")
+                    HapticManager.error()
+                }
+            } catch {
+                if Task.isCancelled { return }
+                let msg: String
+                if let urlError = error as? URLError {
+                    switch urlError.code {
+                    case .timedOut: msg = "Timed out (5s)"
+                    case .cannotFindHost: msg = "Host not found"
+                    case .cannotConnectToHost: msg = "Connection refused"
+                    case .networkConnectionLost: msg = "Network lost"
+                    case .notConnectedToInternet: msg = "Offline"
+                    default: msg = urlError.localizedDescription
+                    }
+                } else {
+                    msg = error.localizedDescription
+                }
+                connectionTest = .error(msg)
+                HapticManager.error()
+            }
+        }
     }
 
     var body: some View {
@@ -405,7 +494,7 @@ struct SettingsView: View {
                         HStack {
                             Image(systemName: "checkmark.circle.fill")
                                 .foregroundColor(Theme.cyberCyan)
-                            Text("Save (restart app to apply)")
+                            Text("Save")
                                 .foregroundColor(.white)
                         }
                     }
@@ -500,6 +589,14 @@ struct SettingsView: View {
         .sheet(isPresented: $showEqualizer) {
             EqualizerPanelView()
                 .preferredColorScheme(.dark)
+        }
+        // S17 (CV-4): cancel any in-flight connection
+        // test when the Settings view is dismissed so we
+        // don't try to update state on a torn-down view.
+        .onDisappear {
+            connectionTestTask?.cancel()
+            connectionTestTask = nil
+            connectionTest = .idle
         }
     }
 
