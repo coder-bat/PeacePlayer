@@ -55,7 +55,7 @@ struct AntiAlgorithmView: View {
             // Icon
             ZStack {
                 Circle()
-                    .fill(Color.orange.opacity(0.1))
+                    .fill(Theme.cyberYellow.opacity(0.1))
                     .frame(width: 100, height: 100)
                 Image(systemName: "dice.fill")
                     .font(.system(size: 44))
@@ -107,7 +107,7 @@ struct AntiAlgorithmView: View {
                 .foregroundColor(.black)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 16)
-                .background(Color.orange)
+                .background(Theme.cyberYellow)
                 .cornerRadius(14)
             }
             .disabled(tasteProfile?.artists.isEmpty ?? true)
@@ -147,7 +147,7 @@ struct AntiAlgorithmView: View {
                     .foregroundColor(.cyberDim)
             }
             .padding()
-            .background(Color.orange.opacity(0.08))
+            .background(Theme.cyberYellow.opacity(0.08))
             .cornerRadius(12)
 
             // Queue

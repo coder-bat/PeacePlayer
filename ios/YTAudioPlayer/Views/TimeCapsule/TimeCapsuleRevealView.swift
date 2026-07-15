@@ -25,7 +25,7 @@ struct TimeCapsuleRevealView: View {
             // Background glow
             if phase == .revealed {
                 Circle()
-                    .fill(Color.cyan.opacity(0.08))
+                    .fill(Theme.cyberCyan.opacity(0.08))
                     .frame(width: 400, height: 400)
                     .blur(radius: 80)
                     .transition(.opacity)
@@ -102,7 +102,7 @@ struct TimeCapsuleRevealView: View {
                             .font(.body.weight(.semibold))
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 16)
-                            .background(Color.cyan)
+                            .background(Theme.cyberCyan)
                             .cornerRadius(14)
                         }
 
@@ -121,7 +121,7 @@ struct TimeCapsuleRevealView: View {
                             .fontWeight(.semibold)
                             .padding(.vertical, 16)
                             .frame(maxWidth: .infinity)
-                            .background(Color.cyan.opacity(0.15))
+                            .background(Theme.cyberCyan.opacity(0.15))
                             .cornerRadius(14)
                     }
                     .padding(.horizontal, 32)
@@ -144,7 +144,7 @@ struct TimeCapsuleRevealView: View {
     private var sealedCapsuleView: some View {
         ZStack {
             Circle()
-                .fill(Color.cyan.opacity(0.1))
+                .fill(Theme.cyberCyan.opacity(0.1))
                 .frame(width: 200, height: 200)
 
             Image(systemName: "envelope.fill")

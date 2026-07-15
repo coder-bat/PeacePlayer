@@ -154,12 +154,12 @@ private struct CapsuleCard: View {
         .background(
             RoundedRectangle(cornerRadius: 14)
                 .fill(style == .readyToOpen
-                    ? Color.cyan.opacity(0.08)
+                    ? Theme.cyberCyan.opacity(0.08)
                     : Color.white.opacity(0.05))
                 .overlay(
                     RoundedRectangle(cornerRadius: 14)
                         .stroke(
-                            style == .readyToOpen ? Color.cyan.opacity(0.4) : Color.clear,
+                            style == .readyToOpen ? Theme.cyberCyan.opacity(0.4) : Color.clear,
                             lineWidth: 1
                         )
                 )
