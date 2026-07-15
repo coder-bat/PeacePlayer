@@ -978,6 +978,11 @@ private struct ProgressSection: View {
             }
 
             // Time Capsule
+            // S15: tap = bury a new capsule (default, most common).
+            // Long-press surfaces a context menu with "Open Vault" as
+            // the secondary action — matches the new confirmation
+            // copy in TimeCapsuleSheet.sealedConfirmation and gives
+            // the vault a real, reachable path from the player.
             MoreActionButton(
                 icon: "hourglass",
                 title: "Capsule",
@@ -986,6 +991,20 @@ private struct ProgressSection: View {
                     showTimeCapsule = true
                 }
             )
+            .contextMenu {
+                Button {
+                    HapticManager.light()
+                    showTimeCapsule = true
+                } label: {
+                    Label("Bury New Capsule", systemImage: "hourglass.badge.plus")
+                }
+                Button {
+                    HapticManager.light()
+                    showTimeCapsuleVault = true
+                } label: {
+                    Label("Open Vault", systemImage: "tray.full")
+                }
+            }
 
             // Audio Settings
             MoreActionButton(

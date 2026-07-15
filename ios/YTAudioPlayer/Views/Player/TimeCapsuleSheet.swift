@@ -193,7 +193,7 @@ struct TimeCapsuleSheet: View {
                 .font(.subheadline)
                 .foregroundColor(Theme.tertiaryText)
 
-            Text("Long-press the Capsule button to view your vault")
+            Text("Long-press the Capsule button for your vault")
                 .font(.caption)
                 .foregroundColor(Theme.tertiaryText.opacity(0.6))
 
