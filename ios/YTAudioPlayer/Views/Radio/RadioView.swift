@@ -770,40 +770,19 @@ struct SongRadioRow: View {
     let onTap: () -> Void
 
     var body: some View {
-        Button(action: onTap) {
-            HStack(spacing: 12) {
-                CachedAsyncImage(url: track.artworkURL) { image in
-                    image.resizable().aspectRatio(contentMode: .fill)
-                } placeholder: {
-                    ZStack {
-                        Theme.cyberSurface
-                        Image(systemName: "music.note")
-                            .font(.system(size: 18))
-                            .foregroundColor(Theme.cyberCyan.opacity(0.5))
-                    }
-                }
-                .frame(width: 44, height: 44)
-                .cornerRadius(CornerRadius.sm)
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(track.title)
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundColor(.white)
-                        .lineLimit(1)
-                    Text(track.displayArtist)
-                        .font(.system(size: 12))
-                        .foregroundColor(Theme.tertiaryText)
-                        .lineLimit(1)
-                }
-                Spacer()
+        TrackRow(
+            title: track.title,
+            subtitle: track.displayArtist,
+            artworkURL: track.artworkURL,
+            titleSize: 15,
+            subtitleSize: 13,
+            accessory: .custom(AnyView(
                 Text(track.durationText)
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundColor(Theme.cyberDim)
-            }
-            .padding(.vertical, 8)
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(track.title) by \(track.displayArtist)")
+            )),
+            onTap: onTap
+        )
     }
 }
 
@@ -813,50 +792,23 @@ struct RadioStationRow: View {
     let station: RadioStation
     let onTap: () -> Void
 
-    var body: some View {
-        Button(action: onTap) {
-            HStack(spacing: 12) {
-                CachedAsyncImage(url: station.faviconURL) { image in
-                    image.resizable().aspectRatio(contentMode: .fill)
-                } placeholder: {
-                    ZStack {
-                        Theme.cyberSurface
-                        Image(systemName: "radio")
-                            .foregroundColor(Theme.cyberCyan.opacity(0.4))
-                    }
-                }
-                .frame(width: 44, height: 44)
-                .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm))
+    private var subtitleText: String {
+        var parts: [String] = []
+        if !station.displayCountry.isEmpty { parts.append(station.displayCountry) }
+        if !station.bitrateText.isEmpty { parts.append(station.bitrateText) }
+        return parts.joined(separator: " · ")
+    }
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(station.name)
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundColor(.white)
-                        .lineLimit(1)
-                    HStack(spacing: 6) {
-                        if !station.displayCountry.isEmpty {
-                            Text(station.displayCountry)
-                                .font(.system(size: 11))
-                                .foregroundColor(Theme.cyberDim)
-                        }
-                        if !station.bitrateText.isEmpty {
-                            Text("·")
-                                .foregroundColor(Theme.cyberDim)
-                            Text(station.bitrateText)
-                                .font(.system(size: 11, design: .monospaced))
-                                .foregroundColor(Theme.cyberDim)
-                        }
-                    }
-                }
-                Spacer()
-                Circle()
-                    .fill(Theme.cyberCyan)
-                    .frame(width: 8, height: 8)
-            }
-            .padding(.vertical, 8)
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(station.name), \(station.country), \(station.bitrateText)")
+    var body: some View {
+        TrackRow(
+            title: station.name,
+            subtitle: subtitleText,
+            artworkURL: station.faviconURL,
+            titleSize: 15,
+            subtitleSize: 12,
+            accessory: .dotIndicator(color: Theme.cyberCyan),
+            onTap: onTap
+        )
     }
 }
 
