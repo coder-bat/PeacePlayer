@@ -42,9 +42,27 @@ final class AudioVisualizerEngine: ObservableObject {
     private var log2n: vDSP_Length = 0
     private var halfN: Int = 0
 
-    // Ring buffer for accumulating samples between FFT passes
-    private var ringBuffer: [Float] = []
+    // Ring buffer for accumulating samples between FFT passes.
+    // S15: pre-allocated to avoid `[Float]` growth on the audio
+    // thread (the tap callback used to do `ringBuffer.append(...)`
+    // which can reallocate). The producer (tap) writes to
+    // `ringTail`, the consumer (timer) reads from `ringHead`;
+    // both indices wrap modulo `ringCapacity`.
+    private let ringCapacity: Int = 16384
+    private var ringBuffer: [Float] = Array(repeating: 0, count: 16384)
+    private var ringHead: Int = 0
+    private var ringTail: Int = 0
+    // Lock scope is now just two integer index updates; the heavy
+    // work (copies) happens outside the lock.
     private let ringLock = NSLock()
+
+    // Pre-allocated scratch for the tap's mono mix-down. The
+    // previous code did `var monoSamples = [Float](repeating: 0,
+    // count: frameCount)` on every audio frame — an allocation
+    // on the audio thread. Now we write into a pre-sized array
+    // and pass the count alongside.
+    private let scratchCapacity: Int = 16384
+    private var monoScratch: [Float] = Array(repeating: 0, count: 16384)
 
     // Update timer (~30fps)
     private var displayTimer: Timer?
@@ -56,7 +74,8 @@ final class AudioVisualizerEngine: ObservableObject {
         log2n = vDSP_Length(log2(Float(n)))
         halfN = n / 2
         fftSetup = vDSP_create_fftsetup(log2n, FFTRadix(kFFTRadix2))
-        ringBuffer.reserveCapacity(fftSize * 2)
+        // ringBuffer and monoScratch are already sized in their
+        // property declarations; no reserveCapacity needed.
     }
 
     deinit {
@@ -117,7 +136,11 @@ final class AudioVisualizerEngine: ObservableObject {
         tapRef = nil
 
         ringLock.lock()
-        ringBuffer.removeAll(keepingCapacity: true)
+        // S15: don't deallocate — just reset the indices. The
+        // pre-allocated buffer is reused across install/remove
+        // cycles.
+        ringHead = 0
+        ringTail = 0
         ringLock.unlock()
 
         DispatchQueue.main.async {
@@ -162,13 +185,21 @@ final class AudioVisualizerEngine: ObservableObject {
     /// Called from timer: pull samples from ring buffer and compute FFT.
     private func processPendingSamples() {
         ringLock.lock()
-        guard ringBuffer.count >= fftSize else {
+        let available = (ringTail - ringHead + ringCapacity) % ringCapacity
+        guard available >= fftSize else {
             ringLock.unlock()
             decayBands()
             return
         }
-        let samples = Array(ringBuffer.prefix(fftSize))
-        ringBuffer.removeFirst(min(fftSize / 2, ringBuffer.count))
+        // Copy fftSize samples to a local windowed array. The copy
+        // happens here (off the audio thread, on the FFT
+        // processing queue) so the ring can be re-filled while
+        // we're crunching numbers.
+        var samples = [Float](repeating: 0, count: fftSize)
+        for i in 0..<fftSize {
+            samples[i] = ringBuffer[(ringHead + i) % ringCapacity]
+        }
+        ringHead = (ringHead + fftSize / 2) % ringCapacity
         ringLock.unlock()
 
         guard let setup = fftSetup else { return }
@@ -264,12 +295,50 @@ final class AudioVisualizerEngine: ObservableObject {
 
     // MARK: - Sample Ingestion (called from tap process callback)
 
-    fileprivate func ingestSamples(_ samples: [Float]) {
+    /// S15: real-time-safe interleaved-to-mono ingestion. Mixes
+    /// `count` interleaved frames of `channels` channels into the
+    /// pre-allocated `monoScratch`, then copies the result into
+    /// the ring buffer. No allocations on the hot path; the lock
+    /// scope is just the two index updates plus the wrap-aware
+    /// copy.
+    fileprivate func ingestInterleaved(
+        count: Int,
+        channels: Int,
+        source: UnsafePointer<Float>
+    ) {
+        // Clamp defensively — if a tap ever produced more frames
+        // than the scratch, drop the excess rather than overflow.
+        let n = min(count, scratchCapacity)
+        guard n > 0 else { return }
+
+        // Per-channel average into monoScratch. Mono path is a
+        // direct copy; multi-channel path averages the channels.
+        // No `[Float]` allocations — monoScratch is reused.
+        if channels > 1 {
+            for frame in 0..<n {
+                var sum: Float = 0
+                for ch in 0..<channels {
+                    sum += source[frame * channels + ch]
+                }
+                monoScratch[frame] = sum / Float(channels)
+            }
+        } else {
+            for frame in 0..<n {
+                monoScratch[frame] = source[frame]
+            }
+        }
+
         ringLock.lock()
-        ringBuffer.append(contentsOf: samples)
-        // Cap ring buffer to avoid unbounded growth
-        if ringBuffer.count > fftSize * 4 {
-            ringBuffer.removeFirst(ringBuffer.count - fftSize * 4)
+        // Copy monoScratch[0..<n] into ringBuffer at ringTail,
+        // wrapping if needed. If the copy would overwrite unread
+        // samples, advance ringHead to the oldest unread sample
+        // (drop-oldest policy) so the consumer never blocks.
+        for i in 0..<n {
+            ringBuffer[ringTail] = monoScratch[i]
+            ringTail = (ringTail + 1) % ringCapacity
+            if ringTail == ringHead {
+                ringHead = (ringHead + 1) % ringCapacity
+            }
         }
         ringLock.unlock()
     }
@@ -327,21 +396,22 @@ private func tapProcess(
     let frameCount = Int(numberFramesOut.pointee)
     let channelCount = Int(firstBuffer.mNumberChannels)
 
-    // Mix channels down to mono
-    let floatData = data.bindMemory(to: Float.self, capacity: frameCount * channelCount)
-    var monoSamples = [Float](repeating: 0, count: frameCount)
-
-    if channelCount > 1 {
-        for frame in 0..<frameCount {
-            var sum: Float = 0
-            for ch in 0..<channelCount {
-                sum += floatData[frame * channelCount + ch]
-            }
-            monoSamples[frame] = sum / Float(channelCount)
-        }
-    } else {
-        monoSamples = Array(UnsafeBufferPointer(start: floatData, count: frameCount))
-    }
-
-    engine.ingestSamples(monoSamples)
+    // S15: real-time-safe mono mix-down. The previous code did
+    // two `[Float]` allocations on every tap callback (one for
+    // the multi-channel case, one via `Array(UnsafeBufferPointer...)`
+    // for the mono case). Apple documents that the tap callback
+    // must be allocation-free and lock-free; an allocator stall
+    // or a contended lock here produces a click/pop in the audio
+    // stream. We now hand the engine the raw float pointer and
+    // let it mix into its pre-allocated `monoScratch` — zero
+    // allocations on the audio thread.
+    let floatData = data.bindMemory(
+        to: Float.self,
+        capacity: frameCount * max(channelCount, 1)
+    )
+    engine.ingestInterleaved(
+        count: frameCount,
+        channels: channelCount,
+        source: floatData
+    )
 }
