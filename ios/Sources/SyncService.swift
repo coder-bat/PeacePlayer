@@ -167,13 +167,18 @@ final class SyncService: NSObject, ObservableObject {
     }
 
     private func upload(payload: UploadRequest) async throws {
-        guard let token = keychain.read(sessionTokenKey) else {
+        // S17 (CV-3): the Bearer token is now added centrally by
+        // APIService.addAuthHeader — same code path the rest of
+        // the app uses. We still fail-fast if there's no session
+        // at all so callers see a clear "not signed in" error
+        // instead of a 401.
+        guard keychain.read(sessionTokenKey) != nil else {
             throw SyncError.notAuthenticated
         }
         var request = URLRequest(url: baseURL.appendingPathComponent("/sync/upload"))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        APIService.addAuthHeader(to: &request)
         request.httpBody = try JSONEncoder().encode(payload)
 
         let (_, response) = try await URLSession.shared.data(for: request)
@@ -183,12 +188,12 @@ final class SyncService: NSObject, ObservableObject {
     }
 
     private func download() async throws -> UploadRequest {
-        guard let token = keychain.read(sessionTokenKey) else {
+        guard keychain.read(sessionTokenKey) != nil else {
             throw SyncError.notAuthenticated
         }
         var request = URLRequest(url: baseURL.appendingPathComponent("/sync/download"))
         request.httpMethod = "GET"
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        APIService.addAuthHeader(to: &request)
 
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {

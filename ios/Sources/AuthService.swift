@@ -99,8 +99,8 @@ final class AuthService: NSObject, ObservableObject {
     }
 
     func signOut() async {
-        if let token = keychain.read(sessionTokenKey) {
-            _ = try? await postSignOut(token: token)
+        if keychain.read(sessionTokenKey) != nil {
+            _ = try? await postSignOut()
         }
         // 2026-06-28 (Phase 3): cancel any in-flight sync so we
         // don't keep writing to a now-invalid session.
@@ -201,10 +201,13 @@ final class AuthService: NSObject, ObservableObject {
         SyncService.shared.handleSignIn(isNewUser: decoded.isNewUser)
     }
 
-    private func postSignOut(token: String) async throws -> Data {
+    private func postSignOut() async throws -> Data {
+        // S17 (CV-3): use the central APIService.addAuthHeader
+        // helper so the Bearer-token construction is in one
+        // place. The keychain read happens inside the helper.
         var request = URLRequest(url: baseURL.appendingPathComponent("/auth/signout"))
         request.httpMethod = "POST"
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        APIService.addAuthHeader(to: &request)
         let (data, _) = try await URLSession.shared.data(for: request)
         return data
     }
