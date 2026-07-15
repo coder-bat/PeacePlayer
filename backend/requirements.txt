@@ -17,3 +17,10 @@ pydantic==2.5.3
 # Apple Sign-In (2026-06-28)
 PyJWT>=2.8.0
 cryptography>=41.0.0
+
+# S17 (CV-3): load backend/.env for local development so the
+# PEACEPLAYER_JWT_SECRET (and any other env vars) can be set
+# in a file rather than exported in every shell. In production
+# the launchd plist (or systemd unit) sets the env directly and
+# .env is just ignored.
+python-dotenv>=1.0.0

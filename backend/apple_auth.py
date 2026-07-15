@@ -48,12 +48,38 @@ APPLE_BUNDLE_ID = os.environ.get("APPLE_BUNDLE_ID", "com.ytaudioplayer.app")
 APPLE_JWKS_URL = "https://appleid.apple.com/auth/keys"
 APPLE_ISSUER = "https://appleid.apple.com"
 
-# Our own secret for signing session JWTs. In production this
-# should be a high-entropy secret from a secrets manager.
-SESSION_JWT_SECRET = os.environ.get(
-    "PEACEPLAYER_JWT_SECRET",
-    "dev-secret-do-not-use-in-prod-32-chars-min"
-)
+# Our own secret for signing session JWTs.
+#
+# S17 (CV-3): the previous code silently fell back to a
+# hardcoded "dev-secret-do-not-use-in-prod-32-chars-min"
+# string. That meant an operator who forgot to set
+# PEACEPLAYER_JWT_SECRET would ship the service with a
+# publicly-known secret — anyone could forge a session JWT
+# for any user_id. Now we fail fast on startup if the env
+# var is missing, and we refuse to boot with a weak secret.
+#
+# Generate a real secret with:
+#   python3 -c "import secrets; print(secrets.token_urlsafe(48))"
+# and put it in backend/.env (gitignored) or export it
+# before launching the service.
+#
+# The .env example (backend/.env.example) shows the variable
+# name without a value, so it's safe to commit.
+SESSION_JWT_SECRET = os.environ.get("PEACEPLAYER_JWT_SECRET")
+if not SESSION_JWT_SECRET or SESSION_JWT_SECRET.strip() == "":
+    raise RuntimeError(
+        "PEACEPLAYER_JWT_SECRET is not set. Refusing to boot. "
+        "Generate one with: python3 -c 'import secrets; "
+        "print(secrets.token_urlsafe(48))' and put it in "
+        "backend/.env (see backend/.env.example)."
+    )
+if len(SESSION_JWT_SECRET) < 32:
+    raise RuntimeError(
+        "PEACEPLAYER_JWT_SECRET must be at least 32 characters "
+        "of high-entropy randomness. Got "
+        f"{len(SESSION_JWT_SECRET)} characters."
+    )
+
 SESSION_JWT_ALG = "HS256"
 SESSION_JWT_TTL_SECONDS = 30 * 24 * 60 * 60  # 30 days
 
