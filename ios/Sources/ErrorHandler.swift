@@ -13,6 +13,7 @@ import Combine
 enum AppError: Error, Equatable {
     case network(String)
     case server(Int, String)
+    case rateLimited(retryAfter: TimeInterval?)
     case offline
     case notFound
     case parsing(String)
@@ -20,11 +21,12 @@ enum AppError: Error, Equatable {
     case playbackFailed(String)
     case authRequired
     case unknown(String)
-    
+
     var title: String {
         switch self {
         case .network: return "Connection Error"
         case .server: return "Server Error"
+        case .rateLimited: return "Slow Down"
         case .offline: return "You're Offline"
         case .notFound: return "Not Found"
         case .parsing: return "Data Error"
@@ -34,7 +36,7 @@ enum AppError: Error, Equatable {
         case .unknown: return "Something Went Wrong"
         }
     }
-    
+
     var message: String {
         switch self {
         case .network(let msg):
@@ -46,6 +48,15 @@ enum AppError: Error, Equatable {
                 return "The requested content could not be found."
             }
             return msg.isEmpty ? "A server error occurred. Please try again." : msg
+        case .rateLimited(let retryAfter):
+            // S15: previously 429 was collapsed to a generic
+            // "check your internet" message. Now the user sees a
+            // real explanation and an explicit wait time when the
+            // server sent a Retry-After header.
+            if let seconds = retryAfter {
+                return "You're going a bit fast — try again in \(Int(seconds))s."
+            }
+            return "You're going a bit fast — wait a moment and try again."
         case .offline:
             return "You appear to be offline. Check your connection and try again."
         case .notFound:
@@ -62,10 +73,10 @@ enum AppError: Error, Equatable {
             return msg.isEmpty ? "An unexpected error occurred. Please try again." : msg
         }
     }
-    
+
     var isRetryable: Bool {
         switch self {
-        case .network, .server, .offline, .downloadFailed, .unknown:
+        case .network, .server, .rateLimited, .offline, .downloadFailed, .unknown:
             return true
         case .notFound, .parsing, .playbackFailed, .authRequired:
             return false
@@ -78,6 +89,8 @@ enum AppError: Error, Equatable {
             return "wifi.slash"
         case .server:
             return "server.rack"
+        case .rateLimited:
+            return "hourglass"
         case .notFound:
             return "magnifyingglass"
         case .parsing:
@@ -92,10 +105,10 @@ enum AppError: Error, Equatable {
             return "exclamationmark.triangle"
         }
     }
-    
+
     var color: Color {
         switch self {
-        case .network, .offline, .server, .unknown:
+        case .network, .offline, .server, .rateLimited, .unknown:
             return .orange
         case .notFound, .parsing:
             return Theme.tertiaryText
@@ -115,13 +128,22 @@ extension APIError {
             return .network("Invalid URL")
         case .invalidResponse:
             return .parsing("Invalid response from server")
+        case .rateLimited(let retryAfter):
+            // S15: 429 used to be lumped into .httpError -> .network
+            // -> "check your internet", which is the worst possible
+            // mapping. Surface it directly so the user sees a
+            // real "slow down" message.
+            return .rateLimited(retryAfter: retryAfter)
         case .httpError(let code, let message):
             if code == 404 {
                 return .notFound
             } else if code >= 500 {
                 return .server(code, message)
             } else {
-                return .network(message)
+                // Other 4xx (400, 401, 403, etc.) — preserve the
+                // status code in the message instead of claiming
+                // it's a network problem.
+                return .server(code, message)
             }
         case .decodingError:
             return .parsing("Failed to decode response")

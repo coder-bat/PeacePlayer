@@ -12,6 +12,12 @@ enum APIError: Error {
     case invalidURL
     case invalidResponse
     case httpError(statusCode: Int, message: String)
+    /// S15: 429 with the Retry-After header (in seconds, or nil
+    /// if the server didn't send one). The UI uses this to show
+    /// a meaningful "Rate limited — try again in Ns" message
+    /// instead of the generic "check your internet" the old
+    /// `toAppError()` path produced.
+    case rateLimited(retryAfter: TimeInterval?)
     case decodingError(Error)
     case networkError(Error)
 }
@@ -57,7 +63,7 @@ class APIService {
         
         let body: [String: Any] = ["query": query, "limit": limit]
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
-        
+
         return session.dataTaskPublisher(for: request)
             .mapError { APIError.networkError($0) }
             .flatMap { data, response -> AnyPublisher<Data, APIError> in
@@ -67,6 +73,21 @@ class APIService {
                 if httpResponse.statusCode != 200 {
                     let body = String(data: data, encoding: .utf8) ?? ""
                     print("❌ [APIService] HTTP \(httpResponse.statusCode): \(body.prefix(500))")
+                    // S15: surface 429 separately so the UI can show a
+                    // real "rate limited" message + Retry-After. The
+                    // previous code path collapsed 429 into
+                    // `.httpError` and the ErrorHandler then turned
+                    // it into a generic "check your internet".
+                    if httpResponse.statusCode == 429 {
+                        let retryAfter: TimeInterval? = {
+                            if let raw = httpResponse.value(forHTTPHeaderField: "Retry-After") {
+                                return TimeInterval(raw)
+                            }
+                            return nil
+                        }()
+                        return Fail(error: APIError.rateLimited(retryAfter: retryAfter))
+                            .eraseToAnyPublisher()
+                    }
                     return Fail(error: APIError.httpError(statusCode: httpResponse.statusCode, message: body)).eraseToAnyPublisher()
                 }
                 return Just(data).setFailureType(to: APIError.self).eraseToAnyPublisher()
