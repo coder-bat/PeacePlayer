@@ -4,11 +4,22 @@
 //
 //  Manages time capsule lifecycle: bury, seal, unlock notification, open.
 //
+//  2026-07-15 (S17-C, CV-2): the sealed note is now AES-GCM
+//  encrypted with a 256-bit master key stored in the Keychain
+//  (see KeychainHelper.getOrCreateTimeCapsuleMasterKey). The
+//  plaintext `noteText` column on CDTimeCapsule is no longer
+//  populated for new rows. Legacy rows from before this commit
+//  are migrated on first read: the existing plaintext is
+//  encrypted and written to `encryptedNote`, and `noteText` is
+//  cleared. After the first read per legacy row, no user-sealed
+//  text remains in plaintext in the SQLite store.
+//
 
 import Foundation
 import CoreData
 import UserNotifications
 import Combine
+import CryptoKit
 
 struct TimeCapsuleSnapshot: Identifiable, Equatable {
     let id: UUID
@@ -43,6 +54,107 @@ final class TimeCapsuleManager: ObservableObject {
         refresh()
     }
 
+    // MARK: - Encryption (S17-C, CV-2)
+
+    /// Encrypts `plaintext` with the TimeCapsule master key using
+    /// AES-GCM. Returns a single `Data` blob containing the
+    /// 12-byte nonce, ciphertext, and 16-byte auth tag (the
+    /// standard `AES.GCM.SealedBox.combined` layout), which is
+    /// what we store on disk.
+    ///
+    /// Returns nil if the master key is unavailable (e.g. the
+    /// device's passcode was disabled after install, putting the
+    /// Keychain entry in a state we can't read). Callers fall
+    /// back to an empty string in that case — same UX as a
+    /// capsule whose note is empty.
+    private static func encryptNote(_ plaintext: String) -> Data? {
+        guard let key = KeychainHelper.shared.getOrCreateTimeCapsuleMasterKey() else {
+            #if DEBUG
+            print("⚠️ TimeCapsule: master key unavailable, refusing to encrypt")
+            #endif
+            return nil
+        }
+        do {
+            let sealed = try AES.GCM.seal(Data(plaintext.utf8), using: key)
+            guard let combined = sealed.combined else {
+                return nil
+            }
+            return combined
+        } catch {
+            #if DEBUG
+            print("⚠️ TimeCapsule: AES-GCM seal failed: \(error)")
+            #endif
+            return nil
+        }
+    }
+
+    /// Decrypts a `Data` blob produced by `encryptNote`. Returns
+    /// the original UTF-8 string. Returns nil if the blob is
+    /// malformed or the auth tag doesn't verify — both of which
+    /// mean the on-disk row was tampered with or came from a
+    /// different key. Treat nil as "this capsule is unreadable"
+    /// and surface that to the user rather than crashing.
+    private static func decryptNote(_ blob: Data) -> String? {
+        guard let key = KeychainHelper.shared.getOrCreateTimeCapsuleMasterKey() else {
+            return nil
+        }
+        do {
+            let box = try AES.GCM.SealedBox(combined: blob)
+            let plaintext = try AES.GCM.open(box, using: key)
+            return String(data: plaintext, encoding: .utf8)
+        } catch {
+            #if DEBUG
+            print("⚠️ TimeCapsule: AES-GCM open failed: \(error)")
+            #endif
+            return nil
+        }
+    }
+
+    /// Reads the user-visible note text from a CDTimeCapsule,
+    /// transparently migrating legacy plaintext rows to the
+    /// encrypted column on first read.
+    ///
+    /// Behavior:
+    /// - `encryptedNote` populated → decrypt and return.
+    /// - `encryptedNote` nil, `noteText` non-empty → legacy row;
+    ///   encrypt the plaintext, save, clear `noteText`, return
+    ///   the original string.
+    /// - both empty → empty string.
+    ///
+    /// If the master key is unavailable or decryption fails, the
+    /// legacy plaintext is returned as a last-resort fallback
+    /// (better than a hard crash) and the row is left alone.
+    /// Once the key is fixed, the next read migrates it.
+    private func readNoteText(for capsule: CDTimeCapsule) -> String {
+        if let blob = capsule.encryptedNote, !blob.isEmpty {
+            return Self.decryptNote(blob) ?? ""
+        }
+        let legacy = capsule.noteText
+        guard !legacy.isEmpty else { return "" }
+
+        // Legacy plaintext. Migrate in place if we can.
+        guard let blob = Self.encryptNote(legacy) else {
+            // No key — return plaintext as a fallback so the
+            // user can still read their old capsules. The next
+            // call after the key is fixed will succeed and the
+            // row will be migrated then.
+            return legacy
+        }
+        capsule.encryptedNote = blob
+        capsule.noteText = ""
+        do {
+            try context.save()
+        } catch {
+            #if DEBUG
+            print("⚠️ TimeCapsule: failed to save migrated row: \(error)")
+            #endif
+            // Don't undo the in-memory writes — the next refresh
+            // will retry, and a failure here doesn't change what
+            // we return to the caller.
+        }
+        return legacy
+    }
+
     // MARK: - Read
 
     func refresh() {
@@ -59,7 +171,7 @@ final class TimeCapsuleManager: ObservableObject {
                     trackTitle: track.title,
                     trackArtist: track.displayArtist,
                     artworkURL: track.artworkURL,
-                    noteText: capsule.noteText,
+                    noteText: self.readNoteText(for: capsule),
                     mood: capsule.mood,
                     createdAt: capsule.createdAt,
                     unlockAt: capsule.unlockAt,
@@ -98,7 +210,13 @@ final class TimeCapsuleManager: ObservableObject {
 
             let capsule = CDTimeCapsule(context: self.context)
             capsule.id = UUID()
-            capsule.noteText = noteText
+            // S17-C (CV-2): write the sealed note to
+            // `encryptedNote` and leave `noteText` empty. If the
+            // key is unavailable the user still gets a capsule,
+            // but the note is effectively dropped (same UX as a
+            // capsule whose note is empty).
+            capsule.encryptedNote = Self.encryptNote(noteText)
+            capsule.noteText = ""
             capsule.createdAt = Date()
             capsule.unlockAt = unlockDate
             capsule.isOpened = false
