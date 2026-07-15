@@ -21,7 +21,7 @@ targets:
   YTAudioPlayer:
     type: application
     platform: iOS
-    deploymentTarget: "15.0"
+    deploymentTarget: "17.0"
     sources:
       - path: YTAudioPlayer
       - path: Sources
@@ -73,7 +73,7 @@ targets:
   PeacePlayerWidget:
     type: app-extension
     platform: iOS
-    deploymentTarget: "16.0"
+    deploymentTarget: "17.0"
     sources:
       - path: PeacePlayerWidget
       - path: Sources/SharedNowPlayingState.swift
@@ -101,7 +101,7 @@ targets:
   YTAudioPlayerTests:
     type: bundle.unit-test
     platform: iOS
-    deploymentTarget: "15.0"
+    deploymentTarget: "17.0"
     sources:
       - path: YTAudioPlayerTests
     dependencies:
