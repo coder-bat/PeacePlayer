@@ -28,6 +28,7 @@
 		219061230F75037D452AA0B5 /* YTAudioPlayer.xcdatamodeld in Sources */ = {isa = PBXBuildFile; fileRef = 67609839B0C75045B46184AD /* YTAudioPlayer.xcdatamodeld */; };
 		221BFC7A742EBC84E62CB20A /* LibraryWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CAA199DFC071428915082C9 /* LibraryWidgets.swift */; };
 		27129EDE50F530DACA2F06C6 /* SharedNowPlayingState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39607B6AF4B8C14661E4BD57 /* SharedNowPlayingState.swift */; };
+		98378A2C3CE14FA5A59B93E8 /* SharedArtworkCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = E06B4A5B06674067B9548EFD /* SharedArtworkCache.swift */; };
 		28D77829AC53C12E84404744 /* WaveformService.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBE8F43DE06B1E954F4B8253 /* WaveformService.swift */; };
 		28DA1B0BE3D506C0F8F453BD /* VibeButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FD6C9133D1AAC6ED27C1C6E /* VibeButton.swift */; };
 		31D763D1C31605E03A21E40A /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A4D4641A6DFB5120002B115 /* ContentView.swift */; };
@@ -103,6 +104,7 @@
 		AB91C2EEBB54FBEAB25F0CED /* ShortcutPlaybackController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2EB0B5914F7E53240295D03C /* ShortcutPlaybackController.swift */; };
 		AC30D021A828DC129499800D /* SleepTimerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 791B0D8E28834A5D34E9FA93 /* SleepTimerView.swift */; };
 		B2E798633D3FE21CFA1B4EA7 /* SharedNowPlayingState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39607B6AF4B8C14661E4BD57 /* SharedNowPlayingState.swift */; };
+		B7844AD6CAC845EE9C896E52 /* SharedArtworkCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = E06B4A5B06674067B9548EFD /* SharedArtworkCache.swift */; };
 		7A1B2C3D4E5F60718293A4E8 /* VinylNowPlayingWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A1B2C3D4E5F60718293A4D7 /* VinylNowPlayingWidget.swift */; };
 		7A1B2C3D4E5F60718293A4C6 /* VinylRecordView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A1B2C3D4E5F60718293A4B5 /* VinylRecordView.swift */; };
 		B5A9F19389EDBC0B9918E9F3 /* PlaylistsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CAC504FA4E7BBC2BDCEBC5BD /* PlaylistsView.swift */; };
@@ -271,6 +273,7 @@
 		B09F71767D3BB29E47770E59 /* GestureEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GestureEngine.swift; sourceTree = "<group>"; };
 		B2A9468FFD7CCB3F04EED038 /* LikeButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LikeButton.swift; sourceTree = "<group>"; };
 		B50C9E287B0A4F7F51A35D9E /* WidgetSyncService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetSyncService.swift; sourceTree = "<group>"; };
+		E06B4A5B06674067B9548EFD /* SharedArtworkCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedArtworkCache.swift; sourceTree = "<group>"; };
 		B7F42F1245CDFCF53C966438 /* AntiAlgorithmEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AntiAlgorithmEngine.swift; sourceTree = "<group>"; };
 		B81D655E3DE40EE89C5400B4 /* EmptyStateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmptyStateView.swift; sourceTree = "<group>"; };
 		BBE8F43DE06B1E954F4B8253 /* WaveformService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WaveformService.swift; sourceTree = "<group>"; };
@@ -475,6 +478,7 @@
 				538A97384F4577D3971EDB4D /* WalkDJAppDelegate.swift */,
 				BBE8F43DE06B1E954F4B8253 /* WaveformService.swift */,
 				B50C9E287B0A4F7F51A35D9E /* WidgetSyncService.swift */,
+				E06B4A5B06674067B9548EFD /* SharedArtworkCache.swift */,
 				218B69801C9B42608F10BD1A /* SpotlightService.swift */,
 				C9F522B0FA8F4D3AB57B8041 /* BiquadFilter.swift */,
 				EE96AA9F018F4BB79CDA287D /* AudioEqualizer.swift */,
@@ -732,6 +736,7 @@
 				1AC5D2294272E30DF4857304 /* PeacePlayerWidgetIntents.swift in Sources */,
 				E06930EDFBFCCD1AAFC5CA26 /* ResumeWidget.swift in Sources */,
 				B2E798633D3FE21CFA1B4EA7 /* SharedNowPlayingState.swift in Sources */,
+				B7844AD6CAC845EE9C896E52 /* SharedArtworkCache.swift in Sources */,
 				400280C613F6E73E4B338CC8 /* WidgetTheme.swift in Sources */,
 				7A1B2C3D4E5F60718293A4E8 /* VinylNowPlayingWidget.swift in Sources */,
 				7A1B2C3D4E5F60718293A4C6 /* VinylRecordView.swift in Sources */,
@@ -834,6 +839,7 @@
 				C41CD7BE9EB5F68AA5C6C50A /* ShareCardGenerator.swift in Sources */,
 				12399D84AAF59515B5FE7923 /* ShareHelper.swift in Sources */,
 				27129EDE50F530DACA2F06C6 /* SharedNowPlayingState.swift in Sources */,
+				98378A2C3CE14FA5A59B93E8 /* SharedArtworkCache.swift in Sources */,
 				E67443988D45187EB8E996D4 /* ShimmerModifier.swift in Sources */,
 				AB91C2EEBB54FBEAB25F0CED /* ShortcutPlaybackController.swift in Sources */,
 				AC30D021A828DC129499800D /* SleepTimerView.swift in Sources */,

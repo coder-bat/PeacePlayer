@@ -431,6 +431,11 @@ class NowPlayingService {
             .first()
             .sink { image in
                 if let image = image {
+                    // S16: write to the App Group artwork cache so the
+                    // widget extension doesn't re-download this image
+                    // on every 15-min refresh. Cheap (JPEG 0.85,
+                    // ~50KB for typical 600x600 album art).
+                    SharedArtworkCache.store(image, for: url)
                     let artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
                     completion(artwork)
                 } else {

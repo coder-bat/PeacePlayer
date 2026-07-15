@@ -54,10 +54,10 @@ struct ResumeProvider: TimelineProvider {
     }
 
     private func fetchArtwork(url: URL?) async -> UIImage? {
-        guard let url,
-              let (data, _) = try? await URLSession.shared.data(from: url)
-        else { return nil }
-        return UIImage(data: data)
+        guard let url else { return nil }
+        // S16: App Group artwork cache (see PeacePlayerWidget.swift
+        // for the rationale). URLSession is the fallback only.
+        return await SharedArtworkCache.readOrFetch(url: url)
     }
 }
 

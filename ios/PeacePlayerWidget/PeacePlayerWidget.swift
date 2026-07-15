@@ -58,8 +58,12 @@ struct NowPlayingProvider: TimelineProvider {
 
     private func fetchArtwork(url: URL?) async -> UIImage? {
         guard let url else { return nil }
-        guard let (data, _) = try? await URLSession.shared.data(from: url) else { return nil }
-        return UIImage(data: data)
+        // S16: App Group artwork cache. The main app writes
+        // the current track's artwork whenever NowPlayingService
+        // loads a new track. The widget reads from the cache
+        // first; URLSession is the fallback for cache miss
+        // (e.g. first run after install, or after a stale prune).
+        return await SharedArtworkCache.readOrFetch(url: url)
     }
 }
 
