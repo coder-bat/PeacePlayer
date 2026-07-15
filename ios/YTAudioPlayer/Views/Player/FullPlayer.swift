@@ -433,89 +433,97 @@ struct FullPlayer: View {
     
     // MARK: - Artwork Section (full-width cyberpunk hero banner)
     private var artworkSection: some View {
-        let w = UIScreen.main.bounds.width
-        let h = w * 0.68          // ~3:2 panoramic — room for album art without going too flat
-        let slash: CGFloat = 40   // diagonal drop: right side is 40pt higher than left
+        // S17-E: was `UIScreen.main.bounds.width`. That API was
+        // deprecated in iOS 16 because it leaks the device screen
+        // size and breaks in Split View / Stage Manager. We now
+        // read the size of the actual container via GeometryReader
+        // so the artwork adapts to whatever width the player
+        // gets (sheet, half-sheet, full screen, iPad split).
+        GeometryReader { geo in
+            let w = geo.size.width
+            let h = w * 0.68          // ~3:2 panoramic — room for album art without going too flat
+            let slash: CGFloat = 40   // diagonal drop: right side is 40pt higher than left
 
-        return ZStack {
-            // Artwork layer
-            ZStack {
-                Color.cyberDim.opacity(0.15)
-                    .overlay(
-                        Image(systemName: "music.note")
-                            .font(.system(size: 56))
-                            .foregroundColor(.cyberDim)
+            return ZStack {
+                // Artwork layer
+                ZStack {
+                    Color.cyberDim.opacity(0.15)
+                        .overlay(
+                            Image(systemName: "music.note")
+                                .font(.system(size: 56))
+                                .foregroundColor(.cyberDim)
+                        )
+                    CachedAsyncImage(url: playerState.currentItem?.track.artworkURL) { EmptyView() }
+                        .frame(width: w, height: h)
+
+                    if playerState.playbackState.isLoading {
+                        Color.black.opacity(0.5)
+                        VStack(spacing: 16) {
+                            ProgressView()
+                                .scaleEffect(1.5)
+                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                            Text("Loading...")
+                                .font(.subheadline)
+                                .foregroundColor(.white)
+                        }
+                    }
+                }
+
+                // Visualizer layer
+                ZStack {
+                    Color.black
+                    NeuralFreqVisualizer(engine: AudioVisualizerEngine.shared, style: .neural)
+                        .frame(width: w, height: h)
+                }
+                .opacity(showingVisualizer ? 1 : 0)
+            }
+            .frame(width: w, height: h)
+            // Diagonal clip
+            .clipShape(CyberpunkHeroShape(slashDrop: slash))
+            // Clean border
+            .overlay(
+                CyberpunkHeroShape(slashDrop: slash)
+                    .stroke(
+                        showingVisualizer
+                            ? Color.cyberCyan.opacity(0.4)
+                            : (currentTrackIsLiked ? Theme.cyberMagenta.opacity(0.4) : Color.white.opacity(0.06)),
+                        lineWidth: 1
                     )
-                CachedAsyncImage(url: playerState.currentItem?.track.artworkURL) { EmptyView() }
-                    .frame(width: w, height: h)
-
-                if playerState.playbackState.isLoading {
-                    Color.black.opacity(0.5)
-                    VStack(spacing: 16) {
-                        ProgressView()
-                            .scaleEffect(1.5)
-                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                        Text("Loading...")
-                            .font(.subheadline)
-                            .foregroundColor(.white)
-                    }
-                }
+            )
+            // Single clean shadow
+            .shadow(
+                color: showingVisualizer
+                    ? Color.cyberCyan.opacity(0.25)
+                    : (currentTrackIsLiked ? Theme.cyberMagenta.opacity(0.2) : Color.black.opacity(0.3)),
+                radius: 12,
+                x: 0, y: 4
+            )
+            .scaleEffect(likePulse ? 1.025 : 1.0)
+            .animation(reduceMotion ? .none : .spring(response: 0.4, dampingFraction: 0.75), value: showingVisualizer)
+            .animation(reduceMotion ? .none : .spring(response: 0.25, dampingFraction: 0.7), value: likePulse)
+            // Extend past the parent VStack's 24pt horizontal padding to go edge-to-edge
+            .padding(.horizontal, -24)
+            .onTapGesture(count: 2) {
+                if !showingVisualizer { toggleCurrentTrackLike() }
             }
-
-            // Visualizer layer
-            ZStack {
-                Color.black
-                NeuralFreqVisualizer(engine: AudioVisualizerEngine.shared, style: .neural)
-                    .frame(width: w, height: h)
-            }
-            .opacity(showingVisualizer ? 1 : 0)
-        }
-        .frame(width: w, height: h)
-        // Diagonal clip
-        .clipShape(CyberpunkHeroShape(slashDrop: slash))
-        // Clean border
-        .overlay(
-            CyberpunkHeroShape(slashDrop: slash)
-                .stroke(
-                    showingVisualizer
-                        ? Color.cyberCyan.opacity(0.4)
-                        : (currentTrackIsLiked ? Theme.cyberMagenta.opacity(0.4) : Color.white.opacity(0.06)),
-                    lineWidth: 1
-                )
-        )
-        // Single clean shadow
-        .shadow(
-            color: showingVisualizer
-                ? Color.cyberCyan.opacity(0.25)
-                : (currentTrackIsLiked ? Theme.cyberMagenta.opacity(0.2) : Color.black.opacity(0.3)),
-            radius: 12,
-            x: 0, y: 4
-        )
-        .scaleEffect(likePulse ? 1.025 : 1.0)
-        .animation(reduceMotion ? .none : .spring(response: 0.4, dampingFraction: 0.75), value: showingVisualizer)
-        .animation(reduceMotion ? .none : .spring(response: 0.25, dampingFraction: 0.7), value: likePulse)
-        // Extend past the parent VStack's 24pt horizontal padding to go edge-to-edge
-        .padding(.horizontal, -24)
-        .onTapGesture(count: 2) {
-            if !showingVisualizer { toggleCurrentTrackLike() }
-        }
-        .gesture(
-            DragGesture(minimumDistance: 30, coordinateSpace: .local)
-                .onEnded { value in
-                    let horizontal = abs(value.translation.width)
-                    let vertical = abs(value.translation.height)
-                    guard horizontal > vertical else { return }
-                    withAnimation(reduceMotion ? .none : .spring(response: 0.5, dampingFraction: 0.75)) {
-                        showingVisualizer.toggle()
+            .gesture(
+                DragGesture(minimumDistance: 30, coordinateSpace: .local)
+                    .onEnded { value in
+                        let horizontal = abs(value.translation.width)
+                        let vertical = abs(value.translation.height)
+                        guard horizontal > vertical else { return }
+                        withAnimation(reduceMotion ? .none : .spring(response: 0.5, dampingFraction: 0.75)) {
+                            showingVisualizer.toggle()
+                        }
                     }
-                }
-        )
-        .onLongPressGesture(minimumDuration: 0.6) {
-            HapticManager.medium()
-            showOrbitalMenu = true
+            )
+            .onLongPressGesture(minimumDuration: 0.6) {
+                HapticManager.medium()
+                showOrbitalMenu = true
+            }
         }
     }
-    
+
     // MARK: - Track Info
     private var trackInfoSection: some View {
         VStack(spacing: 8) {
