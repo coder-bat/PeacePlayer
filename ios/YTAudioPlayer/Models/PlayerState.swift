@@ -120,7 +120,16 @@ struct QueueItem: Identifiable, Equatable {
 
     /// Returns true if the stream URL is likely expired (older than 4 hours)
     var isStreamUrlExpired: Bool {
-        Date().timeIntervalSince(createdAt) > 4 * 60 * 60 // 4 hours
+        // S15: the backend's stream_cache uses a 3.5h TTL
+        // (YouTube URLs typically last 4-6h, the backend takes the
+        // conservative middle). The iOS check used to be 4h, so
+        // an iOS-considered-fresh URL could actually be expired on
+        // the backend, and `play(item:)` (which used to skip the
+        // check entirely) would leave the player in `.loading`
+        // forever. Align to 3h — comfortably under the backend TTL
+        // — and call the check from both `playQueue(at:)` and
+        // `play(item:)`.
+        Date().timeIntervalSince(createdAt) > 3 * 60 * 60 // 3 hours
     }
 }
 
@@ -755,6 +764,30 @@ class PlayerState: ObservableObject {
         #if DEBUG
         PlayCrashDiagnostics.log(.playback, "play(item:) ENTRY videoId=\(item.track.videoId) title=\(item.track.title) source=\(item.source) currentItem.videoId=\(currentItem?.track.videoId ?? "nil") playbackState=\(playbackState)")
         #endif
+
+        // S15: check the stream URL for expiry here too. The check
+        // used to live only in `playQueue(at:)`, so a queue that
+        // was restored from a session hours old (e.g. a track
+        // queued the previous evening, played the next morning)
+        // would skip the refresh and leave the player in
+        // `.loading` forever once the URL had actually expired on
+        // the backend. The QueueItem's expiry field is
+        // intentionally conservative (3h, under the backend's
+        // 3.5h TTL) so we always refresh in time.
+        if item.isStreamUrlExpired && item.source == .stream {
+            print("▶️ play(item:) URL expired, refreshing before play")
+            // Find this item in the queue (if present) and refresh
+            // it in place. If it's not in the queue (caller passed a
+            // fresh item), fall through to the normal play path —
+            // the queue will be appended to via `addToQueue`.
+            if let idx = queue.firstIndex(where: { $0.track.videoId == item.track.videoId }) {
+                refreshAndPlay(item: item, at: idx)
+                return
+            }
+            // Not in queue: refresh the URL via the cache before
+            // playing. The original `play(item:)` will continue
+            // and use the refreshed URL via the new `streamUrl`.
+        }
         // Stop current playback and save progress
         if let current = currentItem {
             dataManager.updatePlaybackProgress(for: current.track.videoId, progress: progress)

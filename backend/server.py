@@ -43,7 +43,12 @@ from apple_auth import (
 
 # --- Configuration from environment ---
 STREAM_CONNECT_TIMEOUT = float(os.environ.get("STREAM_CONNECT_TIMEOUT", "5"))
-STREAM_READ_TIMEOUT = float(os.environ.get("STREAM_READ_TIMEOUT", "30"))
+# S15: 30s was too short for audio streams - a 35s CDN stall
+# killed the whole song. Raise to 120s; the client will still
+# see a fast failure because the bytes-per-second read
+# threshold is what actually matters in practice. Override via
+# the env var if you need a different ceiling.
+STREAM_READ_TIMEOUT = float(os.environ.get("STREAM_READ_TIMEOUT", "120"))
 THUMBNAIL_CONNECT_TIMEOUT = float(os.environ.get("THUMBNAIL_CONNECT_TIMEOUT", "3"))
 THUMBNAIL_READ_TIMEOUT = float(os.environ.get("THUMBNAIL_READ_TIMEOUT", "10"))
 HTTP_POOL_SIZE = int(os.environ.get("HTTP_POOL_SIZE", "10"))
@@ -249,7 +254,7 @@ class AppleSignInRequest(BaseModel):
     ASAuthorizationAppleIDProvider. We verify it against Apple's
     public JWKS, then mint our own session JWT.
 
-    `authorizationCode` is optional — it's a one-time code that
+    `authorizationCode` is optional - it's a one-time code that
     can be exchanged with Apple for refresh tokens. We don't need
     it for the music-streaming use case, but we accept it so the
     iOS code can send the standard Sign in with Apple payload.
@@ -359,7 +364,7 @@ async def auth_apple(request: Request, body: AppleSignInRequest):
     try:
         claims = verify_apple_identity_token(body.identityToken)
     except Exception as e:
-        # PyJWTError or any unexpected JWKS error — all map to 401.
+        # PyJWTError or any unexpected JWKS error - all map to 401.
         logger.warning(f"Apple identity token rejected: {e}")
         raise HTTPException(status_code=401, detail="invalid_identity_token")
 
@@ -409,7 +414,7 @@ async def auth_signout(request: Request):
     flow."""
     user = current_user_from_request(request.headers.get("Authorization"))
     if not user:
-        # 204 even when not authenticated — sign-out is idempotent.
+        # 204 even when not authenticated - sign-out is idempotent.
         return {"ok": True}
     user["last_signout_at"] = int(time.time())
     save_user(user)
@@ -489,14 +494,14 @@ async def search(query: SearchQuery, request: Request):
         client = get_client()
         async with ytmusic_lock:
             results = client.search_tracks(query.query, query.limit)
-        
+
         if not results:
             return []
-        
+
         response = [TrackResponse(**track).model_dump() for track in results]
         search_cache.set(cache_key, response)
         return response
-        
+
     except Exception as e:
         logger.error(f"search_tracks failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
@@ -526,10 +531,10 @@ async def get_playlist(playlist_id: str, request: Request, limit: int = Query(de
         client = get_client()
         async with ytmusic_lock:
             playlist = client.get_playlist(playlist_id, limit=limit)
-        
+
         if not playlist:
             raise HTTPException(status_code=404, detail="Playlist not found")
-        
+
         return playlist
     except HTTPException:
         raise
@@ -546,29 +551,29 @@ async def stream_audio(video_id: str, request: Request):
     try:
         cache = get_cache()
         stream_data = cache.get(video_id)
-        
+
         if not stream_data:
             logger.info(f"Cache miss for {video_id}, fetching from YouTube...")
             client = get_client()
             async with ytmusic_lock:
                 stream_data = client.get_stream_url(video_id)
-            
+
             if not stream_data or not stream_data.get('audio_formats'):
                 raise HTTPException(status_code=404, detail="No audio stream found")
-            
+
             # Cache the stream data
             cache.set(video_id, stream_data)
-        
+
         best = stream_data['audio_formats'][0]
-        
+
         logger.info(f"Returning stream URL: {best['url'][:50]}...")
-        
+
         return StreamResponse(
             streamUrl=best['url'],
             mimeType=best['mime_type'],
             bitrate=best['bitrate']
         )
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -647,15 +652,15 @@ async def proxy_stream_audio(video_id: str, request: Request, quality: str = "hi
         best = audio_formats[0]
         stream_url = best['url']
         mime_type = best.get('mime_type', 'audio/mp4')
-        
+
         # Fix MIME type for iOS AVPlayer
         if mime_type in ['m4a', 'audio/m4a', 'audio/x-m4a']:
             mime_type = 'audio/mp4'
         elif mime_type == 'webm':
             mime_type = 'audio/webm'
-        
+
         logger.info(f"Proxy streaming: {stream_url[:60]}... (mime: {mime_type}, method: {request.method})")
-        
+
         # Handle HEAD request - AVPlayer probes with HEAD first
         # Use cached data to avoid round-trip to YouTube
         if request.method == "HEAD":
@@ -666,14 +671,14 @@ async def proxy_stream_audio(video_id: str, request: Request, quality: str = "hi
                 'Access-Control-Allow-Origin': '*',
                 'Access-Control-Allow-Headers': 'Range'
             }
-            
+
             content_length = best.get('content_length')
             if content_length and content_length > 0:
                 response_headers['Content-Length'] = str(content_length)
-            
+
             logger.info(f"HEAD response headers: {response_headers}")
             return Response(headers=response_headers, status_code=200)
-        
+
         # Handle GET request
         # Headers for YouTube request
         yt_headers = {
@@ -682,56 +687,78 @@ async def proxy_stream_audio(video_id: str, request: Request, quality: str = "hi
             'Accept-Encoding': 'identity',
             'Connection': 'keep-alive'
         }
-        
+
         # Forward range header from client if present (for seeking)
         if 'range' in request.headers:
             yt_headers['Range'] = request.headers['range']
             logger.info(f"Forwarding Range: {request.headers['range']}")
-        
-        # Make request to YouTube using connection pool
-        session = get_http_session()
-        r = session.get(stream_url, headers=yt_headers, stream=True, timeout=(STREAM_CONNECT_TIMEOUT, STREAM_READ_TIMEOUT))
-        try:
-            r.raise_for_status()
-        except Exception:
-            r.close()
-            raise
-        
-        logger.info(f"YouTube response: status={r.status_code}, content-type={r.headers.get('Content-Type')}, length={r.headers.get('Content-Length', 'unknown')}")
-        
-        # Build response headers
-        response_headers = {
-            'Content-Type': mime_type,
-            'Accept-Ranges': 'bytes',
-            'Access-Control-Allow-Origin': '*',
-            'Access-Control-Allow-Headers': 'Range',
-            'Access-Control-Expose-Headers': 'Content-Length, Content-Range'
-        }
-        
-        # Forward content length if available
-        if 'Content-Length' in r.headers:
-            response_headers['Content-Length'] = r.headers['Content-Length']
-        
-        # Forward content range if available (for partial content)
-        if 'Content-Range' in r.headers:
-            response_headers['Content-Range'] = r.headers['Content-Range']
-        
-        logger.info(f"Proxy response headers: {response_headers}")
-        
-        def stream_with_close():
+
+        # S15: this used to be a synchronous `requests.get(...,
+        # stream=True)` call inside an `async def` route, which
+        # blocks the FastAPI event loop for the entire duration
+        # of the upstream read. With multiple concurrent
+        # /proxy-stream requests, every other request stalls while
+        # the slowest upstream read finishes. Switch to
+        # `httpx.AsyncClient` + `aiter_bytes` so the event loop
+        # stays responsive while the upstream bytes stream in.
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(
+                connect=STREAM_CONNECT_TIMEOUT,
+                read=STREAM_READ_TIMEOUT,
+                write=STREAM_READ_TIMEOUT,
+                pool=STREAM_CONNECT_TIMEOUT,
+            ),
+            follow_redirects=True,
+        ) as client:
+            upstream_req = client.build_request(
+                "GET", stream_url, headers=yt_headers
+            )
+            r = await client.send(upstream_req, stream=True)
             try:
-                for chunk in r.iter_content(chunk_size=65536):
-                    if chunk:
-                        yield chunk
-            finally:
-                r.close()
-        
-        return StreamingResponse(
-            stream_with_close(),
-            status_code=r.status_code,
-            headers=response_headers
-        )
-        
+                r.raise_for_status()
+            except Exception:
+                await r.aclose()
+                raise
+
+            logger.info(
+                f"YouTube response: status={r.status_code}, "
+                f"content-type={r.headers.get('Content-Type')}, "
+                f"length={r.headers.get('Content-Length', 'unknown')}"
+            )
+
+            # Build response headers
+            response_headers = {
+                'Content-Type': mime_type,
+                'Accept-Ranges': 'bytes',
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Headers': 'Range',
+                'Access-Control-Expose-Headers': 'Content-Length, Content-Range'
+            }
+
+            # Forward content length if available
+            if 'Content-Length' in r.headers:
+                response_headers['Content-Length'] = r.headers['Content-Length']
+
+            # Forward content range if available (for partial content)
+            if 'Content-Range' in r.headers:
+                response_headers['Content-Range'] = r.headers['Content-Range']
+
+            logger.info(f"Proxy response headers: {response_headers}")
+
+            async def stream_with_close():
+                try:
+                    async for chunk in r.aiter_bytes(chunk_size=65536):
+                        if chunk:
+                            yield chunk
+                finally:
+                    await r.aclose()
+
+            return StreamingResponse(
+                stream_with_close(),
+                status_code=r.status_code,
+                headers=response_headers
+            )
+
     except HTTPException:
         raise
     except Exception as e:
@@ -783,22 +810,22 @@ async def download_track(download_req: DownloadRequest, request: Request):
     """
     try:
         extractor = get_extractor()
-        
+
         metadata = {
             'title': download_req.title,
             'artists': download_req.artists,
             'album': download_req.album,
             'thumbnail': download_req.thumbnail
         }
-        
+
         loop = asyncio.get_event_loop()
         result_path = await loop.run_in_executor(
-            None, 
+            None,
             extractor.download_and_convert,
             download_req.video_id,
             metadata
         )
-        
+
         if not result_path:
             raise HTTPException(status_code=500, detail="Download or conversion failed")
 
@@ -810,7 +837,7 @@ async def download_track(download_req: DownloadRequest, request: Request):
             status="completed",
             filePath=str(result_path)
         )
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -858,7 +885,7 @@ async def delete_library_file(filename: str, request: Request):
         # URL decode the filename
         import urllib.parse
         decoded_filename = urllib.parse.unquote(filename)
-        
+
         if extractor.delete_file(decoded_filename):
             return {"status": "deleted", "filename": decoded_filename}
         else:
@@ -950,25 +977,25 @@ async def local_play(filename: str, request: Request):
     try:
         extractor = get_extractor()
         file_path = extractor.output_dir / filename
-        
+
         # Path traversal protection
         try:
             file_path.resolve().relative_to(extractor.output_dir.resolve())
         except ValueError:
             raise HTTPException(status_code=403, detail="Access denied")
-        
+
         if not file_path.exists():
             raise HTTPException(status_code=404, detail="File not found")
-        
+
         if not file_path.suffix == '.m4a':
             raise HTTPException(status_code=400, detail="Invalid file type")
-        
+
         return FileResponse(
             path=file_path,
             media_type="audio/mp4",
             filename=filename
         )
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -989,7 +1016,7 @@ async def proxy_thumbnail(url: str, request: Request):
                          'lh3.googleusercontent.com', 'yt3.ggpht.com', 'yt3.googleusercontent.com'}
         if parsed.hostname not in allowed_hosts:
             raise HTTPException(status_code=403, detail="Domain not allowed")
-        
+
         session = get_http_session()
         response = session.get(url, timeout=(THUMBNAIL_CONNECT_TIMEOUT, THUMBNAIL_READ_TIMEOUT))
         try:
@@ -998,7 +1025,7 @@ async def proxy_thumbnail(url: str, request: Request):
             content_type = response.headers.get('content-type', 'image/jpeg')
         finally:
             response.close()
-        
+
         return StreamingResponse(
             content=iter([content]),
             media_type=content_type
@@ -1019,12 +1046,12 @@ async def get_lyrics(video_id: str, request: Request):
         client = get_client()
         async with ytmusic_lock:
             lyrics = client.get_lyrics(video_id)
-        
+
         if not lyrics:
             raise HTTPException(status_code=404, detail="Lyrics not available")
-        
+
         return {"lyrics": lyrics}
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -1057,10 +1084,10 @@ async def get_liked_songs(request: Request):
     client = get_client()
     if not client.authenticated:
         raise HTTPException(
-            status_code=401, 
+            status_code=401,
             detail="Authentication required. Run: make auth"
         )
-    
+
     try:
         async with ytmusic_lock:
             tracks = client.get_liked_songs()
@@ -1082,7 +1109,7 @@ async def get_playlists(request: Request):
             status_code=401,
             detail="Authentication required. Run: make auth"
         )
-    
+
     try:
         async with ytmusic_lock:
             playlists = client.get_library_playlists()
@@ -1930,17 +1957,17 @@ async def shutdown_event():
 # Run server
 if __name__ == "__main__":
     import uvicorn
-    
+
     port = int(os.environ.get("PORT", 8181))
     host = os.environ.get("HOST", "0.0.0.0")
-    
+
     print(f"Starting YT Audio Backend on {host}:{port}")
     print(f"Library directory: {get_extractor().output_dir}")
-    
+
     client = get_client()
     if client.authenticated:
         print("✓ Authenticated mode - full features enabled")
     else:
-        print("ℹ️  Guest mode - run 'make auth' for library access")
-    
+        print("i️  Guest mode - run 'make auth' for library access")
+
     uvicorn.run(app, host=host, port=port, log_level="info")
