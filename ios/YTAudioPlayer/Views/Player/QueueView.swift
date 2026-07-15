@@ -216,65 +216,21 @@ struct QueueItemRow: View {
     var onTap: (() -> Void)? = nil
 
     var body: some View {
-        // S13: Wrap the entire row content in a Button so the tap
-        // target is unambiguous and works alongside the row's
-        // `.contextMenu` and the SwiftUI `List` swipeActions the
-        // parent attaches. The previously-bare `.onTapGesture` could
-        // be eaten by the swipe gesture recognizer on iOS 16+.
-        Button {
-            onTap?()
-        } label: {
-            HStack(spacing: 12) {
-                Group {
-                    if let artworkURL = item.track.artworkURL {
-                        CachedAsyncImage(url: artworkURL) {
-                            placeholderView
-                        }
-                    } else {
-                        placeholderView
-                    }
-                }
-                .frame(width: 50, height: 50)
-                .cornerRadius(6)
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(item.track.title)
-                        .font(.system(size: 16, weight: isPlaying ? .semibold : .regular))
-                        .foregroundColor(isPlaying ? .cyberCyan : .white)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-
-                    Text(item.track.displayArtist)
-                        .font(.system(size: 14))
-                        .foregroundColor(.cyberDim)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-                }
-
-                Spacer()
-
-                if isPlaying {
-                    CyberPlayingBars()
-                        .frame(width: 20, height: 20)
-                }
-            }
-            .padding(.vertical, 4)
-            .background(isPlaying ? Color.cyberCyan.opacity(0.08) : Color.clear)
-            .cornerRadius(8)
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(item.track.title)
-        .accessibilityHint(item.track.displayArtist)
-        .accessibilityAddTraits(.isButton)
-    }
-
-    private var placeholderView: some View {
-        RoundedRectangle(cornerRadius: 6)
-            .fill(Color.cyberDim.opacity(0.3))
-            .overlay(
-                Image(systemName: "music.note")
-                    .foregroundColor(.cyberDim)
-            )
+        // S15: delegate to the unified TrackRow. Previously
+        // QueueItemRow had its own 50pt artwork + 2-line text
+        // + CyberPlayingBars accessory implementation, with
+        // `Color.cyberCyan.opacity(0.08)` highlight that disagreed
+        // with History/Library/RecentlyPlayed on the exact tint
+        // and the title weight. Now all four row implementations
+        // share TrackRow's `Theme.cyberCyan` highlight.
+        TrackRow(
+            title: item.track.title,
+            subtitle: item.track.displayArtist,
+            artworkURL: item.track.artworkURL,
+            isPlaying: isPlaying,
+            accessory: isPlaying ? .playingBars : .none,
+            onTap: onTap
+        )
     }
 }
 
