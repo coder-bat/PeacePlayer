@@ -94,18 +94,25 @@ enum Typography {
     static let caption1: Font = .caption
     static let caption2: Font = .caption2
 
-    // MARK: Sectioning (S13 — replaces ad-hoc `.system(size: 12, weight: .bold, design: .monospaced)`)
+    // MARK: Sectioning (S15 — uses TextStyle so it scales with Dynamic Type)
     /// Section heading inside a content area (e.g. "Recently Played", "Quick Vibes").
-    static let sectionHeader = Font.system(size: 13, weight: .bold, design: .monospaced)
+    /// Was 13pt monospaced bold; now `.footnote` text style keeps the
+    /// 13pt baseline but scales with the user's Dynamic Type setting.
+    static let sectionHeader = Font.system(.footnote, design: .monospaced, weight: .bold)
     /// Large featured section title (e.g. "FOR YOU").
-    static let sectionTitle = Font.system(size: 22, weight: .bold, design: .default)
+    /// Was 22pt bold; `.title2` is 22pt at the default text size.
+    static let sectionTitle = Font.system(.title2, design: .default, weight: .bold)
     /// Small uppercase eyebrow tag (e.g. track-row sublabel).
-    static let eyebrow = Font.system(size: 11, weight: .bold, design: .monospaced)
+    /// Was 11pt monospaced bold; `.caption2` is 11pt at the default.
+    static let eyebrow = Font.system(.caption2, design: .monospaced, weight: .bold)
 
-    // MARK: Player Specific (fixed sizes — controlled visual context)
-    static let playerTitle = Font.system(size: 22, weight: .bold, design: .default)
-    static let playerArtist = Font.system(size: 16, weight: .medium, design: .default)
-    static let playerTime = Font.system(size: 12, weight: .medium, design: .monospaced)
+    // MARK: Player Specific (S15 — same Dynamic Type scale-up)
+    /// Was 22pt bold; `.title2` matches the 22pt baseline and scales.
+    static let playerTitle = Font.system(.title2, design: .default, weight: .bold)
+    /// Was 16pt medium; `.callout` is 16pt at the default.
+    static let playerArtist = Font.system(.callout, design: .default, weight: .medium)
+    /// Was 12pt monospaced medium; `.caption` is 12pt at the default.
+    static let playerTime = Font.system(.caption, design: .monospaced, weight: .medium)
 }
 
 // MARK: - Spacing
