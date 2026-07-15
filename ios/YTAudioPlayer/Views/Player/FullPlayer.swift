@@ -1161,7 +1161,7 @@ struct MoreActionButton: View {
     let icon: String
     let title: String
     let action: () -> Void
-    
+
     var body: some View {
         Button(action: action) {
             Image(systemName: icon)
@@ -1170,6 +1170,14 @@ struct MoreActionButton: View {
                 .frame(maxWidth: .infinity)
                 .frame(height: 44)
         }
+        // S15: add a11y label, hint, and button trait. The
+        // `title` is already passed in by every call site, so
+        // this is a one-line fix that turns the row from
+        // invisible-to-VoiceOver ("Image" x 7) to a proper
+        // tappable button announcement.
+        .accessibilityLabel(title)
+        .accessibilityHint("Double tap to activate")
+        .accessibilityAddTraits(.isButton)
         .buttonStyle(.plain)
     }
 }

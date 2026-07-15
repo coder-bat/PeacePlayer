@@ -141,6 +141,43 @@ class NowPlayingService {
             return .success
         }
 
+        // S15: like / favorite from the lock screen and Control
+        // Center. MPFeedbackCommand is the standard iOS mechanism;
+        // we enable it only when the device actually supports it
+        // (iOS 9.1+ and the system is happy) and wire it through
+        // PlaylistManager.toggleLike(trackId:) — the same path the
+        // FullPlayer LikeButton and the context-menu Like already
+        // use, so the liked state is consistent across every
+        // surface.
+        if #available(iOS 9.1, *) {
+            // S15: like from the lock screen and Control
+            // Center. MPFeedbackCommand is the standard iOS
+            // mechanism; we wire it through
+            // PlaylistManager.toggleLike(trackId:) — the same
+            // path the FullPlayer LikeButton and the
+            // context-menu Like already use, so the liked
+            // state is consistent across every surface.
+            commandCenter.likeCommand.isEnabled = true
+            commandCenter.likeCommand.localizedTitle = "Like"
+            commandCenter.likeCommand.addTarget { _ in
+                guard let videoId = PlayerState.shared.currentItem?.track.videoId else {
+                    return .commandFailed
+                }
+                PlaylistManager.shared.toggleLike(trackId: videoId)
+                return .success
+            }
+            commandCenter.dislikeCommand.isEnabled = true
+            commandCenter.dislikeCommand.localizedTitle = "Dislike"
+            commandCenter.dislikeCommand.addTarget { _ in
+                // No-op for now — the app doesn't have a
+                // dislike concept. We register the command so
+                // iOS doesn't show a generic "Disliked" action;
+                // the target returns .success without changing
+                // state.
+                return .success
+            }
+        }
+
         // Playback speed (iOS 11+)
         commandCenter.changePlaybackRateCommand.isEnabled = true
         commandCenter.changePlaybackRateCommand.supportedPlaybackRates = supportedPlaybackRates

@@ -19,10 +19,12 @@ private let darwinControlCallback: CFNotificationCallback = { _, _, name, _, _ i
         case DarwinCmd.playPause:    PlayerState.shared.togglePlayPause()
         case DarwinCmd.skipNext:     PlayerState.shared.nextTrack()
         case DarwinCmd.skipPrevious: PlayerState.shared.previousTrack()
-        case DarwinCmd.seekForward:  PlayerState.shared.seek(by: 15)
-        case DarwinCmd.seekBackward: PlayerState.shared.seek(by: -15)
-        case DarwinCmd.volumeUp:     PlayerState.shared.setVolume(PlayerState.shared.volume + 0.15)
-        case DarwinCmd.volumeDown:   PlayerState.shared.setVolume(PlayerState.shared.volume - 0.15)
+        case DarwinCmd.seekForward:  PlayerState.shared.seek(by: Double(NowPlayingService.skipInterval))
+        case DarwinCmd.seekBackward: PlayerState.shared.seek(by: -Double(NowPlayingService.skipInterval))
+        // S15: clamp the volume delta so widget VU buttons can't
+        // push the value out of the 0.0-1.0 range.
+        case DarwinCmd.volumeUp:     PlayerState.shared.setVolume(min(1.0, PlayerState.shared.volume + 0.15))
+        case DarwinCmd.volumeDown:   PlayerState.shared.setVolume(max(0.0, PlayerState.shared.volume - 0.15))
         case DarwinCmd.setVolume:
             if let v = SharedNowPlayingState.readAndClearPendingVolume() {
                 PlayerState.shared.setVolume(v)
