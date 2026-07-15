@@ -24,7 +24,7 @@ enum APIError: Error {
 
 class APIService {
     static let shared = APIService()
-    
+
     // S15: the previous code hardcoded the Mac's Tailscale IP
     // (`100.77.213.42`) as the device-build default, so the app
     // was non-functional on any other network. Now we read an
@@ -34,8 +34,16 @@ class APIService {
     // from a shell). Falls back to the simulator-friendly
     // localhost and the Tailscale defaults for compatibility.
     static let baseURLOverrideDefaultsKey = "peaceplayer.api_base_url"
-    let baseURL: String = {
-        if let override = UserDefaults.standard.string(forKey: baseURLOverrideDefaultsKey),
+
+    // S17 (CV-4): now a COMPUTED property that re-reads
+    // UserDefaults on every access. The previous `let`
+    // cached the value at APIService.shared init, so a Settings
+    // change didn't take effect until the next app launch. With
+    // this, tapping "Save" in the backend-host row is enough —
+    // no restart, and the "Test connection" button below the
+    // text field sees the new URL on the same frame.
+    var baseURL: String {
+        if let override = UserDefaults.standard.string(forKey: APIService.baseURLOverrideDefaultsKey),
            !override.isEmpty {
             return override
         }
@@ -47,8 +55,18 @@ class APIService {
         // different network.
         return "http://100.77.213.42:8181"
         #endif
-    }()
-    
+    }
+
+    // S17 (CV-3): the auth token is stored in Keychain by
+    // AuthService under the same key both sides agree on. We
+    // read it lazily on every request so a fresh sign-in is
+    // picked up without restarting APIService.
+    private static let authTokenKeychainKey = "peaceplayer.session_token"
+    private let keychain = KeychainHelper.shared
+    private var currentAuthToken: String? {
+        keychain.read(APIService.authTokenKeychainKey)
+    }
+
     private let session: URLSession
     private let maxRetries = 3
     private let retryDelay: TimeInterval = 2.0
@@ -63,15 +81,36 @@ class APIService {
         print("🔗 APIService initialized with baseURL: \(baseURL)")
     }
 
+    // S17 (CV-3): attach the session JWT as a Bearer token on
+    // every request, if a session exists. Unauthenticated
+    // endpoints (sign-in, health) ignore the header; the
+    // backend now enforces auth on the rest, so callers that
+    // haven't signed in yet will see a 401 — and ErrorHandler
+    // already shows "Session expired — sign in again" for that
+    // case. This is what makes the header the source of truth
+    // instead of the previous ad-hoc SyncService/AuthService
+    // inline headers.
+    static func addAuthHeader(to request: inout URLRequest) {
+        if let token = KeychainHelper.shared.read(APIService.authTokenKeychainKey),
+           !token.isEmpty {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+    }
+
+    private func addAuthHeader(to request: inout URLRequest) {
+        APIService.addAuthHeader(to: &request)
+    }
+
     func search(query: String, limit: Int = 20) -> AnyPublisher<[Track], APIError> {
         guard let url = URL(string: "\(baseURL)/search") else {
             return Fail(error: APIError.invalidURL).eraseToAnyPublisher()
         }
-        
+
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        
+        addAuthHeader(to: &request)
+
         let body: [String: Any] = ["query": query, "limit": limit]
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
 
@@ -119,7 +158,9 @@ class APIService {
             return Fail(error: APIError.invalidURL).eraseToAnyPublisher()
         }
 
-        return session.dataTaskPublisher(for: url)
+        var request = URLRequest(url: url)
+        addAuthHeader(to: &request)
+        return session.dataTaskPublisher(for: request)
             .mapError { APIError.networkError($0) }
             .flatMap { data, response -> AnyPublisher<Data, APIError> in
                 guard let httpResponse = response as? HTTPURLResponse else {
@@ -142,7 +183,9 @@ class APIService {
             return Fail(error: APIError.invalidURL).eraseToAnyPublisher()
         }
 
-        return session.dataTaskPublisher(for: url)
+        var request = URLRequest(url: url)
+        addAuthHeader(to: &request)
+        return session.dataTaskPublisher(for: request)
             .mapError { APIError.networkError($0) }
             .flatMap { data, response -> AnyPublisher<Data, APIError> in
                 guard let httpResponse = response as? HTTPURLResponse else {
@@ -193,6 +236,7 @@ class APIService {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        addAuthHeader(to: &request)
         request.timeoutInterval = 120
         
         var body: [String: Any] = [
@@ -236,8 +280,10 @@ class APIService {
         guard let url = URL(string: "\(baseURL)/library") else {
             return Fail(error: APIError.invalidURL).eraseToAnyPublisher()
         }
-        
-        return session.dataTaskPublisher(for: url)
+
+        var request = URLRequest(url: url)
+        addAuthHeader(to: &request)
+        return session.dataTaskPublisher(for: request)
             .mapError { APIError.networkError($0) }
             .map { $0.data }
             .decode(type: LibraryResponse.self, decoder: JSONDecoder())
@@ -255,10 +301,11 @@ class APIService {
         guard let url = URL(string: "\(baseURL)/library/\(track.filename.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? "")") else {
             return Fail(error: APIError.invalidURL).eraseToAnyPublisher()
         }
-        
+
         var request = URLRequest(url: url)
         request.httpMethod = "DELETE"
-        
+        addAuthHeader(to: &request)
+
         return session.dataTaskPublisher(for: request)
             .mapError { APIError.networkError($0) }
             .flatMap { data, response -> AnyPublisher<Data, APIError> in
@@ -280,8 +327,10 @@ class APIService {
         guard let url = URL(string: "\(baseURL)/lyrics/\(videoId)") else {
             return Fail(error: APIError.invalidURL).eraseToAnyPublisher()
         }
-        
-        return session.dataTaskPublisher(for: url)
+
+        var request = URLRequest(url: url)
+        addAuthHeader(to: &request)
+        return session.dataTaskPublisher(for: request)
             .mapError { APIError.networkError($0) }
             .flatMap { data, response -> AnyPublisher<Data, APIError> in
                 guard let httpResponse = response as? HTTPURLResponse else {
@@ -325,7 +374,9 @@ class APIService {
         guard let url = components?.url else {
             return Fail(error: APIError.invalidURL).eraseToAnyPublisher()
         }
-        return session.dataTaskPublisher(for: url)
+        var request = URLRequest(url: url)
+        addAuthHeader(to: &request)
+        return session.dataTaskPublisher(for: request)
             .mapError { APIError.networkError($0) }
             .flatMap { data, response -> AnyPublisher<Data, APIError> in
                 guard let http = response as? HTTPURLResponse else {
@@ -355,11 +406,12 @@ class APIService {
         guard let url = URL(string: "\(baseURL)/search/playlists") else {
             return Fail(error: APIError.invalidURL).eraseToAnyPublisher()
         }
-        
+
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        
+        addAuthHeader(to: &request)
+
         let body: [String: Any] = ["query": query, "limit": limit]
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
         
@@ -384,8 +436,10 @@ class APIService {
         guard let url = URL(string: "\(baseURL)/playlist/\(playlistId)?limit=\(limit)") else {
             return Fail(error: APIError.invalidURL).eraseToAnyPublisher()
         }
-        
-        return session.dataTaskPublisher(for: url)
+
+        var request = URLRequest(url: url)
+        addAuthHeader(to: &request)
+        return session.dataTaskPublisher(for: request)
             .mapError { APIError.networkError($0) }
             .flatMap { data, response -> AnyPublisher<Data, APIError> in
                 guard let httpResponse = response as? HTTPURLResponse else {
@@ -406,8 +460,10 @@ class APIService {
         guard let url = URL(string: "\(baseURL)/radio/\(videoId)") else {
             return Fail(error: APIError.invalidURL).eraseToAnyPublisher()
         }
-        
-        return session.dataTaskPublisher(for: url)
+
+        var request = URLRequest(url: url)
+        addAuthHeader(to: &request)
+        return session.dataTaskPublisher(for: request)
             .mapError { APIError.networkError($0) }
             .flatMap { data, response -> AnyPublisher<Data, APIError> in
                 guard let httpResponse = response as? HTTPURLResponse else {
@@ -438,7 +494,9 @@ class APIService {
             return Fail(error: APIError.invalidURL).eraseToAnyPublisher()
         }
         
-        return session.dataTaskPublisher(for: url)
+        var request = URLRequest(url: url)
+        addAuthHeader(to: &request)
+        return session.dataTaskPublisher(for: request)
             .mapError { APIError.networkError($0) }
             .flatMap { data, response -> AnyPublisher<Data, APIError> in
                 guard let httpResponse = response as? HTTPURLResponse else {
@@ -466,7 +524,9 @@ class APIService {
             return Fail(error: APIError.invalidURL).eraseToAnyPublisher()
         }
         
-        return session.dataTaskPublisher(for: url)
+        var request = URLRequest(url: url)
+        addAuthHeader(to: &request)
+        return session.dataTaskPublisher(for: request)
             .mapError { APIError.networkError($0) }
             .flatMap { data, response -> AnyPublisher<Data, APIError> in
                 guard let httpResponse = response as? HTTPURLResponse else {
@@ -494,7 +554,9 @@ class APIService {
             return Fail(error: APIError.invalidURL).eraseToAnyPublisher()
         }
         
-        return session.dataTaskPublisher(for: url)
+        var request = URLRequest(url: url)
+        addAuthHeader(to: &request)
+        return session.dataTaskPublisher(for: request)
             .mapError { APIError.networkError($0) }
             .flatMap { data, response -> AnyPublisher<Data, APIError> in
                 guard let httpResponse = response as? HTTPURLResponse else {
@@ -518,7 +580,8 @@ class APIService {
         
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        
+        addAuthHeader(to: &request)
+
         return session.dataTaskPublisher(for: request)
             .mapError { APIError.networkError($0) }
             .flatMap { data, response -> AnyPublisher<Void, APIError> in
@@ -548,7 +611,9 @@ class APIService {
             return Fail(error: APIError.invalidURL).eraseToAnyPublisher()
         }
         
-        return session.dataTaskPublisher(for: url)
+        var request = URLRequest(url: url)
+        addAuthHeader(to: &request)
+        return session.dataTaskPublisher(for: request)
             .mapError { APIError.networkError($0) }
             .flatMap { data, response -> AnyPublisher<Data, APIError> in
                 guard let httpResponse = response as? HTTPURLResponse else {
@@ -577,7 +642,9 @@ class APIService {
             return Fail(error: APIError.invalidURL).eraseToAnyPublisher()
         }
         
-        return session.dataTaskPublisher(for: url)
+        var request = URLRequest(url: url)
+        addAuthHeader(to: &request)
+        return session.dataTaskPublisher(for: request)
             .mapError { APIError.networkError($0) }
             .flatMap { data, response -> AnyPublisher<Data, APIError> in
                 guard let httpResponse = response as? HTTPURLResponse else {
@@ -607,7 +674,9 @@ class APIService {
             return Fail(error: APIError.invalidURL).eraseToAnyPublisher()
         }
         
-        return session.dataTaskPublisher(for: url)
+        var request = URLRequest(url: url)
+        addAuthHeader(to: &request)
+        return session.dataTaskPublisher(for: request)
             .mapError { APIError.networkError($0) }
             .flatMap { data, response -> AnyPublisher<Data, APIError> in
                 guard let httpResponse = response as? HTTPURLResponse else {
@@ -638,7 +707,9 @@ class APIService {
             return Fail(error: APIError.invalidURL).eraseToAnyPublisher()
         }
         
-        return session.dataTaskPublisher(for: url)
+        var request = URLRequest(url: url)
+        addAuthHeader(to: &request)
+        return session.dataTaskPublisher(for: request)
             .mapError { APIError.networkError($0) }
             .flatMap { data, response -> AnyPublisher<Data, APIError> in
                 guard let httpResponse = response as? HTTPURLResponse else {
@@ -667,7 +738,9 @@ class APIService {
             return Fail(error: APIError.invalidURL).eraseToAnyPublisher()
         }
         
-        return session.dataTaskPublisher(for: url)
+        var request = URLRequest(url: url)
+        addAuthHeader(to: &request)
+        return session.dataTaskPublisher(for: request)
             .mapError { APIError.networkError($0) }
             .flatMap { data, response -> AnyPublisher<Data, APIError> in
                 guard let httpResponse = response as? HTTPURLResponse else {
@@ -696,7 +769,9 @@ class APIService {
             return Fail(error: APIError.invalidURL).eraseToAnyPublisher()
         }
         
-        return session.dataTaskPublisher(for: url)
+        var request = URLRequest(url: url)
+        addAuthHeader(to: &request)
+        return session.dataTaskPublisher(for: request)
             .mapError { APIError.networkError($0) }
             .flatMap { data, response -> AnyPublisher<Data, APIError> in
                 guard let httpResponse = response as? HTTPURLResponse else {
@@ -728,7 +803,9 @@ class APIService {
             return Fail(error: APIError.invalidURL).eraseToAnyPublisher()
         }
         
-        return session.dataTaskPublisher(for: url)
+        var request = URLRequest(url: url)
+        addAuthHeader(to: &request)
+        return session.dataTaskPublisher(for: request)
             .mapError { APIError.networkError($0) }
             .flatMap { data, response -> AnyPublisher<Data, APIError> in
                 guard let httpResponse = response as? HTTPURLResponse else {
@@ -807,7 +884,9 @@ class APIService {
             return Fail(error: APIError.invalidURL).eraseToAnyPublisher()
         }
 
-        return URLSession.shared.dataTaskPublisher(for: url)
+        var request = URLRequest(url: url)
+        addAuthHeader(to: &request)
+        return URLSession.shared.dataTaskPublisher(for: request)
             .tryMap { data, response in
                 guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
                     throw APIError.networkError(URLError(.badServerResponse))
