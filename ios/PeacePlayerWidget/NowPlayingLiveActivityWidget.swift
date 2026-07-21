@@ -128,16 +128,32 @@ private struct NowPlayingLockScreenView: View {
 // MARK: - Building blocks
 
 private func artworkView(artworkURLString: String?, size: CGFloat) -> some View {
+    // S17-G (perf 10 P0-F5): the previous AsyncImage implementation
+    // re-downloaded the full 4K artwork on every Dynamic Island
+    // re-render (the system re-evaluates the Live Activity view on
+    // state updates, screen wakes, and lock screen transitions).
+    // Apple's AsyncImage cache is in-memory only and is unreliable
+    // across Live Activity re-evaluations, so each render could
+    // trigger a fresh network fetch of the 4K JPEG.
+    //
+    // Now: synchronous read from the App Group artwork cache
+    // (SharedArtworkCache). The main app pre-warms the cache via
+    // NowPlayingService.loadArtwork → SharedArtworkCache.store
+    // whenever a track is loaded. The Live Activity reads from the
+    // same on-disk cache, so the artwork is already on the device
+    // by the time the Live Activity shows.
+    //
+    // On a cache miss (first run after install, before any track
+    // has loaded) we fall back to the placeholder. The next Live
+    // Activity update — triggered by the main app loading a track —
+    // will pick up the real artwork.
     Group {
-        if let s = artworkURLString, let url = URL(string: s) {
-            AsyncImage(url: url) { phase in
-                switch phase {
-                case .success(let image):
-                    image.resizable().aspectRatio(contentMode: .fill)
-                default:
-                    placeholderArtwork(size: size)
-                }
-            }
+        if let s = artworkURLString,
+           let url = URL(string: s),
+           let image = SharedArtworkCache.read(for: url) {
+            Image(uiImage: image)
+                .resizable()
+                .aspectRatio(contentMode: .fill)
         } else {
             placeholderArtwork(size: size)
         }
