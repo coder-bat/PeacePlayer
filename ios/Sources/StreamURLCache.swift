@@ -17,7 +17,25 @@ import CryptoKit
 class StreamURLCache {
     static let shared = StreamURLCache()
 
-    private let memoryCache = NSCache<NSString, StreamInfoWrapper>()
+    /// S17-G (perf 10 P0-F3): bound the in-memory cache.
+    /// `setObject` calls below don't pass a `cost:` parameter, so
+    /// `totalCostLimit` is a safety net (NSCache ignores
+    /// totalCostLimit when costs aren't set). The real bound is
+    /// `countLimit` — 200 covers a heavy listening session (the
+    /// user is unlikely to play 200 unique tracks in one sitting)
+    /// and is well above the 50-entry ceiling NowPlayingService
+    /// uses for its in-memory artwork cache. Previously this
+    /// NSCache was unbounded; on a long session the
+    /// `StreamInfoWrapper` instances accumulate without eviction
+    /// (the disk cache had its own 3h TTL via `cleanOldEntries`,
+    /// but the memory cache did not).
+    private let memoryCache: NSCache<NSString, StreamInfoWrapper> = {
+        let cache = NSCache<NSString, StreamInfoWrapper>()
+        cache.countLimit = 200
+        cache.totalCostLimit = 5_000_000 // 5 MB safety net
+        return cache
+    }()
+
     private let fileManager = FileManager.default
     private let cacheDirectory: URL
     private let diskLock = NSLock()
