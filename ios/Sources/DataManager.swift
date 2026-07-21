@@ -216,18 +216,34 @@ class DataManager: ObservableObject {
     // MARK: - Queue Persistence
     
     func saveQueue(_ items: [QueueItem]) {
+        // S17-G (perf 10 P0-F4): JSON-encode was on the calling
+        // thread (always main, from PlayerState.addToQueue /
+        // addToQueueNext). With a 200-item queue, the encode is
+        // ~10-15ms — enough to stutter a drag-to-reorder
+        // animation. 200 × 10ms = 2s of jank on a full reorder.
+        //
+        // Fix: snapshot stays synchronous (in-memory state, used
+        // by loadQueue on the next launch), the JSON encode +
+        // UserDefaults.set dispatch to a utility queue. UserDefaults
+        // batches its disk write, so defaults.set is fast; the
+        // encode was the hot path.
+        //
+        // `savedQueue` is a property write — Swift's atomic
+        // pointer copy is safe. `encoder` (JSONEncoder) is
+        // documented as thread-safe for encoding. `defaults` is
+        // thread-safe. `ErrorHandler.show` already dispatches to
+        // main, so it's safe to call from any thread.
         savedQueue = items.map { QueueItemSnapshot(from: $0) }
-        do {
-            let data = try encoder.encode(savedQueue)
-            defaults.set(data, forKey: Keys.savedQueue)
-        } catch {
-            // S13: queue-encoding failure is user-actionable because it
-            // breaks queue restore on next launch. The other two silent
-            // catches in this file (play history + listening stats)
-            // are background telemetry and stay as print-only to avoid
-            // toast spam.
-            ErrorHandler.shared.show(.parsing("Couldn't save your queue (\(items.count) tracks). Resume may not work next time."))
-            print("⚠️ Failed to encode queue (\(items.count) items): \(error.localizedDescription)")
+        let snapshot = savedQueue
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            guard let self = self else { return }
+            do {
+                let data = try self.encoder.encode(snapshot)
+                self.defaults.set(data, forKey: Keys.savedQueue)
+            } catch {
+                ErrorHandler.shared.show(.parsing("Couldn't save your queue (\(snapshot.count) tracks). Resume may not work next time."))
+                print("⚠️ Failed to encode queue (\(snapshot.count) items): \(error.localizedDescription)")
+            }
         }
     }
     
