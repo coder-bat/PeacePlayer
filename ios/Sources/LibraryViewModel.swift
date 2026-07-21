@@ -51,7 +51,16 @@ struct DownloadedTrackItem: Identifiable {
 
 class LibraryViewModel: ObservableObject {
     @Published var tracks: [DownloadedTrackItem] = [] {
-        didSet { _sortedCache = nil; _filteredCache = nil }
+        didSet {
+            _sortedCache = nil
+            _filteredCache = nil
+            // S17-G (perf 10 P0-F2): rebuild the search index
+            // when the library changes. The build is O(n × tokens)
+            // which is the same cost as a single linear scan, but
+            // every subsequent search is O(query_tokens × matches)
+            // instead of O(n).
+            rebuildSearchIndex()
+        }
     }
     @Published var sortOption: LibrarySortOption = .recentlyAdded {
         didSet { _sortedCache = nil; _filteredCache = nil }
@@ -63,6 +72,23 @@ class LibraryViewModel: ObservableObject {
     private let persistence = PersistenceController.shared
     private var _sortedCache: [DownloadedTrackItem]?
     private var _filteredCache: (query: String, result: [DownloadedTrackItem])?
+    /// S17-G (perf 10 P0-F2): token → track-IDs index. Keys are
+    /// lowercased, whitespace-split tokens from title + artist +
+    /// album. Values are ALL track IDs that contain that token
+    /// somewhere in those fields. A multi-token search intersects
+    /// the value sets. We index IDs (not DownloadedTrackItem)
+    /// because the struct doesn't conform to Hashable; the final
+    /// mapping from IDs to items is O(n) once at the end of the
+    /// search.
+    ///
+    /// Memory: ~10K tracks × 5 tokens × ~8 bytes/ID + dictionary
+    /// overhead ≈ 1-2 MB. The token keys dominate; the dictionary
+    /// deduplicates them, so we hold ~5-10K unique tokens.
+    private var _searchIndex: [String: Set<String>] = [:]
+    /// S17-G: track-ID → item map for O(1) resolution from the
+    /// search index to the actual DownloadedTrackItem. Rebuilt
+    /// on `tracks` didSet alongside the search index.
+    private var _itemsById: [String: DownloadedTrackItem] = [:]
 
     var totalSize: Int64 {
         tracks.reduce(0) { $0 + $1.fileSize }
@@ -94,23 +120,86 @@ class LibraryViewModel: ObservableObject {
     /// Returns tracks filtered by search query (cached per render cycle)
     func filteredTracks(searchQuery: String) -> [DownloadedTrackItem] {
         let query = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        
+
         if let cached = _filteredCache, cached.query == query {
             return cached.result
         }
-        
+
         let result: [DownloadedTrackItem]
         if query.isEmpty {
             result = sortedTracks
         } else {
-            result = sortedTracks.filter { track in
-                track.title.lowercased().contains(query) ||
-                track.artist.lowercased().contains(query) ||
-                track.album.lowercased().contains(query)
+            // S17-G (perf 10 P0-F2): use the token index for
+            // multi-token or longer queries. For very short
+            // single-token queries (< 4 chars), the index only
+            // has full words — fall back to a linear scan so
+            // partial matches like "em" → "eminem" still work.
+            let queryTokens = tokenize(query)
+            if queryTokens.isEmpty {
+                result = sortedTracks
+            } else if queryTokens.count == 1, queryTokens[0].count < 4 {
+                result = sortedTracks.filter { track in
+                    let combined = "\(track.title) \(track.artist) \(track.album)".lowercased()
+                    return combined.contains(queryTokens[0])
+                }
+            } else {
+                // Token-index lookup with set intersection on
+                // track IDs, then map back to items in sort order.
+                var matches: Set<String>?
+                for token in queryTokens {
+                    guard let tokenMatches = _searchIndex[token], !tokenMatches.isEmpty else {
+                        matches = []
+                        break
+                    }
+                    if matches == nil {
+                        matches = tokenMatches
+                    } else {
+                        matches!.formIntersection(tokenMatches)
+                    }
+                }
+                let matchedIds = matches ?? []
+                // Resolve IDs to items in the cached sort order
+                // so the search results match the unfiltered list
+                // order. firstIndex(of:) on `[String]` is O(n), but
+                // we only do it for the matched subset, so total
+                // cost is O(n) regardless of how many matched.
+                let sortOrderIds = sortedTracks.map { $0.id }
+                result = matchedIds
+                    .sorted { sortOrderIds.firstIndex(of: $0) ?? Int.max < sortOrderIds.firstIndex(of: $1) ?? Int.max }
+                    .compactMap { _itemsById[$0] }
             }
         }
         _filteredCache = (query, result)
         return result
+    }
+
+    // MARK: - Search index
+
+    /// Tokenize a string into lowercased non-empty tokens.
+    private func tokenize(_ s: String) -> [String] {
+        s.components(separatedBy: .whitespacesAndNewlines)
+            .map { $0.lowercased() }
+            .filter { !$0.isEmpty }
+    }
+
+    /// Rebuild the search index from the current `tracks`. Called
+    /// on `tracks` didSet. Idempotent; safe to call multiple times.
+    private func rebuildSearchIndex() {
+        var index: [String: Set<String>] = [:]
+        var byId: [String: DownloadedTrackItem] = [:]
+        for track in tracks {
+            byId[track.id] = track
+            let tokens = Set(
+                tokenize(track.title) +
+                tokenize(track.artist) +
+                tokenize(track.album)
+            )
+            for token in tokens {
+                index[token, default: []].insert(track.id)
+            }
+        }
+        _searchIndex = index
+        _itemsById = byId
     }
 
     init() {

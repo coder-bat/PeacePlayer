@@ -45,6 +45,14 @@ class UnifiedLibraryViewModel: ObservableObject {
     @Published var totalSize: Int64 = 0
     @Published var trackCount: Int = 0
 
+    // MARK: - Search index (S17-G P0-F2)
+    /// Token → track-ID index. See `LibraryViewModel` for the
+    /// design rationale. We use the `UnifiedTrack.id` (a String)
+    /// as the index key because UnifiedTrack is a value type
+    /// and we want fast set intersection on the search side.
+    private var _searchIndex: [String: Set<String>] = [:]
+    private var _tracksById: [String: UnifiedTrack] = [:]
+
     // MARK: - Private Properties
 
     private var cancellables = Set<AnyCancellable>()
@@ -141,6 +149,10 @@ class UnifiedLibraryViewModel: ObservableObject {
             do {
                 // Load from all sources
                 self.allTracks = await self.registry.allTracksFromAllSources()
+                // S17-G (perf 10 P0-F2): rebuild the search index
+                // when the library is loaded. applyFilters uses
+                // this for token-based search.
+                self.rebuildSearchIndex()
 
                 // Bail if the view model was dismissed while we were
                 // loading. Without this check the continuation
@@ -202,12 +214,53 @@ class UnifiedLibraryViewModel: ObservableObject {
         }
 
         // Apply search query
+        // S17-G (perf 10 P0-F2): use the token index for
+        // multi-token or longer queries. The source filter
+        // runs first so we only search within the source
+        // subset. For very short queries (< 4 chars), the
+        // index only has full words — fall back to a linear
+        // scan so partial matches like "em" → "eminem" still
+        // work.
         if !searchQuery.isEmpty {
-            let query = searchQuery.lowercased()
-            filtered = filtered.filter { track in
-                track.title.lowercased().contains(query) ||
-                track.artist.lowercased().contains(query) ||
-                track.album?.lowercased().contains(query) ?? false
+            let queryTokens = searchQuery
+                .components(separatedBy: .whitespacesAndNewlines)
+                .map { $0.lowercased() }
+                .filter { !$0.isEmpty }
+
+            if queryTokens.isEmpty {
+                // No real tokens; just keep the source-filtered set.
+            } else if queryTokens.count == 1, queryTokens[0].count < 4 {
+                // Short single-token query: linear scan with
+                // substring matching.
+                let q = queryTokens[0]
+                filtered = filtered.filter { track in
+                    track.title.lowercased().contains(q) ||
+                    track.artist.lowercased().contains(q) ||
+                    track.album?.lowercased().contains(q) ?? false
+                }
+            } else {
+                // Multi-token or longer query: index lookup with
+                // set intersection on track IDs. We intersect
+                // against the source-filtered set so the source
+                // filter is still respected.
+                let sourceFilteredIds = Set(filtered.map { $0.id })
+                var matchedIds: Set<String>?
+                for token in queryTokens {
+                    guard let tokenMatches = _searchIndex[token] else {
+                        matchedIds = []
+                        break
+                    }
+                    let intersected = tokenMatches.intersection(sourceFilteredIds)
+                    if matchedIds == nil {
+                        matchedIds = intersected
+                    } else {
+                        matchedIds!.formIntersection(intersected)
+                    }
+                }
+                let ids = matchedIds ?? []
+                // Resolve IDs to items via the lookup map.
+                filtered = ids.compactMap { _tracksById[$0] }
+                // Order by current sort option below.
             }
         }
 
@@ -244,6 +297,32 @@ class UnifiedLibraryViewModel: ObservableObject {
             // For others, use duration as proxy
             return tracks.sorted { $0.duration > $1.duration }
         }
+    }
+
+    // MARK: - Search index (S17-G P0-F2)
+
+    /// Build the token index from the current `allTracks`.
+    /// Idempotent. O(n × tokens) but only runs when the library
+    /// is loaded (not on every search).
+    private func rebuildSearchIndex() {
+        var index: [String: Set<String>] = [:]
+        var byId: [String: UnifiedTrack] = [:]
+        for track in allTracks {
+            byId[track.id] = track
+            let tokens = Set(tokenize(track.title) + tokenize(track.artist) + tokenize(track.album ?? ""))
+            for token in tokens {
+                index[token, default: []].insert(track.id)
+            }
+        }
+        _searchIndex = index
+        _tracksById = byId
+    }
+
+    /// Tokenize a string into lowercased non-empty tokens.
+    private func tokenize(_ s: String) -> [String] {
+        s.components(separatedBy: .whitespacesAndNewlines)
+            .map { $0.lowercased() }
+            .filter { !$0.isEmpty }
     }
 
     // MARK: - Stats
