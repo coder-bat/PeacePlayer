@@ -58,7 +58,12 @@ enum AppError: Error, Equatable {
             }
             return "You're going a bit fast — wait a moment and try again."
         case .offline:
-            return "You appear to be offline. Check your connection and try again."
+            // S17-H: distinguish "your device is offline" (the
+            // .network case above) from "your backend is unreachable"
+            // (this case). The latter usually means the Mac
+            // running the backend is asleep, the Tailscale IP
+            // changed, or the backend was stopped.
+            return "Can't reach the PeacePlayer backend. Check that your Mac is awake and the backend host in Settings is correct."
         case .notFound:
             return "The requested item could not be found."
         case .parsing:
@@ -147,7 +152,37 @@ extension APIError {
             }
         case .decodingError:
             return .parsing("Failed to decode response")
-        case .networkError:
+        case .networkError(let underlying):
+            // S17-H (failure modes 5): distinguish "your internet is
+            // down" from "the backend is unreachable" from "we just
+            // lost connectivity briefly". The old mapping collapsed
+            // all of these to .network("") → "check your internet",
+            // which is the wrong message when the Mac is asleep, the
+            // Tailscale IP changed, or the backend was just stopped.
+            //
+            // URLError codes we care about:
+            //   .notConnectedToInternet → user's Wi-Fi/data is off
+            //   .cannotFindHost          → DNS failed (also user side)
+            //   .timedOut                → could be either; treat as
+            //                                backend-unreachable after
+            //                                our retry exhausted
+            //   .cannotConnectToHost     → backend is down / wrong IP
+            //   .networkConnectionLost   → transient (already retried)
+            //   other                    → unknown
+            if let urlError = underlying as? URLError {
+                switch urlError.code {
+                case .notConnectedToInternet, .cannotFindHost, .dataNotAllowed:
+                    return .network("Your device appears to be offline. Check your Wi-Fi or cellular connection.")
+                case .cannotConnectToHost:
+                    return .offline
+                case .timedOut:
+                    return .offline
+                case .networkConnectionLost:
+                    return .network("Connection dropped. Try again.")
+                default:
+                    return .network("")
+                }
+            }
             return .network("")
         }
     }
