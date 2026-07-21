@@ -113,7 +113,12 @@ class ImageCache {
             // Download if not already downloading
             if self.activeDownloads[url] == nil {
                 let download = URLSession.shared.dataTaskPublisher(for: url)
-                    .map { UIImage(data: $0.data) }
+                    .map { [weak self] output -> UIImage? in
+                        // S17-G (perf 10 P0-F6): decode + downsample to
+                        // 1024px instead of full-resolution UIImage(data:).
+                        // See `decodedImage` for the rationale.
+                        self?.decodedImage(data: output.data)
+                    }
                     .catch { _ in Just(nil) }
                     // S15: keep the download pipeline off main.
                     // Decoding + caching + disk save all happen on
@@ -212,15 +217,39 @@ class ImageCache {
     
     // MARK: - Private Methods
     
+    /// S17-G (perf 10 P0-F6): the cache previously used
+    /// `UIImage(data:)` which decodes JPEGs at full resolution.
+    /// A 4K artwork JPEG becomes a 4000x4000x4 byte (64MB) buffer
+    /// in memory — and the row cells only render at 50-100pt. Use
+    /// `CGImageSourceCreateThumbnailAtIndex` to decode + downsample
+    /// in one step, capped at 1024px on the long edge. This is
+    /// the standard pattern for memory-efficient image loading.
+    /// Visible quality loss at 1024px is invisible at 50-100pt;
+    /// memory savings are 16x for a 4K source.
+    private static let maxDecodeDimension: CGFloat = 1024
+
+    private func decodedImage(data: Data) -> UIImage? {
+        let sourceOptions = [kCGImageSourceShouldCache: false] as CFDictionary
+        guard let source = CGImageSourceCreateWithData(data as CFData, sourceOptions) else { return nil }
+        let thumbOptions = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: Self.maxDecodeDimension
+        ] as CFDictionary
+        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, thumbOptions) else { return nil }
+        return UIImage(cgImage: cgImage)
+    }
+
     private func loadFromDisk(key: NSString) -> UIImage? {
         let fileURL = cacheDirectory.appendingPathComponent(key.md5Hash)
-        
+
         guard fileManager.fileExists(atPath: fileURL.path),
               let data = try? Data(contentsOf: fileURL),
-              let image = UIImage(data: data) else {
+              let image = decodedImage(data: data) else {
             return nil
         }
-        
+
         return image
     }
     
