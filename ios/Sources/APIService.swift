@@ -69,7 +69,7 @@ class APIService {
 
     private let session: URLSession
     private let maxRetries = 3
-    private let retryDelay: TimeInterval = 2.0
+    private let retryDelay: TimeInterval = 0.5
 
     private init() {
         let config = URLSessionConfiguration.default
@@ -79,6 +79,54 @@ class APIService {
         config.requestCachePolicy = .reloadIgnoringLocalCacheData
         self.session = URLSession(configuration: config)
         print("🔗 APIService initialized with baseURL: \(baseURL)")
+    }
+
+    // MARK: - Request helper
+
+    /// S17-H (failure modes 6): the previous `maxRetries` and
+    /// `retryDelay` constants were declared but never wired. Every
+    /// transient network blip (5s in a tunnel, brief Wi-Fi drop)
+    /// surfaced to the user as an error toast. Now every request
+    /// retries with short exponential backoff before giving up.
+    ///
+    /// The retry only catches URLErrors (transport-level), not
+    /// HTTP 4xx / 5xx — those are semantic errors from the server
+    /// and shouldn't be retried. Built with `.catch` + `.delay`
+    /// because Combine's `.retry(_:)` has no backoff.
+    private func dataTaskWithRetry(for request: URLRequest) -> AnyPublisher<(data: Data, response: URLResponse), URLError> {
+        return session.dataTaskPublisher(for: request)
+            .catch { [weak self] error -> AnyPublisher<(data: Data, response: URLResponse), URLError> in
+                guard let self = self else {
+                    return Fail(error: error).eraseToAnyPublisher()
+                }
+                return self.retryPublisher(for: request, attempt: 1, originalError: error)
+            }
+            .eraseToAnyPublisher()
+    }
+
+    private func retryPublisher(
+        for request: URLRequest,
+        attempt: Int,
+        originalError: URLError
+    ) -> AnyPublisher<(data: Data, response: URLResponse), URLError> {
+        if attempt >= maxRetries {
+            return Fail(error: originalError).eraseToAnyPublisher()
+        }
+        let delay = retryDelay * pow(2.0, Double(attempt - 1))
+        return Just(())
+            .delay(for: .seconds(delay), scheduler: DispatchQueue.global())
+            .setFailureType(to: URLError.self)
+            .flatMap { [weak self] _ -> AnyPublisher<(data: Data, response: URLResponse), URLError> in
+                guard let self = self else {
+                    return Fail(error: originalError).eraseToAnyPublisher()
+                }
+                return self.dataTaskWithRetry(for: request)
+                    .catch { error -> AnyPublisher<(data: Data, response: URLResponse), URLError> in
+                        self.retryPublisher(for: request, attempt: attempt + 1, originalError: error)
+                    }
+                    .eraseToAnyPublisher()
+            }
+            .eraseToAnyPublisher()
     }
 
     // S17 (CV-3): attach the session JWT as a Bearer token on
@@ -114,7 +162,7 @@ class APIService {
         let body: [String: Any] = ["query": query, "limit": limit]
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
 
-        return session.dataTaskPublisher(for: request)
+        return dataTaskWithRetry(for: request)
             .mapError { APIError.networkError($0) }
             .flatMap { data, response -> AnyPublisher<Data, APIError> in
                 guard let httpResponse = response as? HTTPURLResponse else {
@@ -160,7 +208,7 @@ class APIService {
 
         var request = URLRequest(url: url)
         addAuthHeader(to: &request)
-        return session.dataTaskPublisher(for: request)
+        return dataTaskWithRetry(for: request)
             .mapError { APIError.networkError($0) }
             .flatMap { data, response -> AnyPublisher<Data, APIError> in
                 guard let httpResponse = response as? HTTPURLResponse else {
@@ -185,7 +233,7 @@ class APIService {
 
         var request = URLRequest(url: url)
         addAuthHeader(to: &request)
-        return session.dataTaskPublisher(for: request)
+        return dataTaskWithRetry(for: request)
             .mapError { APIError.networkError($0) }
             .flatMap { data, response -> AnyPublisher<Data, APIError> in
                 guard let httpResponse = response as? HTTPURLResponse else {
@@ -251,7 +299,7 @@ class APIService {
         }
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
         
-        return session.dataTaskPublisher(for: request)
+        return dataTaskWithRetry(for: request)
             .mapError { APIError.networkError($0) }
             .flatMap { data, response -> AnyPublisher<Data, APIError> in
                 guard let httpResponse = response as? HTTPURLResponse else {
@@ -283,7 +331,7 @@ class APIService {
 
         var request = URLRequest(url: url)
         addAuthHeader(to: &request)
-        return session.dataTaskPublisher(for: request)
+        return dataTaskWithRetry(for: request)
             .mapError { APIError.networkError($0) }
             .map { $0.data }
             .decode(type: LibraryResponse.self, decoder: JSONDecoder())
@@ -306,7 +354,7 @@ class APIService {
         request.httpMethod = "DELETE"
         addAuthHeader(to: &request)
 
-        return session.dataTaskPublisher(for: request)
+        return dataTaskWithRetry(for: request)
             .mapError { APIError.networkError($0) }
             .flatMap { data, response -> AnyPublisher<Data, APIError> in
                 guard let httpResponse = response as? HTTPURLResponse else {
@@ -330,7 +378,7 @@ class APIService {
 
         var request = URLRequest(url: url)
         addAuthHeader(to: &request)
-        return session.dataTaskPublisher(for: request)
+        return dataTaskWithRetry(for: request)
             .mapError { APIError.networkError($0) }
             .flatMap { data, response -> AnyPublisher<Data, APIError> in
                 guard let httpResponse = response as? HTTPURLResponse else {
@@ -376,7 +424,7 @@ class APIService {
         }
         var request = URLRequest(url: url)
         addAuthHeader(to: &request)
-        return session.dataTaskPublisher(for: request)
+        return dataTaskWithRetry(for: request)
             .mapError { APIError.networkError($0) }
             .flatMap { data, response -> AnyPublisher<Data, APIError> in
                 guard let http = response as? HTTPURLResponse else {
@@ -415,7 +463,7 @@ class APIService {
         let body: [String: Any] = ["query": query, "limit": limit]
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
         
-        return session.dataTaskPublisher(for: request)
+        return dataTaskWithRetry(for: request)
             .mapError { APIError.networkError($0) }
             .flatMap { data, response -> AnyPublisher<Data, APIError> in
                 guard let httpResponse = response as? HTTPURLResponse else {
@@ -439,7 +487,7 @@ class APIService {
 
         var request = URLRequest(url: url)
         addAuthHeader(to: &request)
-        return session.dataTaskPublisher(for: request)
+        return dataTaskWithRetry(for: request)
             .mapError { APIError.networkError($0) }
             .flatMap { data, response -> AnyPublisher<Data, APIError> in
                 guard let httpResponse = response as? HTTPURLResponse else {
@@ -463,7 +511,7 @@ class APIService {
 
         var request = URLRequest(url: url)
         addAuthHeader(to: &request)
-        return session.dataTaskPublisher(for: request)
+        return dataTaskWithRetry(for: request)
             .mapError { APIError.networkError($0) }
             .flatMap { data, response -> AnyPublisher<Data, APIError> in
                 guard let httpResponse = response as? HTTPURLResponse else {
@@ -496,7 +544,7 @@ class APIService {
         
         var request = URLRequest(url: url)
         addAuthHeader(to: &request)
-        return session.dataTaskPublisher(for: request)
+        return dataTaskWithRetry(for: request)
             .mapError { APIError.networkError($0) }
             .flatMap { data, response -> AnyPublisher<Data, APIError> in
                 guard let httpResponse = response as? HTTPURLResponse else {
@@ -526,7 +574,7 @@ class APIService {
         
         var request = URLRequest(url: url)
         addAuthHeader(to: &request)
-        return session.dataTaskPublisher(for: request)
+        return dataTaskWithRetry(for: request)
             .mapError { APIError.networkError($0) }
             .flatMap { data, response -> AnyPublisher<Data, APIError> in
                 guard let httpResponse = response as? HTTPURLResponse else {
@@ -556,7 +604,7 @@ class APIService {
         
         var request = URLRequest(url: url)
         addAuthHeader(to: &request)
-        return session.dataTaskPublisher(for: request)
+        return dataTaskWithRetry(for: request)
             .mapError { APIError.networkError($0) }
             .flatMap { data, response -> AnyPublisher<Data, APIError> in
                 guard let httpResponse = response as? HTTPURLResponse else {
@@ -582,7 +630,7 @@ class APIService {
         request.httpMethod = "POST"
         addAuthHeader(to: &request)
 
-        return session.dataTaskPublisher(for: request)
+        return dataTaskWithRetry(for: request)
             .mapError { APIError.networkError($0) }
             .flatMap { data, response -> AnyPublisher<Void, APIError> in
                 guard let httpResponse = response as? HTTPURLResponse else {
@@ -613,7 +661,7 @@ class APIService {
         
         var request = URLRequest(url: url)
         addAuthHeader(to: &request)
-        return session.dataTaskPublisher(for: request)
+        return dataTaskWithRetry(for: request)
             .mapError { APIError.networkError($0) }
             .flatMap { data, response -> AnyPublisher<Data, APIError> in
                 guard let httpResponse = response as? HTTPURLResponse else {
@@ -644,7 +692,7 @@ class APIService {
         
         var request = URLRequest(url: url)
         addAuthHeader(to: &request)
-        return session.dataTaskPublisher(for: request)
+        return dataTaskWithRetry(for: request)
             .mapError { APIError.networkError($0) }
             .flatMap { data, response -> AnyPublisher<Data, APIError> in
                 guard let httpResponse = response as? HTTPURLResponse else {
@@ -676,7 +724,7 @@ class APIService {
         
         var request = URLRequest(url: url)
         addAuthHeader(to: &request)
-        return session.dataTaskPublisher(for: request)
+        return dataTaskWithRetry(for: request)
             .mapError { APIError.networkError($0) }
             .flatMap { data, response -> AnyPublisher<Data, APIError> in
                 guard let httpResponse = response as? HTTPURLResponse else {
@@ -709,7 +757,7 @@ class APIService {
         
         var request = URLRequest(url: url)
         addAuthHeader(to: &request)
-        return session.dataTaskPublisher(for: request)
+        return dataTaskWithRetry(for: request)
             .mapError { APIError.networkError($0) }
             .flatMap { data, response -> AnyPublisher<Data, APIError> in
                 guard let httpResponse = response as? HTTPURLResponse else {
@@ -740,7 +788,7 @@ class APIService {
         
         var request = URLRequest(url: url)
         addAuthHeader(to: &request)
-        return session.dataTaskPublisher(for: request)
+        return dataTaskWithRetry(for: request)
             .mapError { APIError.networkError($0) }
             .flatMap { data, response -> AnyPublisher<Data, APIError> in
                 guard let httpResponse = response as? HTTPURLResponse else {
@@ -771,7 +819,7 @@ class APIService {
         
         var request = URLRequest(url: url)
         addAuthHeader(to: &request)
-        return session.dataTaskPublisher(for: request)
+        return dataTaskWithRetry(for: request)
             .mapError { APIError.networkError($0) }
             .flatMap { data, response -> AnyPublisher<Data, APIError> in
                 guard let httpResponse = response as? HTTPURLResponse else {
@@ -805,7 +853,7 @@ class APIService {
         
         var request = URLRequest(url: url)
         addAuthHeader(to: &request)
-        return session.dataTaskPublisher(for: request)
+        return dataTaskWithRetry(for: request)
             .mapError { APIError.networkError($0) }
             .flatMap { data, response -> AnyPublisher<Data, APIError> in
                 guard let httpResponse = response as? HTTPURLResponse else {
