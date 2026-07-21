@@ -42,8 +42,15 @@ public class CDTimeCapsule: NSManagedObject {
 }
 
 extension CDTimeCapsule {
+    /// S17-G: use `TimeCapsuleManager.trustedNow()` instead of
+    /// raw `Date()`. The trusted clock is clamped to the most
+    /// recent forward-time the app has seen, so a user who
+    /// rolls the system clock back can't unlock a future-dated
+    /// capsule. The matching check in `TimeCapsuleSnapshot`
+    /// (line 42) already uses `trustedNow()`; this brings the
+    /// CoreData entity extension into consistency.
     var isUnlocked: Bool {
-        Date() >= unlockAt
+        TimeCapsuleManager.trustedNow() >= unlockAt
     }
 
     var isReadyToOpen: Bool {
