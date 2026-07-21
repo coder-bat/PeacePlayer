@@ -132,6 +132,7 @@
 		E86A578CA391F693A6B3752B /* YTAudioPlayerApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0080BED852F91FC0AFA9DE17 /* YTAudioPlayerApp.swift */; };
 		EBDE2725CE5CAA3CC9DBD44F /* DataManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19520AA0983D814BCB1EF105 /* DataManager.swift */; };
 		ECD0697915EEBFC3863ACFD1 /* PlayerState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12DF773336B5A83BFF1FC347 /* PlayerState.swift */; };
+		A7782DF5019541C895545576 /* QueueStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0FF44C86E74347119D2FFBEB /* QueueStore.swift */; };
 		D30DD3D73AF2462BA25E0196 /* AudioSessionController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96929B2ADE634BE0AAF3E05C /* AudioSessionController.swift */; };
 		F177621963F5E3574084132A /* BackgroundDownloadService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DCF0DCA618422606DA43580 /* BackgroundDownloadService.swift */; };
 		F1BDDD059138B2D12ACD1238 /* DownloadQueueView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC0F1A4A8D19C80A2DFBE1FB /* DownloadQueueView.swift */; };
@@ -199,6 +200,7 @@
 		D7A783AFF778464EB7C3B72C /* NowPlayingLiveActivityWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NowPlayingLiveActivityWidget.swift; sourceTree = "<group>"; };
 		0F15FD3F181894856FF634D2 /* PeacePlayerWidgetBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeacePlayerWidgetBundle.swift; sourceTree = "<group>"; };
 		12DF773336B5A83BFF1FC347 /* PlayerState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerState.swift; sourceTree = "<group>"; };
+		0FF44C86E74347119D2FFBEB /* QueueStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueueStore.swift; sourceTree = "<group>"; };
 		96929B2ADE634BE0AAF3E05C /* AudioSessionController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioSessionController.swift; sourceTree = "<group>"; };
 		16EA893B48AC5117E1F23A9D /* AudiobookDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudiobookDetailView.swift; sourceTree = "<group>"; };
 		18CB5E604384AA12AE84E2D5 /* AddToPlaylistSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddToPlaylistSheet.swift; sourceTree = "<group>"; };
@@ -591,6 +593,7 @@
 				A8BFAE5836927828B11D8D41 /* Audiobook.swift */,
 				0235C33E045FE51378D34C35 /* AudiobookLibrary.swift */,
 				12DF773336B5A83BFF1FC347 /* PlayerState.swift */,
+				0FF44C86E74347119D2FFBEB /* QueueStore.swift */,
 				96929B2ADE634BE0AAF3E05C /* AudioSessionController.swift */,
 				93B4300DF1688D223A2697AE /* Playlist.swift */,
 				9E3A88A80AAC57024D2E8EDC /* Podcast.swift */,
@@ -826,6 +829,7 @@
 				0730E5C7A56C5148472385A9 /* PersistenceController.swift in Sources */,
 				09D5D6AB590AAF6EA2FA0ED7 /* PlaybackQueueManager.swift in Sources */,
 				ECD0697915EEBFC3863ACFD1 /* PlayerState.swift in Sources */,
+				A7782DF5019541C895545576 /* QueueStore.swift in Sources */,
 				D30DD3D73AF2462BA25E0196 /* AudioSessionController.swift in Sources */,
 				971CD66E933CD6EBEBBC611E /* Playlist.swift in Sources */,
 				FCC18AB0C67C1A57062B9ADD /* PlaylistDetailView.swift in Sources */,

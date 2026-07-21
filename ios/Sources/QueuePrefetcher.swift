@@ -78,7 +78,9 @@ class QueuePrefetcher: ObservableObject {
     private func setupPrefetching() {
         // Monitor queue position to prefetch more
         // Reduced debounce from 0.5s to 0.1s for faster response to user navigation
-        playerState.$currentIndex
+        // S17-G: currentIndex moved to QueueStore. Subscribe to the
+        // store's $currentIndex.
+        playerState.queueStore.$currentIndex
             .debounce(for: .seconds(0.1), scheduler: DispatchQueue.main)
             .sink { [weak self] index in
                 self?.checkAndPrefetch(currentIndex: index)

@@ -690,7 +690,8 @@ class HistoryViewModel: ObservableObject {
             guard !orderedInfos.isEmpty else { return }
 
             let playerState = PlayerState.shared
-            playerState.queue.removeAll()
+            // S17-G: queue is a computed property. Use the store.
+            playerState.queueStore.clear()
 
             for info in orderedInfos {
                 let item = QueueItem(

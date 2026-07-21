@@ -62,8 +62,11 @@ class QueueRestorer: ObservableObject {
                 if let trackId = trackId,
                    let index = items.firstIndex(where: { $0.track.videoId == trackId }) {
                     // Resume from saved position
-                    PlayerState.shared.queue = items
-                    PlayerState.shared.currentIndex = index
+                    // S17-G: queue is a computed property backed by
+                    // QueueStore. Replace via the store and set the
+                    // index the same way.
+                    PlayerState.shared.queueStore.replace(with: items)
+                    PlayerState.shared.queueStore.setCurrentIndex(index)
                     PlayerState.shared.playQueue(at: index)
 
                     // Seek to saved position after a short delay
@@ -72,7 +75,9 @@ class QueueRestorer: ObservableObject {
                     }
                 } else {
                     // Just load the queue, don't auto-play
-                    PlayerState.shared.queue = items
+                    // S17-G: queue is a computed property backed by
+                    // QueueStore. Replace via the store.
+                    PlayerState.shared.queueStore.replace(with: items)
                 }
 
                 return Just(()).setFailureType(to: Error.self).eraseToAnyPublisher()

@@ -352,7 +352,7 @@ class PlaylistManager: ObservableObject {
             let ordered = tracks.prefix(20).compactMap { streamInfoById[$0.videoId] }
             
             // Clear queue and add tracks
-            playerState.queue.removeAll()
+            playerState.queueStore.clear()
             for info in ordered {
                 let item = QueueItem(
                     track: info.track,
@@ -484,7 +484,7 @@ class PlaylistManager: ObservableObject {
             let ordered = tracks.prefix(20).compactMap { streamInfoById[$0.videoId] }
             
             // Clear queue and add tracks
-            playerState.queue.removeAll()
+            playerState.queueStore.clear()
             for info in ordered {
                 let item = QueueItem(
                     track: info.track,

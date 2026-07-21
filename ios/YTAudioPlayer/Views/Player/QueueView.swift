@@ -9,8 +9,22 @@ import SwiftUI
 
 struct QueueView: View {
     @StateObject private var playerState = PlayerState.shared
+    // S17-G (perf 10 P0-F1): observe the queue store directly.
+    // PlayerState no longer fires objectWillChange on queue
+    // mutations, so the only way for QueueView to see queue
+    // changes is to subscribe to the store. We use the underscored
+    // wrapper initializer because @ObservedObject doesn't allow
+    // default-value initialization from a singleton property.
+    @ObservedObject private var queueStore: QueueStore
     @Environment(\.dismiss) private var dismiss
     @State private var showClearConfirmation = false
+
+    init() {
+        // Subscribe to the store that lives on PlayerState.
+        // The store is a `let` on PlayerState; the lifetime is
+        // tied to the singleton.
+        self._queueStore = ObservedObject(initialValue: PlayerState.shared.queueStore)
+    }
 
     var body: some View {
         NavigationStack {
@@ -31,9 +45,15 @@ struct QueueView: View {
                     }
 
                     // Up Next Section
+                    // S17-G: read from the queue store directly so
+                    // the List animates with the queue. The store
+                    // owns the items + currentIndex; we just slice
+                    // the upcoming portion.
                     let upcoming: [QueueItem] = {
-                        if playerState.currentIndex < playerState.queue.count - 1 {
-                            return Array(playerState.queue[(playerState.currentIndex + 1)...])
+                        let q = queueStore.items
+                        let idx = queueStore.currentIndex
+                        if idx < q.count - 1 {
+                            return Array(q[(idx + 1)...])
                         } else {
                             return []
                         }
@@ -153,9 +173,15 @@ struct QueueView: View {
                                 }
                             }
                             .onMove { indexSet, destination in
-                                let sourceIndices = Array(indexSet).map { playerState.currentIndex + 1 + $0 }
-                                let destIndex = playerState.currentIndex + 1 + destination
-                                if destIndex <= playerState.queue.count {
+                                // S17-G: index the move against the
+                                // store's queue, not the computed
+                                // `playerState.queue` (which is the
+                                // same value, but using the store
+                                // keeps the access pattern consistent
+                                // for the next maintainer).
+                                let sourceIndices = Array(indexSet).map { queueStore.currentIndex + 1 + $0 }
+                                let destIndex = queueStore.currentIndex + 1 + destination
+                                if destIndex <= queueStore.items.count {
                                     playerState.moveQueueItem(from: IndexSet(sourceIndices), to: destIndex)
                                     HapticManager.light()
                                 }
@@ -164,7 +190,7 @@ struct QueueView: View {
                     }
                 }
                 .listStyle(.insetGrouped)
-                .animation(.spring(response: 0.35, dampingFraction: 0.8), value: playerState.queue.count)
+                .animation(.spring(response: 0.35, dampingFraction: 0.8), value: queueStore.items.count)
                 .onAppear {
                     UITableView.appearance().backgroundColor = .clear
                 }
@@ -191,7 +217,7 @@ struct QueueView: View {
                         Text("Clear")
                             .foregroundColor(.red)
                     }
-                    .disabled(playerState.queue.isEmpty)
+                    .disabled(queueStore.items.isEmpty)
                 }
             }
             .alert("Clear Queue?", isPresented: $showClearConfirmation) {

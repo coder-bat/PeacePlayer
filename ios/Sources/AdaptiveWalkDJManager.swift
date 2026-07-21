@@ -278,8 +278,10 @@ final class AdaptiveWalkDJManager: ObservableObject {
 
         TrackStore.shared.saveTrack(track)
         QueuePrefetcher.shared.resetPrefetchState()
-        PlayerState.shared.queue.removeAll()
-        PlayerState.shared.currentIndex = 0
+        // S17-G: queue / currentIndex are computed properties
+        // backed by QueueStore. Clear via the store and let
+        // `play(track:)` rebuild the queue.
+        PlayerState.shared.queueStore.clear()
         PlayerState.shared.play(track: track)
         PlayerState.shared.showFullPlayer = true
         HapticManager.success()

@@ -134,8 +134,9 @@ struct PlaylistPreviewView: View {
             }
             
             // Clear existing queue if needed and add new tracks
+            // S17-G: queue is a computed property. Use the store.
             if playerState.currentItem == nil {
-                playerState.queue.removeAll()
+                playerState.queueStore.clear()
             }
             
             // Add tracks in order

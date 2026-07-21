@@ -29,15 +29,18 @@ class PlaybackQueueManager: ObservableObject {
         hasStartedObserving = true
 
         // Observe queue changes and persist to Core Data
-        playerState.$queue
+        // S17-G: queue / currentIndex are computed properties on
+        // PlayerState, backed by QueueStore. Subscribe to the
+        // store's @Published publishers directly.
+        playerState.queueStore.$items
             .debounce(for: .milliseconds(500), scheduler: DispatchQueue.main)
             .sink { [weak self] queue in
-                self?.saveQueue(queue, currentIndex: playerState.currentIndex)
+                self?.saveQueue(queue, currentIndex: playerState.queueStore.currentIndex)
             }
             .store(in: &cancellables)
 
         // Observe current index changes
-        playerState.$currentIndex
+        playerState.queueStore.$currentIndex
             .debounce(for: .milliseconds(200), scheduler: DispatchQueue.main)
             .sink { [weak self] currentIndex in
                 self?.updateCurrentItem(currentIndex: currentIndex)

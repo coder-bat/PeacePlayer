@@ -176,11 +176,23 @@ class PlayerState: ObservableObject {
     /// Flag to prevent multiple completion triggers
     private var isHandlingCompletion = false
     
-    /// Playback queue
-    @Published var queue: [QueueItem] = []
-    
-    /// Current track index in queue
-    @Published var currentIndex: Int = 0
+    /// Playback queue. S17-G (perf 10 P0-F1): backed by `queueStore`
+    /// so that queue mutations don't fire `PlayerState.objectWillChange`
+    /// and re-render every observer (MiniPlayer, FullPlayer, etc.).
+    /// Views that display the queue observe the store directly; the
+    /// `queue` getter is a thin pass-through for read-side compat.
+    var queue: [QueueItem] { queueStore.items }
+
+    /// Current track index in queue. Backed by the store.
+    var currentIndex: Int { queueStore.currentIndex }
+
+    /// S17-G: the queue lives in a separate observable so mutations
+    /// don't fan out to every PlayerState observer. The store is
+    /// `let` because the lifetime is tied to PlayerState (singleton).
+    /// PlayerState mirrors `currentItem` from the store via a
+    /// Combine subscription in `init`, so observers that care about
+    /// the current item (MiniPlayer) still re-render when it changes.
+    let queueStore = QueueStore()
     
     /// Shuffle enabled
     @Published var isShuffled: Bool = false
@@ -390,6 +402,27 @@ class PlayerState: ObservableObject {
             self?.handleMediaServicesResetRestart()
         }
         audioSessionController.setup()
+
+        // S17-G: mirror `currentItem` from the store. The store is
+        // the source of truth; PlayerState keeps a stored
+        // @Published `currentItem` so observers (MiniPlayer, the
+        // FullPlayer chrome) re-render when the current track
+        // changes. We update it only when the resolved value
+        // actually changes (removeDuplicates on the combined
+        // publisher) so unrelated queue mutations (add/remove
+        // a non-current track) don't fire PlayerState.objectWillChange.
+        queueStore.$items
+            .combineLatest(queueStore.$currentIndex)
+            .map { items, index -> QueueItem? in
+                guard index >= 0, index < items.count else { return nil }
+                return items[index]
+            }
+            .removeDuplicates { $0?.track.videoId == $1?.track.videoId }
+            .sink { [weak self] newItem in
+                self?.currentItem = newItem
+            }
+            .store(in: &cancellables)
+
         restoreQueue()
 
         // C-2 fix: register memory warning via token (so we can clean up
@@ -427,7 +460,10 @@ class PlayerState: ObservableObject {
             self.$repeatMode.map { _ in () }.eraseToAnyPublisher(),
             self.$volume.map { _ in () }.eraseToAnyPublisher(),
             self.$playbackRate.map { _ in () }.eraseToAnyPublisher(),
-            self.$currentIndex.map { _ in () }.eraseToAnyPublisher(),
+            // S17-G: currentIndex moved to QueueStore. Subscribe
+            // to the store's $currentIndex so the snapshot still
+            // updates on index changes.
+            self.queueStore.$currentIndex.map { _ in () }.eraseToAnyPublisher(),
         ]
         Publishers.MergeMany(triggers)
             .sink { [weak self] _ in
@@ -475,21 +511,22 @@ class PlayerState: ObservableObject {
             guard let self = self, !items.isEmpty else { return }
 
             DispatchQueue.main.async {
-                self.queue = items
-                self.currentIndex = PlaybackQueueManager.shared.getSavedCurrentIndex()
+                // S17-G: forward to the store. The store handles
+                // the index clamping via setCurrentIndex.
+                self.queueStore.replace(with: items)
+                let savedIndex = PlaybackQueueManager.shared.getSavedCurrentIndex()
+                self.queueStore.setCurrentIndex(savedIndex)
 
-                // Clamp index to valid range
-                if self.currentIndex >= items.count {
-                    self.currentIndex = 0
-                }
+                let currentIndex = self.queueStore.currentIndex
+                print("📱 Restored queue with \(items.count) items, current index: \(currentIndex)")
 
-                print("📱 Restored queue with \(items.count) items, current index: \(self.currentIndex)")
-
-                // Restore the current item without auto-playing
-                if self.currentIndex >= 0 && self.currentIndex < items.count {
-                    let currentItem = items[self.currentIndex]
-                    self.currentItem = currentItem
-                    self.updateExpectedDuration(Double(currentItem.track.durationSeconds))
+                // Restore the current item without auto-playing.
+                // The mirror subscription will also set currentItem,
+                // but we do it here to call updateExpectedDuration
+                // synchronously (the mirror fires on the next runloop).
+                if currentIndex >= 0, currentIndex < items.count {
+                    let item = items[currentIndex]
+                    self.updateExpectedDuration(Double(item.track.durationSeconds))
                 }
             }
         }
@@ -730,10 +767,11 @@ class PlayerState: ObservableObject {
         playbackState = .loading
 
         if addToQueue {
-            // Add to queue if not already there
-            if !queue.contains(where: { $0.track.videoId == item.track.videoId }) {
-                queue.append(item)
-                currentIndex = queue.count - 1
+            // S17-G: add to the store (dedup + set currentIndex to
+            // the new last item via the store's add + setCurrentIndex).
+            queueStore.add(item, maxQueueSize: maxQueueSize)
+            if queueStore.items.contains(where: { $0.track.videoId == item.track.videoId }) {
+                queueStore.setCurrentIndex(queueStore.items.count - 1)
             }
         }
         
@@ -973,8 +1011,13 @@ class PlayerState: ObservableObject {
             self.currentItem = upgradedItem
 
             // Update queue
-            if self.currentIndex < self.queue.count {
-                self.queue[self.currentIndex] = upgradedItem
+            // S17-G: `queue` is now a computed property backed by
+            // the store. To replace one element, rebuild the
+            // array and use the store's `replace(with:)`.
+            if self.currentIndex < self.queueStore.items.count {
+                var updatedItems = self.queueStore.items
+                updatedItems[self.currentIndex] = upgradedItem
+                self.queueStore.replace(with: updatedItems)
             }
 
             // S3-4: re-apply the gain on the (possibly new) player
@@ -1028,7 +1071,10 @@ class PlayerState: ObservableObject {
             // CRITICAL FIX: Set expectedDuration from track metadata before playing
             updateExpectedDuration(Double(item.track.durationSeconds))
             print("🎵 playQueue: Set expectedDuration = \(expectedDuration)")
-            currentIndex = index
+            // S17-G: set currentIndex via the store. The mirror
+            // subscription will update `currentItem` from the new
+            // index.
+            queueStore.setCurrentIndex(index)
             play(item: item, addToQueue: false)
         }
         // S11 fix (Bug 11): removed `endTrackTransitionBackgroundTask()`.
@@ -1063,10 +1109,17 @@ class PlayerState: ObservableObject {
                     )
 
                     // Update queue with refreshed item
-                    self.queue[index] = refreshedItem
+                    // S17-G: rebuild the queue with the refreshed item
+                    // and replace via the store. `queue[index] = X` is
+                    // a no-op on the computed property.
+                    var updatedItems = self.queueStore.items
+                    if updatedItems.indices.contains(index) {
+                        updatedItems[index] = refreshedItem
+                        self.queueStore.replace(with: updatedItems)
+                    }
 
                     print("▶️ URL refreshed, playing...")
-                    self.currentIndex = index
+                    self.queueStore.setCurrentIndex(index)
                     self.play(item: refreshedItem, addToQueue: false)
                     // S11 fix (Bug 11): removed `endTrackTransitionBackgroundTask()`.
                     // The task is now released by the isPlaybackLikelyToKeepUp
@@ -1111,11 +1164,15 @@ class PlayerState: ObservableObject {
                     )
                     
                     // Update current item and queue
+                    // S17-G: rebuild via the store. `queue[...]` is
+                    // a no-op on the computed property.
                     self.currentItem = refreshedItem
-                    if self.currentIndex < self.queue.count {
-                        self.queue[self.currentIndex] = refreshedItem
+                    if self.currentIndex < self.queueStore.items.count {
+                        var updatedItems = self.queueStore.items
+                        updatedItems[self.currentIndex] = refreshedItem
+                        self.queueStore.replace(with: updatedItems)
                     }
-                    
+
                     print("🔄 URL refreshed, retrying playback...")
                     self.play(item: refreshedItem, addToQueue: false)
                 }
@@ -1500,114 +1557,113 @@ class PlayerState: ObservableObject {
     // MARK: - Queue Management
 
     func addToQueue(_ item: QueueItem) {
-        // S11 fix (Bug 10): dedup before appending so callers don't
-        // need to worry about double-add (e.g., search-result tap
-        // followed by swipe-to-add-to-queue).
-        if queue.contains(where: { $0.track.videoId == item.track.videoId }) {
-            print("⚠️ [S11] addToQueue: skipping duplicate videoId=\(item.track.videoId)")
-            return
-        }
-        queue.append(item)
-
-        // Trim queue if it gets too large
-        if queue.count > maxQueueSize {
-            trimQueue()
-        }
-
+        // S17-G: forward to the store. Dedup + trim happen inside
+        // the store. The store fires its own objectWillChange; only
+        // views observing the store re-render.
+        queueStore.add(item, maxQueueSize: maxQueueSize)
         dataManager.saveQueue(queue)
     }
 
     func addToQueueNext(_ item: QueueItem) {
-        // S11 fix (Bug 10): dedup before inserting.
-        if queue.contains(where: { $0.track.videoId == item.track.videoId }) {
-            print("⚠️ [S11] addToQueueNext: skipping duplicate videoId=\(item.track.videoId)")
-            return
-        }
-        let insertIndex = min(currentIndex + 1, queue.count)
-        queue.insert(item, at: insertIndex)
-
-        // Trim queue if it gets too large
-        if queue.count > maxQueueSize {
-            trimQueue()
-        }
-
+        // S17-G: forward to the store. The store handles dedup
+        // and trims to maxQueueSize.
+        queueStore.addNext(item, maxQueueSize: maxQueueSize)
         dataManager.saveQueue(queue)
     }
     
     /// Trims queue to keep memory usage in check
     private func trimQueue() {
-        // Keep current track and next 50 items
-        let keepStart = currentIndex
-        let keepEnd = min(currentIndex + trimQueueToSize, queue.count)
-        
-        // Create new queue with kept items
-        var newQueue: [QueueItem] = []
-        
-        // Add items before current if they exist (up to 10 previous)
-        let prevStart = max(0, currentIndex - 10)
-        if prevStart < currentIndex {
-            newQueue.append(contentsOf: queue[prevStart..<currentIndex])
+        // S17-G: the trim logic moved into QueueStore.trimFront.
+        // This method is kept as a hook for any future policy
+        // changes that need to live on PlayerState (e.g., logging).
+        // Currently it just delegates.
+        let beforeCount = queue.count
+        if beforeCount > maxQueueSize {
+            // Compute a new items list using the same policy the
+            // store uses internally. The store would do this on its
+            // own when we call add*; this path is for memory-warning
+            // and direct calls. We rebuild via replace.
+            let keepFromCurrent = trimQueueToSize
+            let currentItemVideoId = queueStore.currentItem?.track.videoId
+
+            var newItems: [QueueItem] = []
+            if let currentVideoId = currentItemVideoId,
+               let currentIdx = queue.firstIndex(where: { $0.track.videoId == currentVideoId }) {
+                let prevStart = max(0, currentIdx - 10)
+                if prevStart < currentIdx {
+                    newItems.append(contentsOf: queue[prevStart..<currentIdx])
+                }
+                let keepEnd = min(currentIdx + keepFromCurrent, queue.count)
+                newItems.append(contentsOf: queue[currentIdx..<keepEnd])
+            } else {
+                newItems = Array(queue.prefix(keepFromCurrent))
+            }
+
+            let newCurrentIndex = currentItemVideoId.flatMap { videoId in
+                newItems.firstIndex(where: { $0.track.videoId == videoId })
+            } ?? -1
+
+            queueStore.replace(with: newItems)
+            queueStore.setCurrentIndex(newCurrentIndex)
+            print("✂️ Trimmed queue to \(newItems.count) items")
         }
-        
-        // Add current and future items
-        newQueue.append(contentsOf: queue[currentIndex..<keepEnd])
-        
-        // Update queue and adjust index
-        queue = newQueue
-        currentIndex = min(currentIndex - prevStart, queue.count - 1)
-        
-        print("✂️ Trimmed queue to \(queue.count) items")
     }
-    
+
     /// Clears old items from queue (call periodically)
     func cleanupOldItems() {
         let cutoff = Date().addingTimeInterval(-maxItemAge)
-        
-        // Remove items older than cutoff, except current
-        queue.removeAll { item in
-            item.createdAt < cutoff && item.track.videoId != currentItem?.track.videoId
+
+        // S17-G: build a filtered list and replace via the store.
+        // This keeps `currentItem` (set later by the mirror) and
+        // the store's invariants in sync.
+        let currentVideoId = currentItem?.track.videoId
+        let filtered = queue.filter { item in
+            item.createdAt >= cutoff || item.track.videoId == currentVideoId
         }
-        
-        // Recalculate current index
-        if let current = currentItem {
-            currentIndex = queue.firstIndex(where: { $0.track.videoId == current.track.videoId }) ?? 0
+        queueStore.replace(with: filtered)
+
+        // Recalculate current index via the store.
+        if let videoId = currentVideoId,
+           let newIdx = filtered.firstIndex(where: { $0.track.videoId == videoId }) {
+            queueStore.setCurrentIndex(newIdx)
         }
     }
-    
+
     func removeFromQueue(at index: Int) {
         guard index >= 0 && index < queue.count else { return }
 
-        let removedItem = queue.remove(at: index)
+        // S17-G: forward to the store. The store handles the
+        // index adjustment when removing before/after the
+        // current index.
+        let wasCurrent = (index == currentIndex)
+        queueStore.remove(at: index)
 
-        // Adjust current index if needed
-        if index < currentIndex {
-            currentIndex -= 1
-        } else if index == currentIndex {
-            // Removed current item, play next
-            if currentIndex < queue.count {
-                playQueue(at: currentIndex)
-            } else if !queue.isEmpty {
-                currentIndex = queue.count - 1
-                playQueue(at: currentIndex)
+        if wasCurrent {
+            // Removed current item, play next (or last, or stop)
+            if queueStore.currentIndex >= 0 && queueStore.currentIndex < queueStore.items.count {
+                playQueue(at: queueStore.currentIndex)
+            } else if !queueStore.items.isEmpty {
+                let last = queueStore.items.count - 1
+                queueStore.setCurrentIndex(last)
+                playQueue(at: last)
             } else {
                 stop()
                 currentItem = nil
             }
         }
     }
-    
-    func moveQueueItem(from source: IndexSet, to destination: Int) {
-        queue.move(fromOffsets: source, toOffset: destination)
 
-        // Recalculate current index
-        if let current = currentItem {
-            currentIndex = queue.firstIndex(where: { $0.track.videoId == current.track.videoId }) ?? 0
-        }
+    func moveQueueItem(from source: IndexSet, to destination: Int) {
+        // S17-G: forward to the store. The current item is
+        // re-derived by the mirror subscription in init, so
+        // currentIndex automatically tracks.
+        queueStore.move(from: source, to: destination)
     }
 
     func clearQueue() {
-        queue.removeAll()
-        currentIndex = 0
+        // S17-G: forward to the store. The store also resets
+        // currentIndex to -1.
+        queueStore.clear()
     }
     
     // MARK: - Skip Control
@@ -1653,10 +1709,14 @@ class PlayerState: ObservableObject {
             let nextIndex = currentIndex + 1
             if nextIndex < queue.count {
                 print("⏭️ Gapless: advancing AVQueuePlayer to next track")
-                currentIndex = nextIndex
-                currentItem = queue[nextIndex]
-                expectedDuration = Double(queue[nextIndex].track.durationSeconds)
-                dataManager.addToRecentlyPlayed(queue[nextIndex].track)
+                // S17-G: set currentIndex via the store. The mirror
+                // subscription updates `currentItem`. The expected
+                // duration is per-track metadata, not a queue
+                // property, so it stays on PlayerState.
+                queueStore.setCurrentIndex(nextIndex)
+                let nextItem = queueStore.items[nextIndex]
+                expectedDuration = Double(nextItem.track.durationSeconds)
+                dataManager.addToRecentlyPlayed(nextItem.track)
                 NotificationCenter.default.post(name: .trackPlayed, object: nil)
                 queuePlayer.advanceToNextItem()
                 // Re-enqueue to refill the queue player
@@ -1782,7 +1842,11 @@ class PlayerState: ObservableObject {
         }
         
         // Now safe to update UI state
-        currentIndex = index
+        // S17-G: set currentIndex via the store. The mirror
+        // subscription will keep currentItem in sync (though
+        // the explicit assignment below is the more direct
+        // path for this code path).
+        queueStore.setCurrentIndex(index)
         currentItem = item
         
         // Perform crossfade
@@ -1874,20 +1938,22 @@ class PlayerState: ObservableObject {
     private func advanceGaplessState() {
         guard let queuePlayer = player as? AVQueuePlayer else { return }
         guard let nowPlaying = queuePlayer.currentItem,
-              let matchIdx = queue.firstIndex(where: { $0.track.videoId == trackIdentifier(for: nowPlaying) }) else {
+              let matchIdx = queueStore.items.firstIndex(where: { $0.track.videoId == trackIdentifier(for: nowPlaying) }) else {
             return
         }
-        currentIndex = matchIdx
-        if matchIdx < queue.count {
-            currentItem = queue[matchIdx]
-            dataManager.addToRecentlyPlayed(currentItem!.track)
+        // S17-G: set currentIndex via the store. The mirror
+        // subscription will keep currentItem in sync.
+        queueStore.setCurrentIndex(matchIdx)
+        if matchIdx < queueStore.items.count {
+            let item = queueStore.items[matchIdx]
+            currentItem = item
+            dataManager.addToRecentlyPlayed(item.track)
             NotificationCenter.default.post(name: .trackPlayed, object: nil)
             // S11 fix (Bug 2): refresh Lock Screen / Control Center
             // immediately on gapless auto-advance. Without this the
             // system Now Playing kept showing the previous track
             // until the next duration-publisher tick (1-3s for HTTP
             // streams).
-            let item = queue[matchIdx]
             NowPlayingService.shared.updateNowPlaying(
                 track: item.track,
                 duration: Double(item.track.durationSeconds),
@@ -1987,18 +2053,27 @@ class PlayerState: ObservableObject {
 
             if currentIndex < queue.count - 1 {
                 let current = queue[currentIndex]
-                var remaining = Array(queue[(currentIndex + 1)...])
+                let remaining = Array(queue[(currentIndex + 1)...])
                 // Partition: fresh first, recent last
                 let fresh = remaining.filter { !recentVideoIds.contains($0.track.videoId) }
                 let recent = remaining.filter { recentVideoIds.contains($0.track.videoId) }
                 print("🔀 Smart shuffle: \(fresh.count) fresh + \(recent.count) recent (last 50 played)")
-                queue = Array(queue[...currentIndex]) + fresh.shuffled() + recent.shuffled()
+                // S17-G: replace via the store. The mirror subscription
+                // updates `currentItem` from the store's new items +
+                // currentIndex (which we set below).
+                let newQueue = Array(queue[...currentIndex]) + fresh.shuffled() + recent.shuffled()
+                queueStore.replace(with: newQueue)
+                queueStore.setCurrentIndex(currentIndex)
             }
         } else {
             // Restore original order
             if let current = currentItem {
-                queue = originalQueue
-                currentIndex = queue.firstIndex(where: { $0.track.videoId == current.track.videoId }) ?? 0
+                // S17-G: replace via the store. Find the current item
+                // in the original queue and set the store's index.
+                queueStore.replace(with: originalQueue)
+                if let newIndex = originalQueue.firstIndex(where: { $0.track.videoId == current.track.videoId }) {
+                    queueStore.setCurrentIndex(newIndex)
+                }
             }
         }
     }

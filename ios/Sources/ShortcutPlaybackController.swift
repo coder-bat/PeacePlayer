@@ -242,8 +242,11 @@ final class ShortcutPlaybackController {
                         ErrorHandler.shared.show(.unknown("Loaded \(items.count) of \(orderedTracks.count) tracks — \(missing) unavailable."))
                     }
 
-                    playerState.queue = items
-                    playerState.currentIndex = 0
+                    // S17-G: queue is now a computed property
+                    // backed by QueueStore. Replace via the store
+                    // and set the index the same way.
+                    playerState.queueStore.replace(with: items)
+                    playerState.queueStore.setCurrentIndex(0)
                     playerState.playQueue(at: 0)
                     playerState.showFullPlayer = true
                 }
