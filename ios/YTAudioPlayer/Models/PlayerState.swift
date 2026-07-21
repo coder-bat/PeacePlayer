@@ -505,12 +505,32 @@ class PlayerState: ObservableObject {
     
     // MARK: - Queue Restoration
 
+    /// S17-H (perf 10 P1-F5): tracks whether the user has touched
+    /// playback before `restoreQueue` completed. The restore fires
+    /// N HTTP calls in parallel (PlaybackQueueManager.restoreQueue),
+    /// which on a large saved queue can take several seconds. The
+    /// previous code unconditionally overwrote whatever the user
+    /// did in that window — so tapping a track first and then
+    /// having the saved queue clobber it was a real bug, not just
+    /// a perf issue.
+    private var hasUserTouchedPlayback = false
+
     private func restoreQueue() {
         // Use PlaybackQueueManager to restore queue with fresh stream URLs
         PlaybackQueueManager.shared.restoreQueue { [weak self] items in
             guard let self = self, !items.isEmpty else { return }
 
             DispatchQueue.main.async {
+                // S17-H (P1-F5): if the user has already started
+                // playing, the restore would clobber their choice.
+                // Skip the restore in that case — the saved queue
+                // is "stale" by definition once the user has made
+                // a decision.
+                if self.hasUserTouchedPlayback {
+                    print("📱 Skipping queue restore — user has already started playing")
+                    return
+                }
+
                 // S17-G: forward to the store. The store handles
                 // the index clamping via setCurrentIndex.
                 self.queueStore.replace(with: items)
@@ -530,6 +550,15 @@ class PlayerState: ObservableObject {
                 }
             }
         }
+    }
+
+    /// S17-H (P1-F5): called by any user-initiated playback entry
+    /// point (play track, play queue at index, add to queue, add
+    /// to queue next, restore-and-resume). Marks the queue as
+    /// "user has decided" so a still-in-flight restoreQueue won't
+    /// clobber it.
+    private func markUserTouchedPlayback() {
+        hasUserTouchedPlayback = true
     }
 
     // S11 fix (Bug 16): removed dead `restorePlaybackState()` method.
@@ -619,6 +648,9 @@ class PlayerState: ObservableObject {
 
     /// Play a track with local file check (plays local file if available, otherwise streams)
     func play(track: Track) {
+        // S17-H (P1-F5): mark the queue as user-touched so an
+        // in-flight restoreQueue won't clobber the user's choice.
+        markUserTouchedPlayback()
         #if DEBUG
         PlayCrashDiagnostics.log(.playback, "play(track:) ENTRY videoId=\(track.videoId) title=\(track.title) currentItem.videoId=\(currentItem?.track.videoId ?? "nil") playbackState=\(playbackState)")
         #endif
@@ -1042,6 +1074,8 @@ class PlayerState: ObservableObject {
     }
     
     func playQueue(at index: Int, isCrossfadeFallback: Bool = false) {
+        // S17-H (P1-F5): see play(track:).
+        markUserTouchedPlayback()
         // S11: log every entry so we can verify the play-from-queue path
         // was reached (especially after autoplay-from-recently-played).
         print("▶️ [S11] playQueue ENTRY index=\(index) queue.count=\(queue.count) currentIndex=\(currentIndex) isCrossfadeFallback=\(isCrossfadeFallback)")
@@ -1557,6 +1591,8 @@ class PlayerState: ObservableObject {
     // MARK: - Queue Management
 
     func addToQueue(_ item: QueueItem) {
+        // S17-H (P1-F5): see play(track:).
+        markUserTouchedPlayback()
         // S17-G: forward to the store. Dedup + trim happen inside
         // the store. The store fires its own objectWillChange; only
         // views observing the store re-render.
@@ -1565,6 +1601,8 @@ class PlayerState: ObservableObject {
     }
 
     func addToQueueNext(_ item: QueueItem) {
+        // S17-H (P1-F5): see play(track:).
+        markUserTouchedPlayback()
         // S17-G: forward to the store. The store handles dedup
         // and trims to maxQueueSize.
         queueStore.addNext(item, maxQueueSize: maxQueueSize)
