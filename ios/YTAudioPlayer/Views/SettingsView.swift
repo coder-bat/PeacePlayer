@@ -40,6 +40,11 @@ struct SettingsView: View {
         case testing
         case ok(latencyMs: Int)
         case error(String)
+
+        var isTesting: Bool {
+            if case .testing = self { return true }
+            return false
+        }
     }
 
     /// One-line status for the EQ row in the Audio section.
@@ -522,6 +527,31 @@ struct SettingsView: View {
                         }
                     }
                     .listRowBackground(Theme.cyberSurface)
+
+                    // S17-H (round 6): wire the "Test connection"
+                    // button into the view. The function
+                    // `runConnectionTest()` and computed
+                    // `connectionTestButtonTitle` were already
+                    // defined since S17-B but the actual Button
+                    // view was never added to the body. This
+                    // makes the helper accessible from the UI
+                    // for the first time. Pings the current
+                    // `APIService.shared.baseURL + "/health"` with
+                    // a 5s timeout (no auth) and shows the
+                    // latency / error inline.
+                    Button {
+                        runConnectionTest()
+                    } label: {
+                        HStack {
+                            Image(systemName: connectionTest.isTesting ? "hourglass" : "wifi")
+                                .foregroundColor(Theme.cyberCyan)
+                            Text(connectionTestButtonTitle)
+                                .foregroundColor(.white)
+                                .font(.system(size: 14, weight: .medium))
+                        }
+                    }
+                    .listRowBackground(Theme.cyberSurface)
+                    .disabled(connectionTest.isTesting)
                 } header: {
                     Text("Backend")
                         .font(Typography.sectionHeader)
