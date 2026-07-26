@@ -165,6 +165,16 @@ class StreamURLCache {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.timeoutInterval = 5
+        // S17-H follow-up: /prefetch requires `require_session_user` on
+        // the backend (same auth as /search and /library). Without the
+        // Authorization header the call was a silent 401 — the user
+        // would never know, but the cache would never warm and the
+        // first play after a cold start would have to pay the full
+        // yt-dlp extraction cost. Use the central APIService.addAuthHeader
+        // helper so the Bearer-token construction is in one place (reads
+        // the session token from the keychain under
+        // "peaceplayer.session_token").
+        APIService.addAuthHeader(to: &request)
 
         URLSession.shared.dataTask(with: request) { _, response, _ in
             if let http = response as? HTTPURLResponse {
