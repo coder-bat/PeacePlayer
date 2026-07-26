@@ -165,6 +165,11 @@ struct SearchView: View {
         // 2026-06-28 (S7): zero out the default List top inset so the
         // filter chips sit immediately under the search input with
         // no gap.
+        // 2026-07-26 (S17-H follow-up): user asked for breathing room
+        // above the chips (gap from the search bar) and below them
+        // (so the default row separator doesn't visually touch the
+        // chip capsules). 10pt top / 10pt bottom feels right with
+        // the existing 12pt section spacing for the rest of the list.
         List {
             // Filter Chips
             Section {
@@ -184,7 +189,7 @@ struct SearchView: View {
                     }
                     .padding(.horizontal, 4)
                 }
-                .listRowInsets(EdgeInsets())
+                .listRowInsets(EdgeInsets(top: 10, leading: 0, bottom: 10, trailing: 0))
                 .listRowBackground(Color.clear)
             }
 
