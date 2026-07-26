@@ -257,7 +257,30 @@ class UnifiedLibraryViewModel: ObservableObject {
                         matchedIds!.formIntersection(intersected)
                     }
                 }
-                let ids = matchedIds ?? []
+                var ids = matchedIds ?? []
+
+                // S17-H follow-up (2026-07-26): substring fallback
+                // for the strict-index blind spot. Same rationale as
+                // `LibraryViewModel.filteredTracks` — the backend
+                // has full fuzzy search, the on-device index is
+                // strict, so when the index comes back empty, scan
+                // the source-filtered set with `.contains(query)`.
+                // Scoped to `filtered` (already source-filtered)
+                // and the lowercased query, so it's the same O(n)
+                // cost as the index's worst case.
+                if ids.isEmpty {
+                    let lowerQuery = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                    ids = Set(
+                        filtered
+                            .filter { track in
+                                track.title.lowercased().contains(lowerQuery) ||
+                                track.artist.lowercased().contains(lowerQuery) ||
+                                (track.album?.lowercased().contains(lowerQuery) ?? false)
+                            }
+                            .map { $0.id }
+                    )
+                }
+
                 // Resolve IDs to items via the lookup map.
                 filtered = ids.compactMap { _tracksById[$0] }
                 // Order by current sort option below.
@@ -318,10 +341,31 @@ class UnifiedLibraryViewModel: ObservableObject {
         _tracksById = byId
     }
 
-    /// Tokenize a string into lowercased non-empty tokens.
+    /// Strip characters that should never anchor a token — leading
+    /// and trailing apostrophes (straight ' and typographic ' / ʼ)
+    /// and backticks. Without this, the title `"Wavin' Flag"` indexes
+    /// under `"wavin'"` (with the apostrophe), so a user query
+    /// `"waving flag"` tokenizes to `["waving", "flag"]` and the
+    /// index lookup for `"waving"` returns nil. Same fix as
+    /// `LibraryViewModel.tokenize` — keep the two helpers in sync.
+    private static let tokenTrimChars: Set<Character> = ["'", "\u{2019}", "\u{02BC}", "`"]
+
+    /// Tokenize a string into lowercased non-empty tokens. Strips
+    /// leading/trailing apostrophes and backticks; the substring
+    /// fallback in `applyFilters` handles stem-vs-lemma differences
+    /// (e.g. "waving" vs "wavin") that strict equality misses.
     private func tokenize(_ s: String) -> [String] {
         s.components(separatedBy: .whitespacesAndNewlines)
-            .map { $0.lowercased() }
+            .map { token -> String in
+                var t = token.lowercased()
+                while let last = t.last, Self.tokenTrimChars.contains(last) {
+                    t.removeLast()
+                }
+                while let first = t.first, Self.tokenTrimChars.contains(first) {
+                    t.removeFirst()
+                }
+                return t
+            }
             .filter { !$0.isEmpty }
     }
 

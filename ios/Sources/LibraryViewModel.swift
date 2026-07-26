@@ -157,7 +157,32 @@ class LibraryViewModel: ObservableObject {
                         matches!.formIntersection(tokenMatches)
                     }
                 }
-                let matchedIds = matches ?? []
+                var matchedIds = matches ?? []
+
+                // S17-H follow-up (2026-07-26): substring fallback.
+                // The strict index can still miss legitimate
+                // matches the backend would catch — for example, a
+                // user searching "waving" against a local copy of
+                // "Wavin' Flag" is now tokenized to "wavin" / "waving"
+                // (apostrophe stripped at both ends), but "wavin"
+                // ≠ "waving" as a literal index key, so the strict
+                // intersection comes back empty. The YT Music
+                // backend has full fuzzy search; on device, when
+                // the index returns nothing, do a linear scan of
+                // the full text. O(n), but only runs as a last
+                // resort so the common case stays at the
+                // index's O(query_tokens × matches) cost.
+                if matchedIds.isEmpty {
+                    matchedIds = Set(
+                        sortedTracks
+                            .filter { track in
+                                let combined = "\(track.title) \(track.artist) \(track.album)".lowercased()
+                                return combined.contains(query)
+                            }
+                            .map { $0.id }
+                    )
+                }
+
                 // Resolve IDs to items in the cached sort order
                 // so the search results match the unfiltered list
                 // order. firstIndex(of:) on `[String]` is O(n), but
@@ -175,10 +200,35 @@ class LibraryViewModel: ObservableObject {
 
     // MARK: - Search index
 
+    /// Strip characters that should never anchor a token — leading
+    /// and trailing apostrophes (straight ' and typographic ' / ʼ)
+    /// and backticks. Without this, the title `"Wavin' Flag"` indexes
+    /// under `"wavin'"` (with the apostrophe), so a user query
+    /// `"waving flag"` tokenizes to `["waving", "flag"]` and the
+    /// index lookup for `"waving"` returns nil. The user sees
+    /// "0 TRACKS" with no error — exactly the bug from the
+    /// 2026-07-26 search report.
+    private static let tokenTrimChars: Set<Character> = ["'", "\u{2019}", "\u{02BC}", "`"]
+
     /// Tokenize a string into lowercased non-empty tokens.
+    /// Strips leading/trailing apostrophes and backticks from each
+    /// token so punctuation-only differences ("wavin'" vs "waving")
+    /// don't fragment the index. Diacritics, internal punctuation,
+    /// and stem-vs-lemma differences (e.g. "waving" vs "wavin")
+    /// are handled by the substring fallback in `filteredTracks`,
+    /// not here.
     private func tokenize(_ s: String) -> [String] {
         s.components(separatedBy: .whitespacesAndNewlines)
-            .map { $0.lowercased() }
+            .map { token -> String in
+                var t = token.lowercased()
+                while let last = t.last, Self.tokenTrimChars.contains(last) {
+                    t.removeLast()
+                }
+                while let first = t.first, Self.tokenTrimChars.contains(first) {
+                    t.removeFirst()
+                }
+                return t
+            }
             .filter { !$0.isEmpty }
     }
 

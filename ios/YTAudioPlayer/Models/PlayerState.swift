@@ -933,6 +933,19 @@ class PlayerState: ObservableObject {
         #endif
         // playbackState stays .loading; observer will flip to .playing when ready.
 
+        // S17-H (P1-FF6 follow-up 2026-07-26): safety timeout.
+        // The status + isPlaybackLikelyToKeepUp observers in
+        // `setupPlayerObservers` should flip `playbackState` to
+        // `.playing` once the AVPlayerItem reports ready / buffered.
+        // If neither fires within 15s, the player is stuck
+        // (typically: stream URL is unreachable, the audio session
+        // failed to reactivate, or the rate-0 race put the player in
+        // a weird state). The previous behavior was to spin the
+        // loading icon forever with no error — exactly the user
+        // report. Now we surface a real error with a retry so the
+        // user can recover without killing the app.
+        scheduleLoadingStateTimeout(after: 15.0, for: item)
+
         print("🔊 Auto-populating queue...")
         QueuePrefetcher.shared.autoPopulateQueue(startingFrom: item.track)
         #if DEBUG
@@ -982,6 +995,49 @@ class PlayerState: ObservableObject {
         #if DEBUG
         PlayCrashDiagnostics.log(.playback, "play(item:) EXIT videoId=\(item.track.videoId)")
         #endif
+    }
+
+    // MARK: - Loading state timeout (S17-H follow-up 2026-07-26)
+
+    /// Safety net for the "tapped a track and the loading icon
+    /// spins forever" symptom. The status / isPlaybackLikelyToKeepUp
+    /// observers in `setupPlayerObservers` should transition
+    /// `playbackState` to `.playing` once the AVPlayerItem reports
+    /// ready / buffered. If they don't fire within `seconds`, the
+    /// player is stuck — typically because:
+    ///   - the stream URL is unreachable (Mac asleep, Tailscale
+    ///     changed, baseURL override stale)
+    ///   - the audio session failed to reactivate and was caught
+    ///     silently
+    ///   - some other AVPlayerItem init failure that the KVO
+    ///     observers didn't surface
+    /// We surface a real error with retry so the user can recover
+    /// without killing the app.
+    private var loadingTimeoutWorkItem: DispatchWorkItem?
+
+    private func scheduleLoadingStateTimeout(after seconds: TimeInterval, for item: QueueItem) {
+        loadingTimeoutWorkItem?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self = self else { return }
+            // Only fire if we're still in a loading state for the
+            // same track. If the player already started playing
+            // (or the user already moved on), the timeout is a
+            // no-op.
+            guard self.playbackState.isLoading,
+                  self.currentItem?.track.videoId == item.track.videoId else {
+                return
+            }
+            print("⏰ [S17-H] Loading-state timeout reached for \(item.track.title) — surfacing error")
+            self.playbackState = .error("Playback didn't start")
+            ErrorHandler.shared.show(
+                .playbackFailed("\"\(item.track.title)\" didn't start playing. The stream may be unreachable — check that your Mac is awake and on the same network, then try again."),
+                retry: { [weak self] in
+                    self?.play(item: item, addToQueue: false)
+                }
+            )
+        }
+        loadingTimeoutWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds, execute: work)
     }
 
     // MARK: - Adaptive Quality Switching
@@ -1342,6 +1398,12 @@ class PlayerState: ObservableObject {
     }
 
     func stop() {
+        // S17-H follow-up: cancel the loading-state timeout (if any)
+        // before tearing down. Otherwise a 15s timer could fire after
+        // the player is already gone and surface a spurious error.
+        loadingTimeoutWorkItem?.cancel()
+        loadingTimeoutWorkItem = nil
+
         player?.pause()
         player?.replaceCurrentItem(with: nil)
         removeTimeObserver()
@@ -2229,6 +2291,9 @@ class PlayerState: ObservableObject {
                 case .readyToPlay:
                     print("✅ Player item ready to play")
                     self?.retryCount = 0  // Reset retry count on success
+                    // S17-H follow-up: clear the loading-state timeout —
+                    // the player reached ready before the 15s safety net.
+                    self?.loadingTimeoutWorkItem?.cancel()
                     // Defer showing .playing until audio is actually ready.
                     if self?.playbackState == .loading {
                         self?.playbackState = .playing
@@ -2364,6 +2429,9 @@ class PlayerState: ObservableObject {
                 guard let self = self else { return }
                 print("🔊 isPlaybackLikelyToKeepUp: \(isLikelyToKeepUp)")
                 if isLikelyToKeepUp {
+                    // S17-H follow-up: clear the loading-state timeout
+                    // — the player buffered enough before the 15s safety net.
+                    self.loadingTimeoutWorkItem?.cancel()
                     if self.isPlaybackStalled {
                         self.isPlaybackStalled = false
                         print("🔄 Recovery from stall: resuming playback")
