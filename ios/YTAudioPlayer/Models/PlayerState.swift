@@ -656,6 +656,68 @@ class PlayerState: ObservableObject {
         }
     }
 
+    /// S17-H: turn an AVPlayer / NSURLError into a one-line
+    /// human-readable description for the playback-failed toast.
+    /// Without this the toast said "Couldn't play this track after
+    /// multiple attempts" for every kind of failure, and the user
+    /// couldn't tell a transient timeout from a 500 from a 401
+    /// from "track not streamable". The most common domains /
+    /// codes are mapped to plain English; everything else falls
+    /// through to the localized description.
+    private static func describeAVPlayerError(_ error: NSError) -> String {
+        let domain = error.domain
+        let code = error.code
+
+        // NSURLErrorDomain: iOS networking layer
+        if domain == NSURLErrorDomain {
+            switch code {
+            case NSURLErrorTimedOut:           return "network timed out"
+            case NSURLErrorCannotFindHost:     return "can't find backend"
+            case NSURLErrorCannotConnectToHost:return "can't reach backend"
+            case NSURLErrorNetworkConnectionLost: return "network connection lost"
+            case NSURLErrorNotConnectedToInternet: return "no internet"
+            case NSURLErrorBadServerResponse:  return "backend returned bad response"
+            case NSURLErrorCannotDecodeRawData:return "can't decode audio data"
+            case NSURLErrorAppTransportSecurityRequiresSecureConnection:
+                return "backend requires HTTPS"
+            default:
+                return "network error \(code)"
+            }
+        }
+
+        // AVFoundationErrorDomain: AVPlayer / AVPlayerItem layer
+        if domain == AVFoundationErrorDomain {
+            switch code {
+            case AVError.unknown.rawValue:
+                return "AVPlayer unknown error"
+            case AVError.serverIncorrectlyConfigured.rawValue:
+                return "AVPlayer server misconfigured"
+            case AVError.formatUnsupported.rawValue:
+                return "audio format not supported"
+            case AVError.contentKeyRequestCancelled.rawValue:
+                return "track key request cancelled"
+            case AVError.operationNotSupportedForAsset.rawValue:
+                return "operation not supported for this track"
+            default:
+                return "AVPlayer error \(code)"
+            }
+        }
+
+        // NSOSStatusErrorDomain: low-level CoreAudio / HTTP errors
+        if domain == NSOSStatusErrorDomain {
+            return "system audio error \(code)"
+        }
+
+        // Fall back to the localized description (AVPlayer often
+        // provides a useful one like "The operation couldn't be
+        // completed" with extra in userInfo).
+        let localized = error.localizedDescription
+        if !localized.isEmpty && localized != "The operation couldn't be completed." {
+            return "\(domain) \(code): \(localized)"
+        }
+        return "\(domain) \(code)"
+    }
+
     private func beginTrackTransitionBackgroundTask() {
         endTrackTransitionBackgroundTask()
         trackTransitionBackgroundTask = UIApplication.shared.beginBackgroundTask(withName: "com.peaceplayer.trackTransition") { [weak self] in
@@ -2318,9 +2380,21 @@ class PlayerState: ObservableObject {
                             // chance to read the message and tap retry. The
                             // original 1.0s skip was too short to even see
                             // the error in the previous silent flow.
-                            self?.playbackState = .error("Playback failed, skipping...")
+                            //
+                            // S17-H follow-up: include the underlying
+                            // AVPlayer error details so the user can tell
+                            // "network timed out" from "track not
+                            // streamable" from "backend 500". The previous
+                            // generic "Couldn't play this track after
+                            // multiple attempts" hid the actual cause —
+                            // particularly the recent S17-H bug where
+                            // the AsyncClient closed mid-stream and
+                            // surfaced as a generic AVPlayer failure.
+                            let nsError = self?.player?.currentItem?.error as NSError?
+                            let detail = nsError.map { Self.describeAVPlayerError($0) } ?? "unknown error"
+                            self?.playbackState = .error("Playback failed: \(detail)")
                             ErrorHandler.shared.show(
-                                .playbackFailed("Couldn't play this track after multiple attempts. Skipping to the next one."),
+                                .playbackFailed("Couldn't play this track (\(detail)). Skipping to the next one."),
                                 retry: { [weak self] in
                                     self?.refreshAndPlayCurrentItem()
                                 }
