@@ -14,6 +14,17 @@ struct SettingsView: View {
     // APIService.baseURLOverrideDefaultsKey and read on the
     // next launch (or immediately on save).
     @State private var serverHostDraft: String = UserDefaults.standard.string(forKey: APIService.baseURLOverrideDefaultsKey) ?? ""
+    // S17-H (round 5): tick that increments on Save so the
+    // "Backend Host" display (Text(APIService.shared.baseURL))
+    // re-renders. Without this, SwiftUI doesn't know to redraw the
+    // display when UserDefaults is mutated by the Save button —
+    // the @State `serverHostDraft` only drives the TextField below
+    // it, not the read-only display above. Result: user sees the
+    // old value in the display, assumes the Save was a no-op, taps
+    // Save again. The tick + an .id() modifier here forces a
+    // re-render and the display reflects the new override
+    // immediately.
+    @State private var savedTick: Int = 0
     // S17 (CV-4): "Test connection" button state. .idle = no
     // test yet, .testing = request in flight, .ok = 200 with
     // latency, .error = non-200 or transport failure. The Task
@@ -455,6 +466,11 @@ struct SettingsView: View {
                             .foregroundColor(Theme.cyberCyan.opacity(0.8))
                             .lineLimit(1)
                             .truncationMode(.middle)
+                            // S17-H: force re-render when savedTick bumps so
+                            // the display reflects the new override
+                            // immediately. .id() rebuilds the view when
+                            // its argument changes.
+                            .id("backend-host-display-\(savedTick)")
                     }
                     .listRowBackground(Theme.cyberSurface)
 
@@ -489,6 +505,13 @@ struct SettingsView: View {
                         } else {
                             UserDefaults.standard.set(trimmed, forKey: APIService.baseURLOverrideDefaultsKey)
                         }
+                        // S17-H: bump the tick so the read-only
+                        // "Backend Host" display at line 453 re-renders
+                        // and reflects the new value (it reads from
+                        // APIService.shared.baseURL on every body
+                        // evaluation; .id() ensures SwiftUI
+                        // actually re-evaluates the body).
+                        savedTick &+= 1
                         HapticManager.success()
                     } label: {
                         HStack {
