@@ -717,6 +717,33 @@ async def stream_audio(video_id: str, request: Request, user: dict = Depends(req
             if not stream_data or not stream_data.get('audio_formats'):
                 raise HTTPException(status_code=404, detail="No audio stream found")
 
+            # S17-H (2026-07-27): yt-dlp returns formats in a
+            # specific order, but it's not consistent across
+            # videos — for some the first format is webm/Opus
+            # (itag 251/249, plays fine in AVPlayer on iOS 17),
+            # for others it's m4a/AAC but the actual file is a
+            # DASH manifest (ftyp dash), not a regular audio MP4.
+            # AVPlayer rejects the DASH m4a with
+            # AVError.fileFormatNotRecognized (-11828) — it can't
+            # play DASH files directly. Pick webm/Opus first,
+            # fall back to m4a only if webm is unavailable.
+            formats = stream_data.get('audio_formats', [])
+            webm = [f for f in formats if f.get('mime_type') == 'webm']
+            m4a = [f for f in formats if f.get('mime_type') in ('m4a', 'audio/mp4')]
+            if webm:
+                # Sort webm by bitrate (ascending) — pick the
+                # smallest one (itag 249) for fast start.
+                webm.sort(key=lambda f: f.get('bitrate', 0))
+                best = webm[0]
+            elif m4a:
+                # No webm available; use m4a. Some m4a URLs are
+                # regular audio, some are DASH — try it and let
+                # AVPlayer surface the error if DASH.
+                m4a.sort(key=lambda f: f.get('bitrate', 0))
+                best = m4a[0]
+            else:
+                best = formats[0]
+            stream_data['audio_formats'] = [best] + [f for f in formats if f is not best]
             # Cache the stream data
             cache.set(video_id, stream_data)
 

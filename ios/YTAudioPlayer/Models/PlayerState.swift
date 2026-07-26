@@ -656,6 +656,25 @@ class PlayerState: ObservableObject {
         }
     }
 
+    /// S17-H follow-up: shared helper for the AVFoundation case
+    /// arms. Pulls the userInfo bits that AVPlayer actually
+    /// populates (NSLocalizedDescription, NSUnderlyingError) and
+    /// returns a short joined string for the toast. Kept separate
+    /// from `describeAVPlayerError` so every AVFoundation case
+    /// (known and unknown) can surface the same diagnostic detail.
+    private static func describeAVPlayerUserInfo(_ error: NSError) -> String {
+        let desc = error.userInfo[NSLocalizedDescriptionKey] as? String
+        let underlying = (error.userInfo[NSUnderlyingErrorKey] as? NSError).map { "\($0.domain) \($0.code)" }
+        var parts: [String] = []
+        if let d = desc, !d.isEmpty, d != "The operation couldn't be completed." {
+            parts.append(d)
+        }
+        if let u = underlying {
+            parts.append("underlying: \(u)")
+        }
+        return parts.isEmpty ? "no detail" : parts.joined(separator: " · ")
+    }
+
     /// S17-H: turn an AVPlayer / NSURLError into a one-line
     /// human-readable description for the playback-failed toast.
     /// Without this the toast said "Couldn't play this track after
@@ -713,6 +732,15 @@ class PlayerState: ObservableObject {
                     return "AVPlayer unknown error -11829"
                 }
                 return "AVPlayer: " + parts.joined(separator: " · ")
+            case AVError.fileFormatNotRecognized.rawValue:
+                // -11828: AVPlayer can't decode the audio file
+                // format. With YouTube this typically means the
+                // m4a URL we handed back is actually a DASH
+                // manifest (ftyp dash) rather than regular audio
+                // MP4. The backend's /stream now prefers webm/Opus
+                // to avoid this; if it still happens, fall through
+                // to userInfo for the actual NSLocalizedDescription.
+                return "format not supported by iOS: " + Self.describeAVPlayerUserInfo(error)
             case AVError.serverIncorrectlyConfigured.rawValue:
                 return "AVPlayer server misconfigured"
             case AVError.formatUnsupported.rawValue:
@@ -722,7 +750,10 @@ class PlayerState: ObservableObject {
             case AVError.operationNotSupportedForAsset.rawValue:
                 return "operation not supported for this track"
             default:
-                return "AVPlayer error \(code)"
+                // Any other AVFoundation error — include userInfo
+                // so the user (and us) can see what AVPlayer
+                // actually said instead of just the code.
+                return "AVPlayer \(code): " + Self.describeAVPlayerUserInfo(error)
             }
         }
 
