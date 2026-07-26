@@ -723,7 +723,7 @@ async def stream_audio(video_id: str, request: Request, user: dict = Depends(req
 # Proxy stream endpoint - streams through backend to avoid IP issues
 @app.api_route("/proxy-stream/{video_id:path}", methods=["GET", "HEAD"])
 @limiter.limit("20/minute")
-async def proxy_stream_audio(video_id: str, request: Request, quality: str = "high", user: dict = Depends(require_session_user),):
+async def proxy_stream_audio(video_id: str, request: Request, quality: str = "high"):
     """
     Proxy stream audio through backend.
     This avoids IP-mismatch issues between backend and iOS client.
@@ -731,7 +731,32 @@ async def proxy_stream_audio(video_id: str, request: Request, quality: str = "hi
 
     Query params:
         quality: "low" for fast start (70kbps), "high" for best quality (160kbps)
+        token:   session JWT — only used as a fallback when the
+                 Authorization header is missing. AVPlayer (a
+                 system component, not URLSession) opens the stream
+                 URL directly and cannot add the iOS app's auth
+                 header, so the iOS code passes the token via
+                 ?token=... instead. See
+                 ios/Sources/APIService.swift#getStreamUrl for the
+                 counterpart.
     """
+    # S17-H follow-up: AVPlayer can't add the iOS app's Bearer
+    # token to its GET request, so every play was 401-ing and
+    # bubbling up as "Couldn't play this track after multiple
+    # attempts. Skipping to the next one." — the audio never
+    # started. Accept the token from the Authorization header
+    # first (the secure path), and fall back to the ?token=
+    # query param for AVPlayer-initiated requests. The query
+    # path is intentionally scoped to this endpoint so the
+    # token doesn't leak into /search / /library / etc. URLs.
+    auth_header = request.headers.get("Authorization")
+    if not auth_header:
+        query_token = request.query_params.get("token")
+        if query_token:
+            auth_header = f"Bearer {query_token}"
+    user = current_user_from_request(auth_header)
+    if not user:
+        raise HTTPException(status_code=401, detail="unauthorized")
 
     # Determine preferred format from extension
     prefer_m4a = video_id.endswith('.m4a')

@@ -296,7 +296,24 @@ class APIService {
             return Fail(error: APIError.invalidURL).eraseToAnyPublisher()
         }
 
-        urlComponents.queryItems = [URLQueryItem(name: "quality", value: quality)]
+        // S17-H follow-up: AVPlayer is a system component, not
+        // URLSession — it cannot add the iOS app's Bearer token to
+        // its GET, so /proxy-stream was 401-ing and the user saw
+        // "Couldn't play this track after multiple attempts. Skipping
+        // to the next one." for every track. The backend now accepts
+        // the session JWT via ?token=... as a fallback to the
+        // Authorization header. We append it here. The token only
+        // shows up in the stream URL, not in /search / /library /
+        // etc., and the same keychain entry (peaceplayer.session_token)
+        // that URLSession uses is the source. If the user signs out,
+        // APIService.baseURL's per-request re-read of the keychain
+        // means the next play after re-auth picks up the new token.
+        var queryItems: [URLQueryItem] = [URLQueryItem(name: "quality", value: quality)]
+        if let token = KeychainHelper.shared.read(APIService.authTokenKeychainKey),
+           !token.isEmpty {
+            queryItems.append(URLQueryItem(name: "token", value: token))
+        }
+        urlComponents.queryItems = queryItems
 
         guard let url = urlComponents.url else {
             return Fail(error: APIError.invalidURL).eraseToAnyPublisher()
