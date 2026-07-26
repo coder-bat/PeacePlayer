@@ -166,6 +166,14 @@ class APIService {
     }
 
     func search(query: String, limit: Int = 20) -> AnyPublisher<[Track], APIError> {
+        // S17-H diagnostic: log the URL + baseURL being used so we
+        // can spot a stale Tailscale IP override (the previous fix
+        // for "couldn't process data" added the response body log
+        // inside the 200 branch; the URL here is the request-side
+        // counterpart).
+        let baseURLString = APIService.shared.baseURL
+        print("🔍 [APIService] search starting — baseURL=\(baseURLString) query=\(query) limit=\(limit)")
+
         guard let url = URL(string: "\(baseURL)/search") else {
             return Fail(error: APIError.invalidURL).eraseToAnyPublisher()
         }
@@ -203,6 +211,18 @@ class APIService {
                             .eraseToAnyPublisher()
                     }
                     return Fail(error: APIError.httpError(statusCode: httpResponse.statusCode, message: body)).eraseToAnyPublisher()
+                }
+                // S17-H diagnostic: log the response body when a
+                // successful 200 still fails to decode. The user
+                // reported "couldn't process data" (the .parsing
+                // error) which means we got a 200 but the JSON
+                // didn't match [Track]. Logging the body + URL lets
+                // us see whether the response is an empty array, a
+                // single object, HTML, or something else entirely
+                // (e.g., a proxy interception page from a stale
+                // Tailscale IP).
+                if let preview = String(data: data.prefix(500), encoding: .utf8) {
+                    print("🔍 [APIService] search 200 body (\(data.count) bytes): \(preview)")
                 }
                 return Just(data).setFailureType(to: APIError.self).eraseToAnyPublisher()
             }
