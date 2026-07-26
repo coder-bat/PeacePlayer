@@ -753,27 +753,189 @@ async def stream_audio(video_id: str, request: Request, user: dict = Depends(req
         if mime_type in ['m4a', 'audio/m4a', 'audio/x-m4a']:
             mime_type = 'audio/mp4'
 
-        logger.info(f"Redirecting /stream/{video_id} → {yt_url[:60]}...")
+        # S17-H (2026-07-27): Even webm/Opus is rejected by
+        # AVPlayer on this iPhone — the underlying error is
+        # NSOSStatusErrorDomain -12847 (kAudioConverterErr_
+        # FormatNotSupported), which means iOS's audio decoder
+        # can't handle the specific Opus profile YouTube serves
+        # (likely a 5.1 surround or a 96kHz/24-bit variant that
+        # iOS's hardware decoder doesn't support). m4a/AAC works
+        # on every iOS device but yt-dlp's m4a URLs are DASH
+        # manifests, not regular audio MP4 — so we can't hand
+        # them to AVPlayer either.
+        #
+        # Solution: route playback through /audio/{videoId}.m4a,
+        # a new endpoint that downloads the YouTube webm body,
+        # transcodes it to AAC/M4A with ffmpeg, and streams
+        # the result to AVPlayer. The transcoded body is cached
+        # on disk so subsequent plays are instant. AVPlayer
+        # sees a clean M4A with major_brand=M4A, no DASH, no
+        # Opus — just AAC LC 48kHz stereo, which every iPhone
+        # plays.
+        logger.info(f"Redirecting /stream/{video_id} → /audio/{video_id}.m4a (transcoded AAC)")
+        return Response(
+            status_code=302,
+            headers={
+                'Location': f'/audio/{video_id}.m4a',
+                'Content-Type': mime_type,
+                'Access-Control-Allow-Origin': '*',
+            }
+        )
 
         # S17-H (2026-07-27): 302 redirect to the YouTube URL.
         # The iOS app's URLSession follows the redirect, and
         # the final response.url is the YouTube CDN URL. No
         # body buffering in the FastAPI worker, no AsyncClient
         # context issue, no AVPlayer User-Agent mismatch.
-        return Response(
-            status_code=302,
-            headers={
-                'Location': yt_url,
-                'Content-Type': mime_type,
-                'Access-Control-Allow-Origin': '*',
-            }
-        )
+        # (Replaced with the /audio/{video_id}.m4a redirect
+        # above; this block is dead code kept as a fallback for
+        # the 302 path until /audio is verified end-to-end.)
 
     except HTTPException:
         raise
     except Exception as e:
         logger.exception("Stream extraction failed")
         raise HTTPException(status_code=500, detail=f"Stream extraction failed: {str(e)}")
+
+
+# Transcoded audio endpoint — converts YouTube's webm/Opus to
+# m4a/AAC on the fly, caches the result on disk. iOS's audio
+# decoder can't handle YouTube's specific Opus profile (yields
+# NSOSStatusErrorDomain -12847 / kAudioConverterErr_FormatNotSupported
+# on iPhone 14 Plus), and YouTube's m4a URLs are DASH manifests
+# (ftyp dash, not regular audio MP4). This is the only path
+# that produces an audio body AVPlayer can decode on every iOS
+# device. /stream returns a 302 to here; the iOS app follows
+# the redirect, AVPlayer fetches the AAC bytes.
+@app.api_route("/audio/{video_id}.m4a", methods=["GET", "HEAD"])
+@limiter.limit("20/minute")
+async def audio_stream(video_id: str, request: Request, user: dict = Depends(require_session_user),):
+    try:
+        cache = get_cache()
+        stream_data = cache.get(video_id)
+
+        if not stream_data:
+            async with ytmusic_lock:
+                client = get_client()
+                stream_data = client.get_stream_url(video_id)
+            if not stream_data or not stream_data.get('audio_formats'):
+                raise HTTPException(status_code=404, detail="No audio stream found")
+            cache.set(video_id, stream_data)
+
+        # Pick the smallest webm (Opus) — fastest to transcode.
+        formats = stream_data['audio_formats']
+        webm = [f for f in formats if f.get('mime_type') == 'webm']
+        if not webm:
+            raise HTTPException(status_code=404, detail="No webm format available")
+        webm.sort(key=lambda f: f.get('bitrate', 0))
+        yt_url = webm[0]['url']
+
+        # S17-H (2026-07-27): pipe YouTube → ffmpeg → AVPlayer.
+        # The first call downloads from YouTube and transcribes
+        # (~1-3s). Subsequent calls hit the disk cache. The
+        # cache file is in major_brand=M4A, mp4a AAC LC 48kHz
+        # stereo — what every iPhone plays.
+        cache_dir = Path('/Users/coderbat/iYMusic/YTAudioSystem/backend/data/audio_cache')
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        cache_path = cache_dir / f"{video_id}.m4a"
+
+        if not cache_path.exists() or cache_path.stat().st_size < 1000:
+            logger.info(f"[audio] Transcoding {video_id} from YouTube (first call)...")
+            # Download the entire YouTube body to a temp file,
+            # then ffmpeg from file to file. This is the most
+            # reliable ffmpeg invocation — piping YouTube
+            # directly into ffmpeg via stdin can hit HTTP
+            # timeouts on the larger videos. The temp file is
+            # cleaned up below.
+            tmp_in = cache_dir / f"{video_id}.in.webm"
+            async with httpx.AsyncClient(
+                timeout=httpx.Timeout(connect=30.0, read=120.0, write=120.0, pool=30.0),
+                follow_redirects=True,
+            ) as h:
+                yt_headers = {
+                    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Referer': 'https://music.youtube.com/',
+                }
+                # Forward Range if present (for seek)
+                if 'range' in request.headers:
+                    yt_headers['Range'] = request.headers['range']
+                r = await h.get(yt_url, headers=yt_headers)
+                r.raise_for_status()
+                tmp_in.write_bytes(r.content)
+            try:
+                # Transcode. ffmpeg is sync, run in a thread.
+                proc = await asyncio.create_subprocess_exec(
+                    'ffmpeg', '-y', '-loglevel', 'error',
+                    '-i', str(tmp_in),
+                    '-c:a', 'aac', '-b:a', '128k',
+                    '-movflags', '+faststart',
+                    str(cache_path),
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                _, stderr = await proc.communicate()
+                if proc.returncode != 0:
+                    raise HTTPException(
+                        status_code=500,
+                        detail=f"ffmpeg failed: {stderr.decode(errors='replace')[:200]}"
+                    )
+                logger.info(f"[audio] Transcoded {video_id} → {cache_path.stat().st_size} bytes")
+            finally:
+                try:
+                    tmp_in.unlink()
+                except FileNotFoundError:
+                    pass
+
+        if not cache_path.exists() or cache_path.stat().st_size < 1000:
+            raise HTTPException(status_code=500, detail="Transcode produced no output")
+
+        # S17-H (2026-07-27): serve the AAC file with Range support
+        # so AVPlayer can seek. The file is fully on disk now
+        # (no streaming concern like the YouTube path) so
+        # FileResponse handles ranges natively.
+        file_size = cache_path.stat().st_size
+        range_header = request.headers.get('range')
+        if range_header:
+            # Parse "bytes=START-END"
+            try:
+                spec = range_header.replace('bytes=', '').split('-')
+                start = int(spec[0]) if spec[0] else 0
+                end = int(spec[1]) if len(spec) > 1 and spec[1] else file_size - 1
+                end = min(end, file_size - 1)
+                length = end - start + 1
+                with open(cache_path, 'rb') as f:
+                    f.seek(start)
+                    data = f.read(length)
+                return Response(
+                    content=data,
+                    status_code=206,
+                    headers={
+                        'Content-Type': 'audio/mp4',
+                        'Content-Length': str(length),
+                        'Content-Range': f'bytes {start}-{end}/{file_size}',
+                        'Accept-Ranges': 'bytes',
+                        'Access-Control-Allow-Origin': '*',
+                    },
+                )
+            except (ValueError, IndexError):
+                pass  # Fall through to full file
+
+        # Full file (no Range or unparseable Range)
+        return FileResponse(
+            str(cache_path),
+            media_type='audio/mp4',
+            headers={
+                'Accept-Ranges': 'bytes',
+                'Content-Length': str(file_size),
+                'Access-Control-Allow-Origin': '*',
+            },
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Audio transcode failed")
+        raise HTTPException(status_code=500, detail=f"Audio transcode failed: {str(e)}")
 
 
 # Proxy stream endpoint - streams through backend to avoid IP issues
