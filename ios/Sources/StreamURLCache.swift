@@ -87,16 +87,38 @@ class StreamURLCache {
         preferM4A: Bool = true,
         quality: String = "low"
     ) -> AnyPublisher<StreamInfo, APIError> {
-        let key = videoId as NSString
+        // S17-H follow-up: the cache key is NOT just videoId. The
+        // StreamInfo holds a fully-built URL (host + port + token),
+        // and the URL construction changes when:
+        //   - the user changes Backend Host in Settings
+        //   - the user signs out / signs back in (rotates the JWT)
+        //   - the iOS code starts appending a new query param
+        //     (e.g. the ?token=... auth fix on /proxy-stream)
+        // With a plain videoId key, the cache happily returns a
+        // stale streamInfo from before those changes — which is
+        // exactly the bug we just hit: 3h TTL, cached URL had no
+        // ?token= in it, every play was 401 even after the fix
+        // shipped.
+        //
+        // Fold (baseURL, token, videoId) into the key so any
+        // change auto-invalidates. We don't need to track every
+        // param — baseURL+token captures the practical axis of
+        // change. The token is hashed (not stored in the key
+        // string) so a logout doesn't leave a JWT in the file
+        // system cache filenames.
+        let baseURL = APIService.shared.baseURL
+        let token = KeychainHelper.shared.read(APIService.authTokenKeychainKey) ?? ""
+        let tokenHash = String(token.hashValue)
+        let keyRaw = "\(baseURL)|\(tokenHash)|\(videoId)" as NSString
 
-        if let wrapper = memoryCache.object(forKey: key), !wrapper.isExpired {
+        if let wrapper = memoryCache.object(forKey: keyRaw), !wrapper.isExpired {
             return Just(wrapper.streamInfo)
                 .setFailureType(to: APIError.self)
                 .eraseToAnyPublisher()
         }
 
-        if let wrapper = loadFromDisk(key: key), !wrapper.isExpired {
-            memoryCache.setObject(wrapper, forKey: key)
+        if let wrapper = loadFromDisk(key: keyRaw), !wrapper.isExpired {
+            memoryCache.setObject(wrapper, forKey: keyRaw)
             return Just(wrapper.streamInfo)
                 .setFailureType(to: APIError.self)
                 .eraseToAnyPublisher()
@@ -122,8 +144,8 @@ class StreamURLCache {
                 receiveOutput: { [weak self] info in
                     guard let self = self else { return }
                     let wrapper = StreamInfoWrapper(streamInfo: info, createdAt: Date())
-                    self.memoryCache.setObject(wrapper, forKey: key)
-                    self.saveToDisk(wrapper: wrapper, key: key)
+                    self.memoryCache.setObject(wrapper, forKey: keyRaw)
+                    self.saveToDisk(wrapper: wrapper, key: keyRaw)
                 },
                 receiveCompletion: { [weak self] _ in
                     guard let self = self else { return }

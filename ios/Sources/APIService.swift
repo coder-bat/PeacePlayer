@@ -61,7 +61,15 @@ class APIService {
     // AuthService under the same key both sides agree on. We
     // read it lazily on every request so a fresh sign-in is
     // picked up without restarting APIService.
-    private static let authTokenKeychainKey = "peaceplayer.session_token"
+    //
+    // S17-H follow-up: `static let` (internal) instead of
+    // `private static let` so StreamURLCache can read the same
+    // key when building its cache key (it folds baseURL + token
+    // hash + videoId so a sign-out / sign-in / Backend Host
+    // change auto-invalidates the cache). Keeping the key as the
+    // single source of truth in APIService avoids string drift
+    // between callers.
+    static let authTokenKeychainKey = "peaceplayer.session_token"
     private let keychain = KeychainHelper.shared
     private var currentAuthToken: String? {
         keychain.read(APIService.authTokenKeychainKey)
