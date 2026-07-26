@@ -296,45 +296,53 @@ class APIService {
     }
 
     func getStreamUrl(videoId: String, preferM4A: Bool = true, quality: String = "low") -> AnyPublisher<StreamInfo, APIError> {
-        // Return the proxy-stream URL immediately without a blocking HEAD request.
-        // The proxy-stream endpoint handles yt-dlp extraction; AVPlayer will surface
-        // errors naturally if the stream fails, and PlayerState already handles them.
-        let ext = preferM4A ? "m4a" : "webm"
-        guard var urlComponents = URLComponents(string: "\(baseURL)/proxy-stream/\(videoId).\(ext)") else {
+        // S17-H (2026-07-27): switched from the in-app /proxy-stream
+        // URL to a real HTTP call to /stream/{videoId}. The
+        // /stream endpoint returns a direct YouTube CDN URL,
+        // which we hand to AVPlayer. The result: AVPlayer fetches
+        // audio straight from Google's CDN — no Mac hop, no
+        // FastAPI worker memory spike, no AsyncClient context
+        // issues, no AVPlayer -11829 from the proxy. Trade-offs:
+        //   1. /stream does yt-dlp extraction on the first call
+        //      for a video (1-2s); subsequent plays within the
+        //      3.5h cache TTL are instant. The /prefetch warmup
+        //      path (now auth-bearing since 01b1285) keeps the
+        //      cache hot for tracks the user is about to play.
+        //   2. The YouTube URL has its own 3.5h expiry; the
+        //      StreamURLCache stores a wrapper that includes the
+        //      URL + createdAt, and the existing 3h TTL in
+        //      StreamURLCache is conservative (under 3.5h) so
+        //      a fresh URL is always fetched before expiry.
+        //   3. The URL is HTTPS (googlevideo.com) so ATS allows
+        //      it without an exception. No ?token= in the URL
+        //      (the YouTube CDN is open — it has its own
+        //      signature).
+        guard let url = URL(string: "\(baseURL)/stream/\(videoId)") else {
             return Fail(error: APIError.invalidURL).eraseToAnyPublisher()
         }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 8  // yt-dlp extraction can take 1-2s; budget more
+        addAuthHeader(to: &request)
 
-        // S17-H follow-up: AVPlayer is a system component, not
-        // URLSession — it cannot add the iOS app's Bearer token to
-        // its GET, so /proxy-stream was 401-ing and the user saw
-        // "Couldn't play this track after multiple attempts. Skipping
-        // to the next one." for every track. The backend now accepts
-        // the session JWT via ?token=... as a fallback to the
-        // Authorization header. We append it here. The token only
-        // shows up in the stream URL, not in /search / /library /
-        // etc., and the same keychain entry (peaceplayer.session_token)
-        // that URLSession uses is the source. If the user signs out,
-        // APIService.baseURL's per-request re-read of the keychain
-        // means the next play after re-auth picks up the new token.
-        var queryItems: [URLQueryItem] = [URLQueryItem(name: "quality", value: quality)]
-        if let token = KeychainHelper.shared.read(APIService.authTokenKeychainKey),
-           !token.isEmpty {
-            queryItems.append(URLQueryItem(name: "token", value: token))
-        }
-        urlComponents.queryItems = queryItems
-
-        guard let url = urlComponents.url else {
-            return Fail(error: APIError.invalidURL).eraseToAnyPublisher()
-        }
-
-        let mimeType = preferM4A ? "audio/mp4" : "audio/webm"
-        let bitrate = quality == "low" ? 70000 : 160000
-        let streamInfo = StreamInfo(
-            streamUrl: url.absoluteString,
-            mimeType: mimeType,
-            bitrate: bitrate
-        )
-        return Just(streamInfo).setFailureType(to: APIError.self).eraseToAnyPublisher()
+        return dataTaskWithRetry(for: request)
+            .mapError { error -> APIError in
+                if let apiError = error as? APIError { return apiError }
+                return APIError.networkError(error)
+            }
+            .flatMap { data, response -> AnyPublisher<StreamInfo, APIError> in
+                guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+                    let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+                    let bodyStr = String(data: data, encoding: .utf8) ?? ""
+                    print("❌ [APIService] getStreamUrl \(videoId) → HTTP \(status): \(bodyStr.prefix(200))")
+                    return Fail(error: APIError.httpError(statusCode: status, message: bodyStr)).eraseToAnyPublisher()
+                }
+                return Just(data)
+                    .decode(type: StreamInfo.self, decoder: JSONDecoder())
+                    .mapError { APIError.decodingError($0) }
+                    .eraseToAnyPublisher()
+            }
+            .receive(on: DispatchQueue.main)
+            .eraseToAnyPublisher()
     }
     
     func downloadTrack(_ track: Track) -> AnyPublisher<String, APIError> {
