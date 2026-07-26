@@ -282,6 +282,23 @@ class PlayerState: ObservableObject {
     private var player: AVPlayer?
     private var timeObserver: Any?
     private var cancellables = Set<AnyCancellable>()
+
+    /// S17-H (P1-FF6 follow-up): lifetime subscriptions that must
+    /// survive `stop()` and `setupPlayerObservers()`. The mirror
+    /// from `queueStore` into `currentItem` is the prime example:
+    /// `stop()` does `cancellables.removeAll()` to drop the old
+    /// player observers, and `setupPlayerObservers()` repeats the
+    /// clear as a defensive idempotency guard. The mirror was set
+    /// up in `init` and previously lived in the same set, so it
+    /// was killed on the first `stop()` and never came back. The
+    /// `currentItem` value was still set explicitly in
+    /// `play(item:)` so the UI looked correct for the immediate
+    /// tap, but a later `restoreQueue` / QueuePrefetcher change
+    /// would no longer propagate to `currentItem` (the store
+    /// would mutate, PlayerState wouldn't react). Storing the
+    /// mirror here means it lives for the lifetime of the
+    /// singleton — exactly what we want.
+    private var lifetimeCancellables = Set<AnyCancellable>()
     private var retryCount = 0
     private let maxRetries = 2
     private var originalQueue: [QueueItem] = []
@@ -411,6 +428,18 @@ class PlayerState: ObservableObject {
         // actually changes (removeDuplicates on the combined
         // publisher) so unrelated queue mutations (add/remove
         // a non-current track) don't fire PlayerState.objectWillChange.
+        //
+        // S17-H (P1-FF6 follow-up): store the mirror in
+        // `lifetimeCancellables` instead of `cancellables`. The
+        // `cancellables` set is cleared by `stop()` and by
+        // `setupPlayerObservers()`; if the mirror lived there it
+        // would die on the first `stop()` and never come back. The
+        // explicit `currentItem = item` in `play(item:)` masked the
+        // symptom for the immediate tap, but a subsequent
+        // `restoreQueue` / QueuePrefetcher add would not
+        // propagate to `currentItem` (the store would mutate,
+        // PlayerState wouldn't react). Storing the mirror here
+        // gives it the same lifetime as the PlayerState singleton.
         queueStore.$items
             .combineLatest(queueStore.$currentIndex)
             .map { items, index -> QueueItem? in
@@ -421,7 +450,7 @@ class PlayerState: ObservableObject {
             .sink { [weak self] newItem in
                 self?.currentItem = newItem
             }
-            .store(in: &cancellables)
+            .store(in: &lifetimeCancellables)
 
         restoreQueue()
 
@@ -882,12 +911,26 @@ class PlayerState: ObservableObject {
         // Start playback immediately for fast start - don't wait for readyToPlay
         // AVPlayer will handle buffering as it plays. Keep playbackState as .loading
         // until the item reports .readyToPlay so the UI shows accurate feedback.
+        //
+        // S17-H (P1-FF6 follow-up): use `playImmediately(atRate:)` instead of
+        // `play() + rate = X`. The two-call pattern has a 1-frame race where
+        // the player starts at rate 0 and only ramps to the requested rate
+        // on the next runloop tick. The race was already known — S17-E
+        // (commit 02c622f) fixed it for `performSeamlessQualitySwitch` —
+        // but the fix was never propagated to the main play path. The user
+        // reports the mini-player showing the loading icon forever after
+        // tapping a recently-played track; the most likely cause is the
+        // 1-frame rate-0 race putting the new player in a state where the
+        // `isPlaybackLikelyToKeepUp` publisher never fires, so the
+        // `playbackState` observer at line 2332 never transitions
+        // `.loading` → `.playing`. `playImmediately(atRate:)` is the
+        // atomic single-call form AVFoundation now recommends; using it
+        // here means the player starts at the correct rate from frame 0.
         print("🔊 Starting playback immediately (fast-start mode)...")
-        player?.play()
+        player?.playImmediately(atRate: playbackRate)
         #if DEBUG
-        PlayCrashDiagnostics.log(.playback, "play(item:) POST-player.play")
+        PlayCrashDiagnostics.log(.playback, "play(item:) POST-playImmediately")
         #endif
-        player?.rate = playbackRate
         // playbackState stays .loading; observer will flip to .playing when ready.
 
         print("🔊 Auto-populating queue...")
