@@ -925,6 +925,17 @@ class SearchViewModel: ObservableObject {
     @Published var activeFilter: SearchFilter = .all
 
     private var cancellables = Set<AnyCancellable>()
+    // S17-H follow-up (2026-07-26): generation counter for
+    // out-of-order search responses. The TextField debounce
+    // (300ms) cancels the *wait* but not the in-flight API call,
+    // so when the user types fast, multiple `APIService.search`
+    // publishers can be active in parallel. The first search
+    // (e.g. for "f") might complete AFTER the final search (e.g.
+    // for "fifa 2010 album") and clobber the results with stale
+    // 0-hit data. Bumping `searchGeneration` on each call and
+    // capturing the value in the closure means late responses
+    // are dropped on the floor.
+    private var searchGeneration: UInt = 0
     
     init() {
         loadRecentSearches()
@@ -986,6 +997,13 @@ class SearchViewModel: ObservableObject {
     func search(query: String) {
         guard !query.isEmpty else { return }
 
+        // S17-H follow-up: bump the generation. Any
+        // receiveValue / receiveCompletion from a previous
+        // search that fires after this point will be a stale
+        // response and must be dropped.
+        searchGeneration &+= 1
+        let generation = searchGeneration
+
         isLoading = true
         hasSearched = true
         saveRecentSearch(query)
@@ -998,14 +1016,20 @@ class SearchViewModel: ObservableObject {
             .handleErrors(with: .shared, retry: { [weak self] in
                 self?.search(query: query)
             })
-            .sink(receiveCompletion: { completion in
+            .sink(receiveCompletion: { [weak self] completion in
+                guard let self = self, self.searchGeneration == generation else {
+                    return
+                }
                 if case .failure(let error) = completion {
                     print("⚠️ [SearchView] Request failed: \(error.localizedDescription)")
                 }
             },
                   receiveValue: { [weak self] tracks in
-                self?.results = tracks
-                self?.refreshDownloadedIds()
+                guard let self = self, self.searchGeneration == generation else {
+                    return
+                }
+                self.results = tracks
+                self.refreshDownloadedIds()
             })
             .store(in: &cancellables)
 
@@ -1014,11 +1038,17 @@ class SearchViewModel: ObservableObject {
         APIService.shared.searchPlaylists(query: query, limit: 10)
             .handleErrors(with: .shared)
             .sink(receiveCompletion: { [weak self] completion in
+                guard let self = self, self.searchGeneration == generation else {
+                    return
+                }
                 print("🔍 Playlist search completed")
-                self?.isLoading = false
+                self.isLoading = false
             }, receiveValue: { [weak self] playlists in
+                guard let self = self, self.searchGeneration == generation else {
+                    return
+                }
                 print("🔍 Found \(playlists.count) playlists")
-                self?.playlistResults = playlists
+                self.playlistResults = playlists
             })
             .store(in: &cancellables)
     }
