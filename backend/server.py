@@ -845,7 +845,17 @@ async def proxy_stream_audio(video_id: str, request: Request, quality: str = "hi
 
         # Handle GET request
         # Headers for YouTube request
+        # S17-H (2026-07-26): YouTube was closing the upstream
+        # connection after a few seconds of streaming, which surfaced
+        # to the iOS app as "Couldn't play this track after multiple
+        # attempts. Skipping to the next one." for every track. The
+        # proxy was sending httpx's default User-Agent
+        # ("python-httpx/0.x.y") which YouTube's bot detection
+        # matches and mid-stream-throttles. Use a desktop Chrome UA
+        # — same one yt-dlp uses for extraction so the URL's
+        # signature is consistent with the headers we send.
         yt_headers = {
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             'Referer': 'https://music.youtube.com/',
             'Accept': '*/*',
             'Accept-Encoding': 'identity',

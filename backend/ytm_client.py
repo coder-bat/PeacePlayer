@@ -278,12 +278,29 @@ class YTMusicClient:
         """
         try:
             url = f"https://music.youtube.com/watch?v={video_id}"
-            
+
             ydl_opts = {
                 'format': 'bestaudio/best',
                 'quiet': True,
                 'skip_download': True,
                 'extract_flat': False,
+                # S17-H (2026-07-26): YouTube's n-challenge (the
+                # signature-cipher "n" parameter) is now required for
+                # most formats, and yt-dlp ships the JS challenge
+                # solver scripts as opt-in remote components. Without
+                # this, the n challenge solving fails and yt-dlp
+                # returns partial format lists — the URLs it does
+                # return then break mid-stream when the backend
+                # tries to proxy them, surfacing to the iOS app as
+                # "Couldn't play this track after multiple attempts.
+                # Skipping to the next one." for every track.
+                #
+                # 'ejs:github' pulls the EJS solver scripts from
+                # yt-dlp/yt-dlp-impersonate's GitHub releases. This
+                # is the recommended option in the yt-dlp warning
+                # (instead of installing deno locally) and avoids a
+                # local runtime dependency.
+                'remote_components': 'ejs:github',
             }
             
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
