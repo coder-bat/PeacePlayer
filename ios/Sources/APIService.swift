@@ -93,13 +93,28 @@ class APIService {
     /// HTTP 4xx / 5xx — those are semantic errors from the server
     /// and shouldn't be retried. Built with `.catch` + `.delay`
     /// because Combine's `.retry(_:)` has no backoff.
-    private func dataTaskWithRetry(for request: URLRequest) -> AnyPublisher<(data: Data, response: URLResponse), URLError> {
+    ///
+    /// S17-H follow-up (2026-07-26): the recursive call now carries
+    /// the current `attempt` through, instead of always starting at
+    /// 1. The previous code called `self.dataTaskWithRetry(for:)`
+    /// from inside `retryPublisher`, but that helper has its own
+    /// `.catch` that calls `retryPublisher(attempt: 1)` — the inner
+    /// catch fires BEFORE the outer catch, so the attempt counter
+    /// never incremented and the `attempt >= maxRetries` check at
+    /// line 112 never triggered. If the network was failing, the
+    /// retry would recurse forever with a 0.5s delay on each
+    /// iteration; the search would hang in the skeleton view with
+    /// no error. Fix: thread the `attempt` through every call.
+    private func dataTaskWithRetry(
+        for request: URLRequest,
+        attempt: Int = 1
+    ) -> AnyPublisher<(data: Data, response: URLResponse), URLError> {
         return session.dataTaskPublisher(for: request)
             .catch { [weak self] error -> AnyPublisher<(data: Data, response: URLResponse), URLError> in
                 guard let self = self else {
                     return Fail(error: error).eraseToAnyPublisher()
                 }
-                return self.retryPublisher(for: request, attempt: 1, originalError: error)
+                return self.retryPublisher(for: request, attempt: attempt + 1, originalError: error)
             }
             .eraseToAnyPublisher()
     }
@@ -109,7 +124,7 @@ class APIService {
         attempt: Int,
         originalError: URLError
     ) -> AnyPublisher<(data: Data, response: URLResponse), URLError> {
-        if attempt >= maxRetries {
+        if attempt > maxRetries {
             return Fail(error: originalError).eraseToAnyPublisher()
         }
         let delay = retryDelay * pow(2.0, Double(attempt - 1))
@@ -120,11 +135,12 @@ class APIService {
                 guard let self = self else {
                     return Fail(error: originalError).eraseToAnyPublisher()
                 }
-                return self.dataTaskWithRetry(for: request)
-                    .catch { error -> AnyPublisher<(data: Data, response: URLResponse), URLError> in
-                        self.retryPublisher(for: request, attempt: attempt + 1, originalError: error)
-                    }
-                    .eraseToAnyPublisher()
+                // Pass the current `attempt` through to the next
+                // request so the counter actually increments. The
+                // previous version called `self.dataTaskWithRetry`
+                // (no attempt arg), which reset to 1 and shadowed
+                // the outer `attempt + 1` in its own catch.
+                return self.dataTaskWithRetry(for: request, attempt: attempt)
             }
             .eraseToAnyPublisher()
     }
