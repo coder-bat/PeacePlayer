@@ -683,10 +683,27 @@ async def get_playlist(playlist_id: str, request: Request, limit: int = Query(de
 
 
 # Stream endpoint
-@app.get("/stream/{video_id}", response_model=StreamResponse)
-@limiter.limit("20/minute")
+@app.api_route("/stream/{video_id}", methods=["GET", "HEAD"])
+@limiter.limit("60/minute")
 async def stream_audio(video_id: str, request: Request, user: dict = Depends(require_session_user),):
-    """Get streaming URL for a video. Uses caching."""
+    """Get streaming URL for a video. Returns a 302 redirect to the
+    YouTube CDN URL. The iOS app follows the redirect and uses the
+    final URL (response.url) to hand to AVPlayer.
+
+    Why a 302 instead of a JSON body with the URL: when the iOS app
+    used the previous JSON response, the URL went through with
+    ANDROID_VR's c= client tag baked in, and AVPlayer's iOS User-Agent
+    + the ANDROID_VR signature didn't match — YouTube served a
+    response shape AVPlayer rejected with AVError.fileFormatNotRecognized
+    (-11828). By returning a 302, URLSession follows the redirect
+    server-side, the iOS app gets the final YouTube URL via
+    response.url, and AVPlayer has a clean URL with no client-tag
+    surprises.
+
+    The 3.5h URL signature is still bound to the original
+    request — we just hand the bytes back to YouTube. Cache hit
+    is fast (no yt-dlp re-run).
+    """
     try:
         cache = get_cache()
         stream_data = cache.get(video_id)
@@ -704,13 +721,25 @@ async def stream_audio(video_id: str, request: Request, user: dict = Depends(req
             cache.set(video_id, stream_data)
 
         best = stream_data['audio_formats'][0]
+        yt_url = best['url']
+        mime_type = best.get('mime_type', 'audio/mp4')
+        if mime_type in ['m4a', 'audio/m4a', 'audio/x-m4a']:
+            mime_type = 'audio/mp4'
 
-        logger.info(f"Returning stream URL: {best['url'][:50]}...")
+        logger.info(f"Redirecting /stream/{video_id} → {yt_url[:60]}...")
 
-        return StreamResponse(
-            streamUrl=best['url'],
-            mimeType=best['mime_type'],
-            bitrate=best['bitrate']
+        # S17-H (2026-07-27): 302 redirect to the YouTube URL.
+        # The iOS app's URLSession follows the redirect, and
+        # the final response.url is the YouTube CDN URL. No
+        # body buffering in the FastAPI worker, no AsyncClient
+        # context issue, no AVPlayer User-Agent mismatch.
+        return Response(
+            status_code=302,
+            headers={
+                'Location': yt_url,
+                'Content-Type': mime_type,
+                'Access-Control-Allow-Origin': '*',
+            }
         )
 
     except HTTPException:
