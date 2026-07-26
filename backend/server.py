@@ -851,11 +851,18 @@ async def proxy_stream_audio(video_id: str, request: Request, quality: str = "hi
         # attempts. Skipping to the next one." for every track. The
         # proxy was sending httpx's default User-Agent
         # ("python-httpx/0.x.y") which YouTube's bot detection
-        # matches and mid-stream-throttles. Use a desktop Chrome UA
-        # — same one yt-dlp uses for extraction so the URL's
-        # signature is consistent with the headers we send.
+        # matches and mid-stream-throttles.
+        #
+        # The stream URL embeds `c=ANDROID_VR` in its query string
+        # — yt-dlp extracted the URL using its Android VR client
+        # config, and the signature is bound to that client's
+        # expected headers. Sending a desktop Chrome UA alongside
+        # an Android-VR-signed URL trips YouTube's bot check (the
+        # client/UA mismatch is exactly what YouTube looks for to
+        # detect re-streaming). Use the matching Android VR UA
+        # (same one yt-dlp's Android VR player config uses).
         yt_headers = {
-            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'User-Agent': 'com.google.android.apps.youtube.vr.oculus/1.55.18 (Linux; U; Android 12; en_US; Quest 2; Build/SQ3A.220605.009.A1; Cronet/114.0.5735.130)',
             'Referer': 'https://music.youtube.com/',
             'Accept': '*/*',
             'Accept-Encoding': 'identity',
@@ -873,8 +880,27 @@ async def proxy_stream_audio(video_id: str, request: Request, quality: str = "hi
         # of the upstream read. With multiple concurrent
         # /proxy-stream requests, every other request stalls while
         # the slowest upstream read finishes. Switch to
-        # `httpx.AsyncClient` + `aiter_bytes` so the event loop
-        # stays responsive while the upstream bytes stream in.
+        # `httpx.AsyncClient` so the event loop stays responsive.
+        #
+        # S17-H (2026-07-26): the previous version tried
+        # `client.send(..., stream=True)` and yielded chunks via
+        # `StreamingResponse`. That pattern is broken in this
+        # FastAPI handler because the `async with httpx.AsyncClient`
+        # block closes the connection pool on function return —
+        # which kills the upstream YouTube connection while the
+        # body iterator is still trying to read. Every track
+        # surfaced as 0 bytes / StreamClosed / "Skipping to the
+        # next one" on the iPhone.
+        #
+        # The clean fix would be to manage the AsyncClient and
+        # response lifecycle outside the request handler (a
+        # background task or an event-stream that owns the
+        # resources). For now, read the body fully inside the
+        # `async with`, then return it as a regular Response.
+        # The trade-off: no progressive streaming from
+        # YouTube → backend, and a ~3-5 MB per-track memory
+        # spike. For 30-track gapless queueing that's still
+        # fine; the FastAPI worker can afford it.
         async with httpx.AsyncClient(
             timeout=httpx.Timeout(
                 connect=STREAM_CONNECT_TIMEOUT,
@@ -887,7 +913,7 @@ async def proxy_stream_audio(video_id: str, request: Request, quality: str = "hi
             upstream_req = client.build_request(
                 "GET", stream_url, headers=yt_headers
             )
-            r = await client.send(upstream_req, stream=True)
+            r = await client.send(upstream_req)
             try:
                 r.raise_for_status()
             except Exception:
@@ -919,18 +945,18 @@ async def proxy_stream_audio(video_id: str, request: Request, quality: str = "hi
 
             logger.info(f"Proxy response headers: {response_headers}")
 
-            async def stream_with_close():
-                try:
-                    async for chunk in r.aiter_bytes(chunk_size=65536):
-                        if chunk:
-                            yield chunk
-                finally:
-                    await r.aclose()
+            # Read the body fully while still inside the AsyncClient
+            # context, then return it. The body lives on as a
+            # bytes blob in the Response; the AsyncClient closes
+            # cleanly on `async with` exit.
+            body = r.content
+            logger.info(f"Read {len(body)} bytes from upstream")
 
-            return StreamingResponse(
-                stream_with_close(),
+            return Response(
+                content=body,
                 status_code=r.status_code,
-                headers=response_headers
+                headers=response_headers,
+                media_type=mime_type
             )
 
     except HTTPException:
