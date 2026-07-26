@@ -21,11 +21,14 @@
 //    runs the NotificationCenter observer registration. By
 //    the time PersistenceController's load callback fires,
 //    the listener is already in place.
-//  - As a second line of defense, we observe
-//    PersistenceController.shared.loadState via Combine so
-//    we still catch a failure if the notification was
-//    somehow missed (e.g. if the listener was registered
-//    after the load callback's main-queue block ran).
+//  - Earlier versions also observed
+//    PersistenceController.shared.$loadState via Combine as
+//    a backup, but that created a circular dependency between
+//    two `static let` singletons (deadlock at app launch — see
+//    the inline comment in init). The notification is the only
+//    path now; the race the backup was guarding against can't
+//    actually happen because the notification fires after both
+//    singletons finish initializing.
 //
 
 import UIKit
@@ -45,26 +48,29 @@ final class MigrationFailureAlert {
     private var hasPresentedForCurrentFailure: Bool = false
 
     private init() {
-        // Primary path: the explicit notification posted by
-        // PersistenceController. This is the one we expect
-        // to fire in normal flow.
+        // S17-H: the previous version also subscribed to
+        // `PersistenceController.shared.$loadState` as a "backup
+        // path" for a missed notification. That created a
+        // circular dependency: PersistenceController.shared's
+        // static let init references MigrationFailureAlert.shared
+        // (to register the alert listener early), and
+        // MigrationFailureAlert.shared's init subscribes to
+        // PersistenceController.shared.$loadState. Both static
+        // let inits use dispatch_once, so the second one deadlocks
+        // waiting for the first to finish.
+        //
+        // Fix: drop the $loadState backup. The notification is
+        // posted by PersistenceController when the load fails;
+        // the listener is registered synchronously in this init
+        // (which is called from PersistenceController.init via
+        // the `MigrationFailureAlert.shared` reference). The
+        // notification fires AFTER both inits complete, so the
+        // race the backup was guarding against can't actually
+        // happen.
         NotificationCenter.default.publisher(for: .persistentStoreMigrationFailed)
             .receive(on: DispatchQueue.main)
             .sink { [weak self] note in
                 self?.handleFailure(error: note.userInfo?["error"] as? Error)
-            }
-            .store(in: &cancellables)
-
-        // Backup path: observe the published loadState. If
-        // the notification was missed (timing edge case during
-        // launch), the state transition still fires here and
-        // we re-attempt the alert.
-        PersistenceController.shared.$loadState
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] state in
-                if case .migrationFailed = state {
-                    self?.handleFailure(error: PersistenceController.shared.lastError)
-                }
             }
             .store(in: &cancellables)
 
