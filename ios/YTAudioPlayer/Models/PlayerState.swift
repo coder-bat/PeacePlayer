@@ -663,7 +663,10 @@ class PlayerState: ObservableObject {
     /// couldn't tell a transient timeout from a 500 from a 401
     /// from "track not streamable". The most common domains /
     /// codes are mapped to plain English; everything else falls
-    /// through to the localized description.
+    /// through to the localized description. For the catch-all
+    /// AVError.unknown (-11829) we also surface a few of the
+    /// userInfo keys AVPlayer does populate, since that's the
+    /// case users see most often.
     private static func describeAVPlayerError(_ error: NSError) -> String {
         let domain = error.domain
         let code = error.code
@@ -689,7 +692,27 @@ class PlayerState: ObservableObject {
         if domain == AVFoundationErrorDomain {
             switch code {
             case AVError.unknown.rawValue:
-                return "AVPlayer unknown error"
+                // -11829 is the catch-all "AVPlayer failed for some
+                // unspecified reason" — pull the userInfo keys that
+                // AVPlayer does populate (NSLocalizedDescription,
+                // NSUnderlyingError, AVFoundationErrorPresentationErrorDataKey,
+                // sometimes a track-time / status dump). Without
+                // this the toast just says "AVPlayer unknown error"
+                // and we can't tell whether it was a 416, a corrupt
+                // response, a missing range, etc.
+                let desc = error.userInfo[NSLocalizedDescriptionKey] as? String
+                let underlying = (error.userInfo[NSUnderlyingErrorKey] as? NSError).map { "\($0.domain) \($0.code)" }
+                var parts: [String] = []
+                if let d = desc, !d.isEmpty, d != "The operation couldn't be completed." {
+                    parts.append(d)
+                }
+                if let u = underlying {
+                    parts.append("underlying: \(u)")
+                }
+                if parts.isEmpty {
+                    return "AVPlayer unknown error -11829"
+                }
+                return "AVPlayer: " + parts.joined(separator: " · ")
             case AVError.serverIncorrectlyConfigured.rawValue:
                 return "AVPlayer server misconfigured"
             case AVError.formatUnsupported.rawValue:
