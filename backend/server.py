@@ -772,15 +772,37 @@ async def stream_audio(video_id: str, request: Request, user: dict = Depends(req
         # sees a clean M4A with major_brand=M4A, no DASH, no
         # Opus — just AAC LC 48kHz stereo, which every iPhone
         # plays.
-        logger.info(f"Redirecting /stream/{video_id} → /audio/{video_id}.m4a (transcoded AAC)")
-        return Response(
-            status_code=302,
-            headers={
-                'Location': f'/audio/{video_id}.m4a',
-                'Content-Type': mime_type,
-                'Access-Control-Allow-Origin': '*',
-            }
-        )
+        #
+        # S17-H (2026-07-27 00:48 follow-up): previously this
+        # returned a 302 to /audio/{videoId}.m4a and relied on
+        # URLSession to forward the Bearer token on the
+        # redirect — it doesn't (per RFC 7235, the Authorization
+        # header is stripped on cross-host redirects; URLSession
+        # is even stricter on same-host). The redirect produced
+        # a 401 on /audio. Instead, return a JSON body with the
+        # full audio URL (including ?token=...). The iOS app
+        # extracts the URL and hands it to AVPlayer; AVPlayer
+        # fetches with the token in the query string, which
+        # /audio accepts (same pattern as /proxy-stream).
+        # Result: one HTTP call to get the URL, no redirect,
+        # no 401.
+        logger.info(f"/stream/{video_id} → JSON with /audio URL (transcoded AAC)")
+        # Build the audio URL with the user's auth token in
+        # the query string. The token is the same session JWT
+        # the iOS app sent in the Authorization header to this
+        # /stream call. We re-emit it in the response so the
+        # iOS app can put it on the /audio URL for AVPlayer.
+        auth_header = request.headers.get('Authorization') or ''
+        token = ''
+        if auth_header.lower().startswith('bearer '):
+            token = auth_header.split(' ', 1)[1].strip()
+        from urllib.parse import quote
+        audio_url = f'/audio/{video_id}.m4a?token={quote(token)}'
+        return JSONResponse(content={
+            'streamUrl': audio_url,
+            'mimeType': 'audio/mp4',
+            'bitrate': 128000,
+        })
 
         # S17-H (2026-07-27): 302 redirect to the YouTube URL.
         # The iOS app's URLSession follows the redirect, and
@@ -809,7 +831,31 @@ async def stream_audio(video_id: str, request: Request, user: dict = Depends(req
 # the redirect, AVPlayer fetches the AAC bytes.
 @app.api_route("/audio/{video_id}.m4a", methods=["GET", "HEAD"])
 @limiter.limit("20/minute")
-async def audio_stream(video_id: str, request: Request, user: dict = Depends(require_session_user),):
+async def audio_stream(video_id: str, request: Request):
+    # S17-H (2026-07-27 00:48): also accept the session JWT
+    # via ?token=... query param. AVPlayer is a system
+    # component, not URLSession — it can't add the iOS app's
+    # Bearer token to its GET, so the token has to ride along
+    # in the URL. The iOS app's getStreamUrl now appends the
+    # same peaceplayer.session_token from the keychain that
+    # URLSession uses. The Authorization header path is still
+    # primary — the query param is the fallback for
+    # redirect-stripped / AVPlayer-initiated requests.
+    #
+    # CRITICAL: do the auth check INLINE (not via
+    # `Depends(require_session_user)`) so FastAPI doesn't
+    # evaluate auth before the function body runs. We need
+    # to read either the Authorization header OR the
+    # ?token= query param ourselves.
+    from urllib.parse import unquote
+    auth_header = request.headers.get('Authorization') or ''
+    if not auth_header:
+        query_token = request.query_params.get('token')
+        if query_token:
+            auth_header = f'Bearer {unquote(query_token)}'
+    user = current_user_from_request(auth_header)
+    if not user:
+        raise HTTPException(status_code=401, detail="unauthorized")
     try:
         cache = get_cache()
         stream_data = cache.get(video_id)

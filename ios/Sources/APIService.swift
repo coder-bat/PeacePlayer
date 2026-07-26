@@ -296,29 +296,23 @@ class APIService {
     }
 
     func getStreamUrl(videoId: String, preferM4A: Bool = true, quality: String = "low") -> AnyPublisher<StreamInfo, APIError> {
-        // S17-H (2026-07-27): the iOS app calls /stream/{videoId}
-        // and hands the returned YouTube CDN URL to AVPlayer.
-        // The previous round had a webm URL causing
-        // AVError.fileFormatNotRecognized (-11828). That was
-        // almost certainly the ANDROID_VR-signed URL — the
-        // signature was bound to ANDROID_VR's expected
-        // User-Agent and the iOS app's different User-Agent
-        // produced a response shape AVPlayer rejected.
+        // S17-H (2026-07-27 00:49): /stream now returns JSON
+        // with the iOS app's Bearer token embedded in the
+        // query string of the audio URL. The iOS app hands
+        // that URL to AVPlayer, which fetches the URL and
+        // /audio authenticates via the ?token= fallback.
+        // (The previous round redirected to /audio, but
+        // URLSession stripped the Authorization header on
+        // the redirect, so /audio returned 401.)
         //
-        // To dodge that, the backend now returns a 302
-        // redirect to the YouTube URL with c=ANDROID_VR
-        // stripped (we re-sign with a more iOS-friendly
-        // client config). The iOS app follows the redirect
-        // and uses the final response URL — URLSession's
-        // dataTaskPublisher follows redirects by default, so
-        // response.url is the YouTube CDN URL after the 302
-        // has been followed.
-        //
-        // AVPlayer then initializes with that final URL.
-        // The URL has no .m4a suffix, so the Content-Type
-        // YouTube sends is authoritative (audio/mp4 or
-        // audio/webm depending on the format) and AVPlayer
-        // doesn't have to guess from the extension.
+        // /audio downloads the YouTube webm/Opus body,
+        // transcodes to AAC/M4A via ffmpeg, caches the
+        // result on disk, and serves with Range support.
+        // iOS plays AAC universally — the previous
+        // NSOSStatusErrorDomain -12847 (kAudioConverterErr_
+        // FormatNotSupported) was because iOS's hardware
+        // decoder can't handle YouTube's specific Opus
+        // profile.
         guard let url = URL(string: "\(baseURL)/stream/\(videoId)") else {
             return Fail(error: APIError.invalidURL).eraseToAnyPublisher()
         }
@@ -332,32 +326,41 @@ class APIService {
                 return APIError.networkError(error)
             }
             .flatMap { data, response -> AnyPublisher<StreamInfo, APIError> in
-                guard let http = response as? HTTPURLResponse else {
-                    return Fail(error: APIError.invalidResponse).eraseToAnyPublisher()
-                }
-                if http.statusCode != 200 {
+                guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+                    let status = (response as? HTTPURLResponse)?.statusCode ?? 0
                     let bodyStr = String(data: data, encoding: .utf8) ?? ""
-                    print("❌ [APIService] getStreamUrl \(videoId) → HTTP \(http.statusCode): \(bodyStr.prefix(200))")
-                    return Fail(error: APIError.httpError(statusCode: http.statusCode, message: bodyStr)).eraseToAnyPublisher()
+                    print("getStreamUrl error " + videoId + " HTTP " + String(status))
+                    return Fail(error: APIError.httpError(statusCode: status, message: bodyStr)).eraseToAnyPublisher()
                 }
-                // The response is a 302 followed to the YouTube URL.
-                // `response.url` is the final URL (the YouTube CDN).
-                // The body is the audio bytes (not JSON) — we
-                // don't care about them, we just want the URL.
-                guard let finalURL = response.url else {
-                    return Fail(error: APIError.invalidResponse).eraseToAnyPublisher()
+                do {
+                    let info = try JSONDecoder().decode(StreamInfo.self, from: data)
+                    let resolved = self.resolveStreamURL(info.streamUrl)
+                    print("getStreamUrl " + videoId + " -> " + String(resolved.prefix(120)))
+                    return Just(StreamInfo(
+                        streamUrl: resolved,
+                        mimeType: info.mimeType,
+                        bitrate: info.bitrate
+                    )).setFailureType(to: APIError.self).eraseToAnyPublisher()
+                } catch {
+                    return Fail(error: APIError.decodingError(error)).eraseToAnyPublisher()
                 }
-                print("🔗 [APIService] Stream URL for \(videoId) → \(finalURL.absoluteString.prefix(100))...")
-                return Just(StreamInfo(
-                    streamUrl: finalURL.absoluteString,
-                    mimeType: http.mimeType ?? "audio/mp4",
-                    bitrate: 128000
-                )).setFailureType(to: APIError.self).eraseToAnyPublisher()
             }
             .receive(on: DispatchQueue.main)
             .eraseToAnyPublisher()
     }
-    
+
+    /// S17-H: resolve a path-only or path-with-query stream URL
+    /// returned by /stream against the current baseURL. /stream
+    /// returns e.g. "/audio/VIDEOID.m4a?token=..." which needs
+    /// the baseURL scheme + host prepended for AVPlayer.
+    private func resolveStreamURL(_ streamUrl: String) -> String {
+        if let abs = URL(string: streamUrl), abs.scheme != nil {
+            return abs.absoluteString
+        }
+        let base = baseURL.hasSuffix("/") ? String(baseURL.dropLast()) : baseURL
+        return base + streamUrl
+    }
+
     func downloadTrack(_ track: Track) -> AnyPublisher<String, APIError> {
         guard let url = URL(string: "\(baseURL)/download") else {
             return Fail(error: APIError.invalidURL).eraseToAnyPublisher()
