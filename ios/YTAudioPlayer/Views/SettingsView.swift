@@ -1,4 +1,7 @@
 import SwiftUI
+#if canImport(UIKit)
+import UIKit  // S17-H (round 7): UIPasteboard for tap-to-copy on connection test errors
+#endif
 
 struct SettingsView: View {
     @StateObject private var favoriteArtists = FavoriteArtistsManager.shared
@@ -60,8 +63,11 @@ struct SettingsView: View {
     /// S17 (CV-4): title for the "Test connection" button
     /// depends on the current state. idle → "Test connection",
     /// testing → "Testing…", ok → "OK · Nms", error →
-    /// "Failed: <message>". Capped at 40 chars so the row
-    /// doesn't reflow on a long error.
+    /// "Failed: <message>". S17-H (round 7): show up to 200
+    /// chars so the user can actually read the iOS URLSession
+    /// error — the previous 40-char cap truncated the
+    /// NSURLError localizedDescription to "The resource could
+    /// not be loaded because..." which is useless for diagnosis.
     private var connectionTestButtonTitle: String {
         switch connectionTest {
         case .idle:
@@ -71,8 +77,9 @@ struct SettingsView: View {
         case .ok(let ms):
             return "OK · \(ms)ms"
         case .error(let msg):
-            let trimmed = msg.count > 40 ? String(msg.prefix(40)) + "…" : msg
-            return "Failed: \(trimmed)"
+            // 200 char cap + a tap-to-copy hint
+            let trimmed = msg.count > 200 ? String(msg.prefix(200)) + "…" : msg
+            return "Failed: \(trimmed) (tap to copy)"
         }
     }
 
@@ -539,7 +546,17 @@ struct SettingsView: View {
                     // `APIService.shared.baseURL + "/health"` with
                     // a 5s timeout (no auth) and shows the
                     // latency / error inline.
+                    //
+                    // S17-H (round 7): when the test fails, make
+                    // the error message tappable so the user can
+                    // long-press → copy the full NSURLError text.
+                    // The 40-char cap was useless for diagnosis;
+                    // the new 200-char cap + tap-to-copy lets the
+                    // user actually paste the full error.
                     Button {
+                        if case .error(let msg) = connectionTest {
+                            UIPasteboard.general.string = msg
+                        }
                         runConnectionTest()
                     } label: {
                         HStack {
@@ -552,6 +569,15 @@ struct SettingsView: View {
                     }
                     .listRowBackground(Theme.cyberSurface)
                     .disabled(connectionTest.isTesting)
+                    .contextMenu {
+                        if case .error(let msg) = connectionTest {
+                            Button {
+                                UIPasteboard.general.string = msg
+                            } label: {
+                                Label("Copy error to clipboard", systemImage: "doc.on.doc")
+                            }
+                        }
+                    }
                 } header: {
                     Text("Backend")
                         .font(Typography.sectionHeader)
