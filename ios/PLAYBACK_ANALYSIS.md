@@ -298,42 +298,65 @@ Background context is independent from the view context. Brief moment of empty l
 
 | Symptom | Root cause | Status |
 |---|---|---|
-| "Track change feels broken" (overlap, gap) | `updateProgress` end-detection racing with `.AVPlayerItemDidPlayToEndTime` | 1.2 — still latent |
+| "Track change feels broken" (overlap, gap) | `updateProgress` end-detection racing with `.AVPlayerItemDidPlayToEndTime` | FIXED 1.2 (1891a1e) — polling removed; `.AVPlayerItemDidPlayToEndTime` is the sole source of truth |
 | "Mini-player loading icon forever" | Rate race in playImmediately path | FIXED 1.11 (88c6de9) |
 | "Next/Prev doesn't work" | `isHandlingCompletion` race | FIXED 1.1 (88c6de9) |
 | "Auto-advance broken" (same track plays twice) | Gapless re-enqueue duplicates | FIXED 1.4 (88c6de9) |
 | "Lock screen shows wrong duration after gapless" | Gapless path skips `playbackClock.setExpectedDuration` | FIXED 1.3 (88c6de9) |
-| "Recently-played is out of order" | Gapless `nextTrack` adds to recently-played before AVPlayer actually starts | 1.6 — still latent |
+| "Recently-played is out of order" | Gapless `nextTrack` adds to recently-played before AVPlayer actually starts | FIXED 1.6 (dfb2763) — moved to `advanceGaplessState` so it fires when the new track actually starts |
 | "Listening time credited during phone call" | `updateProgress` checks `playbackState == .playing` | FIXED 1.16 (88c6de9) |
 | "Queue restored with fewer tracks than saved" | `restoreQueue` silently drops failures | FIXED 5.2 (88c6de9) |
 | "Clear queue doesn't stop playback" | `clearQueue` doesn't call `stop()` | FIXED 1.9 (88c6de9) |
 | "Background audio is mono on BT headphones" | Audio session missing `.allowBluetoothA2DP` | FIXED 4.6 (88c6de9) |
 | "Crossfade doesn't work after a cancelled crossfade" | `cancelCrossfade` doesn't nil out `nextPlayer` | FIXED 3.6 (88c6de9) |
-| "Lock screen keeps adding notifications" | Live Activity racy end+request | FIXED in 88c6de9 (separate fix) |
+| "Lock screen keeps adding notifications" | Live Activity racy end+request | FIXED (88c6de9) |
 | "Headphones unplugged = audio keeps playing" | Audio session doesn't pause on `oldDeviceUnavailable` | FIXED 4.1 (88c6de9) |
 | "Two background saves for the same queue" | `DataManager.saveQueue` dead code | FIXED 2.1 (88c6de9) |
-| "Recently-played / .trackPlayed duplicate" | Gapless `nextTrack` posts .trackPlayed before AVPlayer starts; `advanceGaplessState` posts again | 1.6 — still latent |
+| "Recently-played / .trackPlayed duplicate" | Gapless `nextTrack` posted .trackPlayed before AVPlayer starts; `advanceGaplessState` posted again | FIXED 1.6 (dfb2763) — `nextTrack` no longer posts |
+| "Gapless toggle does nothing mid-playback" | `gaplessEnabled` only consulted at `play(item:)` time | FIXED 3.2 (ae821f7) — toast "takes effect on next track" |
+| "Phone call: UI shows 'playing' with no audio" | AVPlayer auto-pauses but `playbackState` doesn't flip | FIXED 4.2/4.5 (ae821f7) — `onInterruptionBegan` callback |
+| "AirPods in one ear: audio drops" | Missing `routeSharingPolicy: .longFormAudio` | FIXED 4.7 (ae821f7) |
+| "First-track gapless doesn't pre-queue the next" | `enqueueUpcomingItemsForGapless` bails on `queueCount > 1` | FIXED 1.5 (95863e3) — subscription to `queueStore.$items` re-enqueues after prefetcher |
+| "Queue restore leaks cancellables" | `fetchFreshStreamUrl` stored in `self.cancellables` | FIXED 5.6 (ae821f7) — per-call set |
+| "200-item queue: 200 row mutations per track change" | `updateCurrentItem` fetches + mutates + saves all rows | FIXED 5.4 (ae821f7) — `NSBatchUpdateRequest` O(1) |
+| "AVPlayer: 'playing' with no audio after media-services reset" | Hardcoded 0.5s delay could fire too early | FIXED 4.4 (95863e3) — polling work item + 2s safety timeout |
+| "Dead `filter { _ in true }` + 25 lines of comment" | Setup cleanup that was never implemented | FIXED 1.14 (ae821f7) |
 
 ---
 
-## Top P2 items still unaddressed
+## Top P2 items still unaddressed (after S17-H R10–R14)
 
-1. **1.2** — Two completion triggers, no dedup. Move the polling-based end detection in `updateProgress` (2689-2702) to a single source of truth (the AVPlayer notification) and drop the 0.5s early-fire path.
-2. **1.5** — First-track-after-launch gapless pre-queue is a no-op. Have `QueuePrefetcher` enqueue directly into the AVQueuePlayer, or have `play(item:)` call `enqueueUpcomingItemsForGapless` *after* `QueuePrefetcher` has populated the queue.
-3. **1.6** — Gapless "Next" branch posts `.trackPlayed` twice (once in `nextTrack`, once in `advanceGaplessState`). Pick one — the auto-advance one is the right place because it's the actual user-perceived moment.
-4. **1.7** — `play(item:)` double audio-session activation. Remove the direct `setActive(true)` at line 928-935; route everything through `audioSessionController.activate()`.
-5. **1.10** — `previousTrack` doesn't support "restart current" within 3 seconds. Add a `previousTrackRestartGracePeriod` of 3s; if elapsed time is within that, seek to 0 instead of advancing.
-6. **1.12 / 1.13** — `nextTrack` BG task can leak. Audit every call site that calls `cancellables.removeAll()` and ensure each one calls `endTrackTransitionBackgroundTask()` if a BG task is held.
-7. **1.14** — Dead comment chain at `setupPlayerObservers`. Delete the `filter { _ in true }` and the 25 lines of comment that describe an aspiration that was never implemented.
-8. **1.15** — `removeTimeObserver` doesn't fully stop. Swap the order: call `removeTimeObserver()` *before* `player?.replaceCurrentItem(with: nil)`.
-9. **1.20** — `originalQueue` in `toggleShuffle` is captured by value but the items are class-by-value. Re-save `originalQueue` every time the user toggles shuffle on, not just on the first toggle.
-10. **3.2** — Mid-playback gapless toggle: no rebuild. Either rebuild the AVPlayer on toggle (expensive but correct), or show a "takes effect on next play" message.
-11. **3.7** — `shouldUseGapless(for:nextTrack:)` and `prebufferNextTrack` are dead. Either wire them up so gapless is per-album as the comment claims, or delete them.
-12. **4.2 / 4.5** — Interruption doesn't update `playbackState`. Expose `onInterruptionBegan` callback or KVO `timeControlStatus`.
-13. **4.4** — `mediaServicesWereReset` 0.5s delay is hard-coded. Pass the delay as a parameter or use a notification-based wait.
-14. **4.7** — No `routeSharingPolicy: .longFormAudio` for podcasts/audiobooks. Add a content-type-based switch in `configureCategory()`.
-15. **5.4** — `updateCurrentItem` re-fetches all queue rows on every `currentIndex` change. Switch to `NSBatchUpdateRequest` for O(1) updates.
-16. **5.6** — `restoreQueue` leaks one `AnyCancellable` per call. Use a per-call set.
+1. **1.2** — Two completion triggers, no dedup. **RESOLVED**: the polling-based end detection in `updateProgress` (was 2689-2702) was removed in R12. `.AVPlayerItemDidPlayToEndTime` is now the sole source. The `isHandlingCompletion` guard is kept as a defensive layer in case the AVPlayer notification fires twice (rare; would happen on a stream-URL refresh). The `isHandlingCompletion` race from 1.1 (the user-tap vs auto-advance race) was the more dangerous one and is fixed via `userSkippedPendingCompletion`.
+
+2. **1.5** — First-track-after-launch gapless pre-queue is a no-op. **RESOLVED**: added a lifetime subscription to `queueStore.$items` (debounced 300ms) that re-runs `enqueueUpcomingItemsForGapless` whenever the queue changes. When `QueuePrefetcher` populates the queue ~300ms after `play(item:)`, the subscription re-enqueues and the AVQueuePlayer has the next item ready.
+
+3. **1.6** — Gapless "Next" branch posts `.trackPlayed` twice. **RESOLVED**: the `addToRecentlyPlayed` and `NotificationCenter.default.post(.trackPlayed)` calls were removed from the `nextTrack` gapless branch. They now happen only in `advanceGaplessState` (line 2314) when the AVQueuePlayer reports the new track has actually started. The dedup in `addToRecentlyPlayed` handles the edge case where the same track is recorded twice (e.g., on a stream-URL refresh).
+
+4. **1.7** — `play(item:)` double audio-session activation. **RESOLVED**: removed the direct `setActive(true)` call at line 928-935. Now `play(item:)` calls `audioSessionController.activate()` like `play(track:)` does. Single owner of session activation.
+
+5. **1.10** — `previousTrack` doesn't support "restart current" within 3 seconds. **RESOLVED**: added `previousTrackRestartGracePeriod: TimeInterval = 3` constant. If `player.currentTime() > 3s`, the first prev-press seeks to 0 instead of advancing.
+
+6. **1.12 / 1.13** — `nextTrack` BG task can leak. **RESOLVED**: `stop()` and the 3 content-switching entry points (`playRadioStation` / `playPodcastEpisode` / `playAudiobookChapter`) now call `endTrackTransitionBackgroundTask()` before `cancellables.removeAll()`.
+
+7. **1.14** — Dead comment chain at `setupPlayerObservers`. **RESOLVED**: deleted the `filter { _ in true }` and the 25 lines of comment that described an aspiration that was never implemented. The `removeAll()` below is what actually runs.
+
+8. **1.15** — `removeTimeObserver` doesn't fully stop. **RESOLVED**: swapped the order in `stop()` so `removeTimeObserver()` runs *before* `player?.replaceCurrentItem(with: nil)`. The `.AVPlayerItemDidPlayToEndTime` observer is removed before the old item is dealloc'd.
+
+9. **1.20** — `originalQueue` in `toggleShuffle` is captured by value but the items are class-by-value. **SKIPPED**: re-read the code; `originalQueue = queue` IS in the `isShuffled` branch (line 2467) and re-captures every time the user toggles on. The analysis was wrong; the invariant is preserved.
+
+10. **3.2** — Mid-playback gapless toggle: no rebuild. **RESOLVED**: shows a "Gapless will take effect on the next track." toast when the user toggles gapless mid-playback. Section footer text also updated to mention the lazy-rebuild behavior.
+
+11. **3.7** — `shouldUseGapless(for:nextTrack:)` and `prebufferNextTrack` are dead. **RESOLVED**: both deleted. Per-album gapless is a future feature that would live in `PlayerState.enqueueUpcomingItemsForGapless`, not `CrossfadeManager`. `prebufferNextTrack` was a no-op (AVURLAsset load is lazy anyway).
+
+12. **4.2 / 4.5** — Interruption doesn't update `playbackState`. **RESOLVED**: new `onInterruptionBegan` callback in `AudioSessionController`. Wired in `PlayerState.init` to set `playbackState = .paused` when a phone call / Siri / alarm starts.
+
+13. **4.4** — `mediaServicesWereReset` 0.5s delay is hard-coded. **RESOLVED**: replaced with a polling work item that fires on AVPlayer readiness or a 2s safety timeout. Also tracks the in-flight work item so a second reset during the wait doesn't double-fire the owner's `onMediaServicesReset`.
+
+14. **4.7** — No `routeSharingPolicy: .longFormAudio` for podcasts/audiobooks. **RESOLVED**: set via `setCategory(_:mode:policy:options:)` (the Swift name for the `setCategory:mode:routeSharingPolicy:options:` Obj-C method). AirPods will intelligently route when only one pod is in the ear.
+
+15. **5.4** — `updateCurrentItem` re-fetches all queue rows. **RESOLVED**: rewritten with two `NSBatchUpdateRequest`s. O(1) database-side updates instead of O(n) row mutations + save. View context refreshed via `NSManagedObjectContext.mergeChanges(fromRemoteContextSave:into:)`.
+
+16. **5.6** — `restoreQueue` leaks one `AnyCancellable` per call. **RESOLVED**: `fetchFreshStreamUrl` now takes a per-call `cancellables: inout Set<AnyCancellable>` parameter. The previous code stored each restore's subscription in `self.cancellables`, leaking one per restore.
 
 ## PlayerState refactor (P3, multi-week)
 
