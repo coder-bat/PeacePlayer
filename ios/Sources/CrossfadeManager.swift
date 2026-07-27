@@ -231,17 +231,6 @@ class CrossfadeManager: ObservableObject {
         print("🔊 Crossfade cancelled")
     }
 
-    /// Checks if we should use gapless playback for the current context
-    func shouldUseGapless(for currentTrack: Track, nextTrack: Track) -> Bool {
-        guard gaplessEnabled else { return false }
-
-        // Check if tracks are from the same album
-        let sameAlbum = currentTrack.album == nextTrack.album
-        let validAlbum = currentTrack.album != "Unknown Album"
-
-        return sameAlbum && validAlbum
-    }
-
     // MARK: - Private Methods
 
     private func completeCrossfade(completion: @escaping () -> Void) {
@@ -262,28 +251,16 @@ class CrossfadeManager: ObservableObject {
     }
 }
 
-// MARK: - Gapless Playback Support
-
-extension CrossfadeManager {
-
-    /// Pre-buffers the next track for gapless playback
-    func prebufferNextTrack(_ item: QueueItem) {
-        guard gaplessEnabled else { return }
-
-        print("🔊 Prebuffering for gapless: \(item.track.title)")
-
-        guard let url = URL(string: item.streamUrl) else { return }
-
-        // Just load the asset, don't create player yet
-        let asset = AVURLAsset(url: url)
-        asset.loadValuesAsynchronously(forKeys: ["playable", "duration"]) {
-            DispatchQueue.main.async {
-                var error: NSError?
-                let status = asset.statusOfValue(forKey: "playable", error: &error)
-                if status == .loaded {
-                    print("✅ Gapless: Next track prebuffered")
-                }
-            }
-        }
-    }
-}
+// S17-H: removed the dead `shouldUseGapless(for:nextTrack:)`
+// and `prebufferNextTrack(_:)` functions. Both were defined
+// here but never called from anywhere in the codebase
+// (verified via grep). The FullPlayer settings text claims
+// "gapless between consecutive tracks from the same album",
+// which `shouldUseGapless` was meant to implement, but the
+// `gaplessEnabled` toggle in PlayerState.applyGapless is a
+// global flag, not a per-album decision. If we want
+// per-album gapless, that's a future feature that would
+// live in PlayerState.enqueueUpcomingItemsForGapless, not
+// here. `prebufferNextTrack` just warmed an AVURLAsset that
+// the AVQueuePlayer would lazy-load anyway, so the
+// pre-buffer was a no-op.

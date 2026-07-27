@@ -128,21 +128,49 @@ class PlaybackQueueManager: ObservableObject {
     }
 
     private func updateCurrentItem(currentIndex: Int) {
+        // S17-H: use NSBatchUpdateRequest for O(1) database-side
+        // updates instead of fetching every row, mutating every
+        // row, and saving. For a 200-item queue this scales
+        // from 200 row mutations + 1 save per track change
+        // (called on every advance) to a single SQL UPDATE.
+        //
+        // Caveat: NSBatchUpdateRequest updates the persistent
+        // store directly and bypasses the row cache. We need
+        // to refresh the view context so the History / queue
+        // list views see the new isCurrent flag. We do that
+        // via NSManagedObjectContext.mergeChanges with the
+        // batch update result.
         let context = persistence.newBackgroundContext()
 
         context.perform {
             do {
-                // Fetch all queue items
-                let request: NSFetchRequest<CDPlaybackQueue> = CDPlaybackQueue.fetchRequest()
-                request.sortDescriptors = [NSSortDescriptor(keyPath: \CDPlaybackQueue.position, ascending: true)]
-                let items = try context.fetch(request)
+                // 1) Clear isCurrent on every row except the target index.
+                let clearRequest = NSBatchUpdateRequest(entityName: "CDPlaybackQueue")
+                clearRequest.predicate = NSPredicate(format: "position != %d", currentIndex)
+                clearRequest.propertiesToUpdate = ["isCurrent": false]
+                clearRequest.resultType = .updatedObjectIDsResultType
 
-                // Update isCurrent flag
-                for (index, item) in items.enumerated() {
-                    item.isCurrent = (index == currentIndex)
+                let clearResult = try context.execute(clearRequest) as? NSBatchUpdateResult
+                let clearIDs = clearResult?.result as? [NSManagedObjectID] ?? []
+
+                // 2) Set isCurrent=true on the target row (if it exists).
+                let setRequest = NSBatchUpdateRequest(entityName: "CDPlaybackQueue")
+                setRequest.predicate = NSPredicate(format: "position == %d", currentIndex)
+                setRequest.propertiesToUpdate = ["isCurrent": true]
+                setRequest.resultType = .updatedObjectIDsResultType
+
+                let setResult = try context.execute(setRequest) as? NSBatchUpdateResult
+                let setIDs = setResult?.result as? [NSManagedObjectID] ?? []
+
+                // 3) Merge the change notifications into the view
+                //    context so SwiftUI views reading CDPlaybackQueue
+                //    pick up the new isCurrent values.
+                let allIDs = clearIDs + setIDs
+                if !allIDs.isEmpty {
+                    let changes = [NSUpdatedObjectsKey: allIDs]
+                    let viewContext = self.persistence.viewContext
+                    NSManagedObjectContext.mergeChanges(fromRemoteContextSave: changes, into: [viewContext])
                 }
-
-                try context.save()
             } catch {
                 print("❌ Error updating current item: \(error)")
             }
@@ -195,6 +223,15 @@ class PlaybackQueueManager: ObservableObject {
         let failedTitles = NSLock()
         var failedCount = 0
         var failedNames: [String] = []
+        // S17-H: per-call cancellable set. The previous code
+        // stored each `fetchFreshStreamUrl` cancellable into
+        // `self.cancellables` (PlaybackQueueManager.shared),
+        // which leaked one AnyCancellable per restore call. A
+        // user who reopens the app 10 times would accumulate
+        // 10×N (N = queue size) dead cancellables. Now each
+        // restore uses its own set, which is released when the
+        // restore completes.
+        var restoreCancellables = Set<AnyCancellable>()
 
         for (index, item) in savedItems.enumerated() {
             // If it was a local file and still exists, use the local path
@@ -211,7 +248,7 @@ class PlaybackQueueManager: ObservableObject {
 
             // Otherwise, fetch a fresh stream URL
             group.enter()
-            fetchFreshStreamUrl(for: item.track) { streamUrl in
+            fetchFreshStreamUrl(for: item.track, cancellables: &restoreCancellables) { streamUrl in
                 if let url = streamUrl {
                     restoredItems[index] = QueueItem(
                         track: item.track,
@@ -245,7 +282,14 @@ class PlaybackQueueManager: ObservableObject {
         }
     }
 
-    private func fetchFreshStreamUrl(for track: Track, completion: @escaping (String?) -> Void) {
+    private func fetchFreshStreamUrl(
+        for track: Track,
+        // S17-H: caller passes its own cancellable set instead of
+        // `self.cancellables`. This prevents the per-restore
+        // subscription from leaking into the shared set.
+        cancellables: inout Set<AnyCancellable>,
+        completion: @escaping (String?) -> Void
+    ) {
         // Check if local file exists first
         let localURL = AudioFileManager.shared.localFileURL(for: track.videoId)
         if FileManager.default.fileExists(atPath: localURL.path) {

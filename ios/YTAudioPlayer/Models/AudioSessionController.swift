@@ -49,6 +49,13 @@ final class AudioSessionController {
     /// handler just called `activate()` regardless of the reason.
     var onRouteChangeShouldPause: (() -> Void)?
 
+    /// The audio interruption began (phone call, Siri, alarm, etc.).
+    /// S17-H: the owner uses this to flip `playbackState = .paused`
+    /// so the UI reflects the paused state during the call. Without
+    /// this callback, the AVPlayer auto-pauses but `playbackState`
+    /// stays `.playing` — the user sees "playing" with no audio.
+    var onInterruptionBegan: (() -> Void)?
+
     private var observerTokens: [NSObjectProtocol] = []
 
     init() {}
@@ -102,6 +109,17 @@ final class AudioSessionController {
             try session.setCategory(
                 .playback,
                 mode: .default,
+                // S17-H: routeSharingPolicy .longFormAudio tells
+                // iOS this is long-form audio (podcast / audiobook
+                // / music). AirPods will intelligently route: one
+                // pod gets full stereo when only one is in the ear;
+                // the other pod keeps a secondary channel. Without
+                // this, the system defaults to .default which
+                // doesn't trigger the AirPods intelligent routing
+                // for spoken content. For music, .longFormAudio
+                // is also fine — it's the most common policy and
+                // is well-supported.
+                policy: .longFormAudio,
                 options: [.allowAirPlay, .allowBluetooth, .allowBluetoothA2DP]
             )
         } catch {
@@ -156,9 +174,13 @@ final class AudioSessionController {
         switch type {
         case .began:
             print("🔇 Audio interruption began")
-            // Owner listens for the system pause; we don't need to
-            // notify because the AVPlayer is the source of truth and
-            // will reflect the interrupted state on its own.
+            // S17-H: notify the owner so it can flip
+            // `playbackState = .paused`. The AVPlayer auto-pauses
+            // on interruption, but `playbackState` is a derived
+            // app-side property that doesn't update until something
+            // explicitly calls pause(). Without this, the UI shows
+            // "playing" with no audio during a phone call.
+            onInterruptionBegan?()
         case .ended:
             guard let optionsValue = userInfo[AVAudioSessionInterruptionOptionKey] as? UInt else { return }
             let options = AVAudioSession.InterruptionOptions(rawValue: optionsValue)

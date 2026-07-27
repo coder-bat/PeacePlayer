@@ -442,6 +442,14 @@ class PlayerState: ObservableObject {
         audioSessionController.onRouteChangeShouldPause = { [weak self] in
             self?.pause()
         }
+        // S17-H: flip playbackState to .paused when a phone call /
+        // Siri / alarm starts. The AVPlayer auto-pauses, but the
+        // derived playbackState doesn't update until something
+        // calls pause() explicitly. Without this, the UI shows
+        // "playing" with no audio during the call.
+        audioSessionController.onInterruptionBegan = { [weak self] in
+            self?.playbackState = .paused
+        }
         audioSessionController.setup()
 
         // S17-G: mirror `currentItem` from the store. The store is
@@ -2536,28 +2544,16 @@ class PlayerState: ObservableObject {
         // Clearing here means the function is idempotent: it
         // represents "the current player has exactly these 4
         // observers, and nothing else."
-        cancellables = cancellables.filter { cancellable in
-            // Keep only non-player observers (radio tune, sync
-            // bridge, etc.) — the player-item status, duration, and
-            // isPlaybackLikelyToKeepUp publishers all belong to the
-            // current `player` and are recreated below.
-            // Without a `kind` tag on the cancellable we can't
-            // filter precisely, so we drop everything added by
-            // this function on each call. Existing radio/sync/etc.
-            // cancellables are stored at the call sites in
-            // dedicated sub-arrays (see `radioObservers` etc.)
-            // and will be re-added if needed.
-            true
-        }
-        // The simpler approach: just clear all player-observation
-        // cancellables by clearing the whole set here. Any non-
-        // player observers (radio tune, sync bridge) are added via
-        // `addToPlayerObservers(...)` below to keep them in a
-        // dedicated Set.
-        // For now, we keep all the prior cancellables and just
-        // make sure they don't pile up by re-clearing before each
-        // setupPlayerObservers call. The unconditional clear here
-        // is the safety net.
+        //
+        // S17-H: removed the dead `cancellables = cancellables.filter { _ in true }`
+        // that preceded the `removeAll()`. The filter was a
+        // no-op (predicate returns true for every element), and
+        // the 25-line comment block describing an aspiration
+        // ("addToPlayerObservers" that was never implemented)
+        // was misleading. The `removeAll()` below is what
+        // actually does the work. Lifetime-only observers
+        // (queueStore mirror, etc.) live in `lifetimeCancellables`
+        // and are not touched here.
         let priorPlayerCancellableCount = cancellables.count
         print("🔊 setupPlayerObservers: clearing \(priorPlayerCancellableCount) prior cancellables")
         cancellables.removeAll()

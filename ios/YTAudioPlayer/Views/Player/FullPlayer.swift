@@ -1460,7 +1460,25 @@ struct AudioSettingsView: View {
                     Section {
                         Toggle(isOn: Binding(
                             get: { crossfadeManager.gaplessEnabled },
-                            set: { crossfadeManager.gaplessEnabled = $0 }
+                            // S17-H: show a hint when the user
+                            // toggles gapless mid-playback. The
+                            // setting is "lazy" — the AVPlayer
+                            // type (AVPlayer vs AVQueuePlayer) is
+                            // only re-evaluated on the next
+                            // play(item:) call, not on toggle.
+                            // Without this hint the user would
+                            // expect an immediate effect, get
+                            // confused when gapless doesn't
+                            // "kick in", and file a bug.
+                            set: { newValue in
+                                let wasDifferent = crossfadeManager.gaplessEnabled != newValue
+                                crossfadeManager.gaplessEnabled = newValue
+                                if wasDifferent, PlayerState.shared.currentItem != nil {
+                                    ErrorHandler.shared.show(
+                                        .playbackFailed("Gapless will take effect on the next track.")
+                                    )
+                                }
+                            }
                         )) {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text("Gapless Playback")
@@ -1478,7 +1496,7 @@ struct AudioSettingsView: View {
                             .font(.system(size: 11, weight: .bold, design: .monospaced))
                             .foregroundColor(.cyberDim)
                     } footer: {
-                        Text("Gapless playback automatically removes silence between consecutive tracks from the same album.")
+                        Text("Gapless playback automatically removes silence between consecutive tracks. Toggling mid-playback takes effect on the next track.")
                             .foregroundColor(.cyberDim)
                     }
 
