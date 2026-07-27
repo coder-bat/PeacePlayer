@@ -1404,8 +1404,6 @@ async def _prefetch_worker(video_id: str):
                             leftover.unlink()
                         except FileNotFoundError:
                             pass
-            except Exception as e:
-                logger.error(f"Prefetch transcode failed for {video_id}: {e}")
     except Exception as e:
         logger.error(f"Prefetch failed: {video_id}: {e}", exc_info=True)
 
