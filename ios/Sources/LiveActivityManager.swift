@@ -43,36 +43,34 @@ final class LiveActivityManager {
     private var pendingLifecycle: Task<Void, Never>?
 
     private init() {
-        // Start a Live Activity whenever the current track
-        // changes. The handler decides whether to start a new
-        // activity, update the existing one, or end it.
-        if #available(iOS 16.2, *) {
-            PlayerState.shared.$currentItem
-                .removeDuplicates { $0?.track.videoId == $1?.track.videoId }
-                .sink { [weak self] _ in
-                    self?.refreshActivityForCurrentTrack()
-                }
-                .store(in: &cancellables)
+        // The class is annotated @available(iOS 16.2, *), so all
+        // the body code can use ActivityKit APIs directly. No need
+        // for inner #available checks.
+        PlayerState.shared.$currentItem
+            .removeDuplicates { $0?.track.videoId == $1?.track.videoId }
+            .sink { [weak self] _ in
+                self?.refreshActivityForCurrentTrack()
+            }
+            .store(in: &cancellables)
 
-            // Update the live activity's isPlaying / currentTime on
-            // every playbackState or progress change. We use
-            // debounce-less updates here because the system rate-
-            // limits the activity updates for us (max ~1 Hz), and
-            // we want the user to see immediate state when they
-            // pause.
-            PlayerState.shared.$playbackState
-                .sink { [weak self] _ in
-                    self?.updateActivityState()
-                }
-                .store(in: &cancellables)
+        // Update the live activity's isPlaying / currentTime on
+        // every playbackState or progress change. We use
+        // debounce-less updates here because the system rate-
+        // limits the activity updates for us (max ~1 Hz), and
+        // we want the user to see immediate state when they
+        // pause.
+        PlayerState.shared.$playbackState
+            .sink { [weak self] _ in
+                self?.updateActivityState()
+            }
+            .store(in: &cancellables)
 
-            PlayerState.shared.$progress
-                .throttle(for: .seconds(1), scheduler: DispatchQueue.main, latest: true)
-                .sink { [weak self] _ in
-                    self?.updateActivityState()
-                }
-                .store(in: &cancellables)
-        }
+        PlayerState.shared.$progress
+            .throttle(for: .seconds(1), scheduler: DispatchQueue.main, latest: true)
+            .sink { [weak self] _ in
+                self?.updateActivityState()
+            }
+            .store(in: &cancellables)
     }
 
     // MARK: - Public API
@@ -81,7 +79,6 @@ final class LiveActivityManager {
     /// no track, end any active activity. If the track changed,
     /// start a new activity. Otherwise, just update the state.
     private func refreshActivityForCurrentTrack() {
-        guard #available(iOS 16.1, *) else { return }
         guard let item = PlayerState.shared.currentItem else {
             scheduleEnd()
             return
@@ -174,7 +171,6 @@ final class LiveActivityManager {
         attributes: NowPlayingActivityAttributes,
         state: NowPlayingActivityAttributes.ContentState
     ) {
-        guard #available(iOS 16.1, *) else { return }
         // Don't start a new activity if the user has Live
         // Activities disabled globally.
         guard ActivityAuthorizationInfo().areActivitiesEnabled else {
@@ -198,7 +194,6 @@ final class LiveActivityManager {
     }
 
     private func updateActivityState() {
-        guard #available(iOS 16.1, *) else { return }
         guard let activity = activity,
               let item = PlayerState.shared.currentItem else {
             return
@@ -217,7 +212,6 @@ final class LiveActivityManager {
     /// End any active activity. Called on stop, sign-out, or
     /// when playback ends naturally.
     func endActivity() {
-        guard #available(iOS 16.1, *) else { return }
         let old = pendingLifecycle
         pendingLifecycle = Task { [weak self] in
             await old?.value
