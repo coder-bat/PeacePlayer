@@ -887,28 +887,53 @@ async def audio_stream(video_id: str, request: Request):
 
         if not cache_path.exists() or cache_path.stat().st_size < 1000:
             logger.info(f"[audio] Transcoding {video_id} from YouTube (first call)...")
-            # Download the entire YouTube body to a temp file,
-            # then ffmpeg from file to file. This is the most
-            # reliable ffmpeg invocation — piping YouTube
-            # directly into ffmpeg via stdin can hit HTTP
-            # timeouts on the larger videos. The temp file is
-            # cleaned up below.
+            # S17-H (2026-07-27 13:30): switched from a raw
+            # httpx download to yt-dlp's own downloader.
+            # YouTube is rate-limiting / dropping connections
+            # on raw httpx downloads (peer closes the
+            # connection mid-body after ~300-440KB of a 1-2MB
+            # file, leaving the body truncated and ffmpeg
+            # failing to transcode). yt-dlp's downloader
+            # handles YouTube's rate limiting, retry logic,
+            # and the SABR / PO-Token / chunked transfer
+            # machinery that bare httpx doesn't. It also picks
+            # the right range-headers and User-Agent to match
+            # the URL signature.
             tmp_in = cache_dir / f"{video_id}.in.webm"
-            async with httpx.AsyncClient(
-                timeout=httpx.Timeout(connect=30.0, read=120.0, write=120.0, pool=30.0),
-                follow_redirects=True,
-            ) as h:
-                yt_headers = {
-                    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                    'Referer': 'https://music.youtube.com/',
-                }
-                # Forward Range if present (for seek)
-                if 'range' in request.headers:
-                    yt_headers['Range'] = request.headers['range']
-                r = await h.get(yt_url, headers=yt_headers)
-                r.raise_for_status()
-                tmp_in.write_bytes(r.content)
             try:
+                # Run yt-dlp in a thread (it's sync). Use
+                # youtube-dl's "dump-single-file" with
+                # output to a template path; but we want raw
+                # audio, no post-processing. The simplest
+                # reliable path: yt-dlp -f "bestaudio[ext=webm]"
+                # -o tmp_in --no-playlist --no-part
+                proc = await asyncio.create_subprocess_exec(
+                    'yt-dlp',
+                    '-f', 'worstaudio[ext=webm]/worstaudio/bestaudio[ext=webm]/bestaudio/best',
+                    '-o', str(tmp_in),
+                    '--no-playlist',
+                    '--no-part',
+                    '--no-progress',
+                    '--quiet',
+                    '--remote-components', 'ejs:github',
+                    yt_url,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                _, stderr = await proc.communicate()
+                if proc.returncode != 0:
+                    raise HTTPException(
+                        status_code=500,
+                        detail=f"yt-dlp download failed: {stderr.decode(errors='replace')[:300]}"
+                    )
+                # yt-dlp might append an extension. Find the actual file.
+                possible = [tmp_in, tmp_in.with_suffix('.webm'),
+                           cache_dir / f"{video_id}.in.webm.webm"]
+                actual_in = next((p for p in possible if p.exists()), None)
+                if not actual_in:
+                    raise HTTPException(status_code=500, detail="yt-dlp download produced no file")
+                if actual_in != tmp_in:
+                    actual_in.rename(tmp_in)
                 # Transcode. ffmpeg is sync, run in a thread.
                 proc = await asyncio.create_subprocess_exec(
                     'ffmpeg', '-y', '-loglevel', 'error',
