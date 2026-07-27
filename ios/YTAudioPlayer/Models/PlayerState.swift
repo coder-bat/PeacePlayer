@@ -175,6 +175,17 @@ class PlayerState: ObservableObject {
 
     /// Flag to prevent multiple completion triggers
     private var isHandlingCompletion = false
+    /// S17-H: set by `nextTrack(userSkipped: true)` (and other
+    /// user-initiated skip paths) so the in-flight
+    /// `.AVPlayerItemDidPlayToEndTime` auto-advance can be
+    /// recognized and skipped. Without this, a user tapping Next
+    /// in the last 0.5s of a track races with the auto-advance:
+    /// the user's tap advances to N+1 on the main thread, then
+    /// the queued completion handler dispatches and advances to
+    /// N+2, skipping a track the user wanted to hear. The flag
+    /// is cleared in `play(item:)` once the new track is
+    /// committed.
+    private var userSkippedPendingCompletion = false
     
     /// Playback queue. S17-G (perf 10 P0-F1): backed by `queueStore`
     /// so that queue mutations don't fire `PlayerState.objectWillChange`
@@ -418,6 +429,14 @@ class PlayerState: ObservableObject {
         audioSessionController.onMediaServicesReset = { [weak self] in
             self?.handleMediaServicesResetRestart()
         }
+        // S17-H: pause on headphone unplug. AudioSessionController
+        // fires this from the routeChange handler when the
+        // previous output device went away. Without this, audio
+        // would keep playing through the device speaker after
+        // headphones are disconnected.
+        audioSessionController.onRouteChangeShouldPause = { [weak self] in
+            self?.pause()
+        }
         audioSessionController.setup()
 
         // S17-G: mirror `currentItem` from the store. The store is
@@ -607,8 +626,18 @@ class PlayerState: ObservableObject {
     /// with `.shouldResume`. The controller has already re-activated
     /// the session; we just need to resume the AVPlayer.
     private func resumeFromInterruption() {
-        player?.play()
-        player?.rate = playbackRate
+        // S17-H: use playImmediately(atRate:) instead of
+        // play() + rate=playbackRate. The two-call sequence has a
+        // 1-frame window where the player runs at 1.0x (from
+        // play()) before snapping to playbackRate, audible as a
+        // pop/glitch on resume if the user had set 1.5x. The S17-E
+        // fix for this race was already applied in
+        // performSeamlessQualitySwitch but never propagated here.
+        // playImmediately(atRate:) sets rate and starts in the
+        // same call.
+        if let player = player {
+            player.playImmediately(atRate: Float(playbackRate))
+        }
     }
 
     /// Called by AudioSessionController 0.5s after a media-services
@@ -895,6 +924,13 @@ class PlayerState: ObservableObject {
         // the backend. The QueueItem's expiry field is
         // intentionally conservative (3h, under the backend's
         // 3.5h TTL) so we always refresh in time.
+
+        // S17-H: clear the user-skip flag. The new track is
+        // about to be committed, so any future auto-advance
+        // from `.AVPlayerItemDidPlayToEndTime` belongs to this
+        // new track and should run normally.
+        userSkippedPendingCompletion = false
+
         if item.isStreamUrlExpired && item.source == .stream {
             print("▶️ play(item:) URL expired, refreshing before play")
             // Find this item in the queue (if present) and refresh
@@ -1817,8 +1853,13 @@ class PlayerState: ObservableObject {
         // S17-G: forward to the store. Dedup + trim happen inside
         // the store. The store fires its own objectWillChange; only
         // views observing the store re-render.
+        // S17-H: removed `dataManager.saveQueue(queue)` — the
+        // JSON path was never read by the restore flow
+        // (PlaybackQueueManager/CoreData is the source of truth)
+        // and was duplicating writes. The CoreData subscription
+        // in PlaybackQueueManager.startObservingPlayerStateIfNeeded
+        // handles persistence.
         queueStore.add(item, maxQueueSize: maxQueueSize)
-        dataManager.saveQueue(queue)
     }
 
     func addToQueueNext(_ item: QueueItem) {
@@ -1826,8 +1867,8 @@ class PlayerState: ObservableObject {
         markUserTouchedPlayback()
         // S17-G: forward to the store. The store handles dedup
         // and trims to maxQueueSize.
+        // S17-H: see addToQueue — JSON path removed.
         queueStore.addNext(item, maxQueueSize: maxQueueSize)
-        dataManager.saveQueue(queue)
     }
     
     /// Trims queue to keep memory usage in check
@@ -1895,7 +1936,27 @@ class PlayerState: ObservableObject {
         // index adjustment when removing before/after the
         // current index.
         let wasCurrent = (index == currentIndex)
+        let removedItem = queue[index]
         queueStore.remove(at: index)
+
+        // S17-H: if the removed track was already pre-queued
+        // in the AVQueuePlayer (gapless mode), remove the
+        // matching AVPlayerItem too. Otherwise the AVQueuePlayer
+        // would play the removed track as if nothing happened,
+        // and `advanceGaplessState`'s lookup in `queueStore.items`
+        // would return nil, leaving `currentIndex` stale and
+        // breaking the next user-tap of Next.
+        if !wasCurrent, let queuePlayer = player as? AVQueuePlayer {
+            let removedUrl = URL(string: removedItem.streamUrl)
+            for queued in queuePlayer.items() {
+                guard let queuedAsset = queued.asset as? AVURLAsset else { continue }
+                if queuedAsset.url == removedUrl {
+                    queuePlayer.remove(queued)
+                    print("✂️ Removed pre-queued gapless item: \(removedItem.track.title)")
+                    break
+                }
+            }
+        }
 
         if wasCurrent {
             // Removed current item, play next (or last, or stop)
@@ -1923,6 +1984,15 @@ class PlayerState: ObservableObject {
         // S17-G: forward to the store. The store also resets
         // currentIndex to -1.
         queueStore.clear()
+        // S17-H: also stop the player. Without this, an in-flight
+        // AVPlayerItem kept playing the cleared current track, and
+        // when it ended the next-track path saw an empty queue and
+        // left the AVPlayer paused-but-still-on-the-now-missing
+        // item, with playbackState stuck at .playing. UI shows
+        // "playing" with no audio. Now clearQueue is a complete
+        // teardown.
+        stop()
+        currentItem = nil
     }
     
     // MARK: - Skip Control
@@ -1946,6 +2016,16 @@ class PlayerState: ObservableObject {
             if userSkipped {
                 AntiAlgorithmEngine.shared.trackSkipped(videoId: currentVideoId)
             }
+        }
+        // S17-H: mark that a user-initiated skip just happened.
+        // The handleTrackCompletion path that fires from
+        // .AVPlayerItemDidPlayToEndTime (which is in flight on
+        // completionQueue at this very moment for tracks that
+        // are near the end) will see this flag and skip its own
+        // auto-advance, so the user hears the track they tapped
+        // for, not the one after it.
+        if userSkipped {
+            userSkippedPendingCompletion = true
         }
         guard !queue.isEmpty else {
             print("⏭️ Queue is empty!")
@@ -1974,7 +2054,16 @@ class PlayerState: ObservableObject {
                 // property, so it stays on PlayerState.
                 queueStore.setCurrentIndex(nextIndex)
                 let nextItem = queueStore.items[nextIndex]
-                expectedDuration = Double(nextItem.track.durationSeconds)
+                // S17-H: route through the helper so playbackClock
+                // (the focused observable that the scrubber
+                // subscribes to) also gets the new duration. A
+                // direct `expectedDuration =` write here was
+                // leaving the scrubber denominator stale across
+                // gapless transitions, so the progress bar
+                // visibly compressed when crossing into the next
+                // track. Same helper is used by every other
+                // play/crossfade path.
+                updateExpectedDuration(Double(nextItem.track.durationSeconds))
                 dataManager.addToRecentlyPlayed(nextItem.track)
                 NotificationCenter.default.post(name: .trackPlayed, object: nil)
                 queuePlayer.advanceToNextItem()
@@ -2169,6 +2258,24 @@ class PlayerState: ObservableObject {
         let queueCount = queue.count
         guard queueCount > 1 else { return }
 
+        // S17-H: drop already-queued-but-not-current AVPlayerItems
+        // before re-enqueueing. The previous code blindly called
+        // `queuePlayer.insert(item, after: queuePlayer.items().last)`
+        // on every auto-advance / next-tap, leaving the items the
+        // AVQueuePlayer had already pre-queued for upcoming tracks
+        // in place. After 3 auto-advances in a row, the
+        // AVQueuePlayer's items[] would contain [3, 4, 5, 6, 4, 5,
+        // 6, 4, 5, 6] — same tracks appended multiple times. The
+        // user would hear track 4 played three times in a row.
+        // Strategy: remove every item except the current one. This
+        // is safe because AVQueuePlayer's `canInsert(_:after:)` is
+        // for inserting new items; what we need is the inverse
+        // operation on already-queued items. The simplest correct
+        // path: iterate `items()` after the current, remove each.
+        for queuedItem in queuePlayer.items().dropFirst() {
+            queuePlayer.remove(queuedItem)
+        }
+
         let lookAhead = min(3, queueCount - 1)  // Pre-queue up to 3 tracks to limit memory
         for offset in 1...lookAhead {
             let nextIdx: Int
@@ -2206,6 +2313,14 @@ class PlayerState: ObservableObject {
         if matchIdx < queueStore.items.count {
             let item = queueStore.items[matchIdx]
             currentItem = item
+            // S17-H: push expectedDuration through the helper so
+            // playbackClock (and the scrubber) follow the
+            // auto-advance. Without this the lock-screen / control-
+            // center duration stayed on the previous track for
+            // 1-3s after the auto-advance fired (NowPlayingService
+            // gets the new duration, but the in-app scrubber uses
+            // playbackClock).
+            updateExpectedDuration(Double(item.track.durationSeconds))
             dataManager.addToRecentlyPlayed(item.track)
             NotificationCenter.default.post(name: .trackPlayed, object: nil)
             // S11 fix (Bug 2): refresh Lock Screen / Control Center
@@ -2661,10 +2776,22 @@ class PlayerState: ObservableObject {
             if timeRemaining <= CrossfadeManager.shared.duration && timeRemaining > CrossfadeManager.shared.duration - 1 {
                 prepareNextTrackForCrossfade()
             }
-            // Track listening time (only count when playing and progress is moving forward)
+            // Track listening time (only count when audio is
+            // actually playing and progress is moving forward)
+            // S17-H: use player.rate > 0 instead of
+            // playbackState == .playing. The previous check
+            // credited listening time during phone calls and
+            // headphone unplugs, because the AVPlayer auto-pauses
+            // on interruption but playbackState doesn't flip until
+            // pause() is explicitly called. The player.rate is the
+            // ground truth for "is audio actually being produced".
+            // Note: in this scope `player` is shadowed by the
+            // `guard let player = player` at the top of
+            // updateProgress, so it's non-optional here.
             let now = Date()
             let timeDelta = now.timeIntervalSince(lastProgressUpdate)
-            if timeDelta > 0 && timeDelta < 5 && playbackState == .playing {
+            let isAudioPlaying = player.rate > 0
+            if timeDelta > 0 && timeDelta < 5 && isAudioPlaying {
                 accumulatedListeningTime += timeDelta
                 // Save to DataManager every 10 seconds
                 if accumulatedListeningTime >= 10 {
@@ -2835,6 +2962,24 @@ class PlayerState: ObservableObject {
         // Prevent multiple completion triggers - now thread-safe via completionQueue
         guard !isHandlingCompletion else {
             print("🏁 Completion already being handled, skipping")
+            return
+        }
+        // S17-H: if a user-initiated skip just landed (Next tap
+        // in the last fraction of a second), the user's chosen
+        // next track is already playing or about to play via
+        // `nextTrack(userSkipped: true)`. The .AVPlayerItemDidPlayToEndTime
+        // for the *old* track is firing now (the old item is
+        // still in the AVPlayer until it's swapped), and we
+        // would otherwise advance again to the track *after*
+        // the user's choice. Swallow the auto-advance. The flag
+        // is cleared the next time `play(item:)` commits a new
+        // current track.
+        if userSkippedPendingCompletion {
+            print("🏁 User skip landed in the last 0.5s — skipping auto-advance to honor user choice")
+            isHandlingCompletion = false
+            // The BG task was started by the user-skip path; let
+            // the user-skip's own isPlaybackLikelyToKeepUp observer
+            // release it. Don't release it here.
             return
         }
         isHandlingCompletion = true

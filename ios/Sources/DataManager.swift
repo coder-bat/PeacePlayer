@@ -17,7 +17,12 @@ class DataManager: ObservableObject {
     @Published var recentlyPlayed: [RecentTrack] = []
     @Published var totalListeningSeconds: TimeInterval = 0
     @Published var tracksPlayedCount: Int = 0
-    @Published var savedQueue: [QueueItemSnapshot] = []
+    // S17-H: removed `savedQueue` (JSON snapshot of the queue).
+    // It was never read by the restore path (CoreData via
+    // PlaybackQueueManager is the source of truth) and was just
+    // a duplicate write that drifted from the CoreData truth. The
+    // `dataManager.saveQueue(_:)` call sites in PlayerState
+    // (formerly in addToQueue/addToQueueNext) are also removed.
     
     // MARK: - Private Properties
     private let defaults = UserDefaults.standard
@@ -33,7 +38,8 @@ class DataManager: ObservableObject {
         static let recentlyPlayed = "recentlyPlayed"
         static let totalListeningSeconds = "totalListeningSeconds"
         static let tracksPlayedCount = "tracksPlayedCount"
-        static let savedQueue = "savedQueue"
+        // S17-H: removed `savedQueue` (JSON snapshot key) — see
+        // the matching comment on the @Published var.
         static let lastPlayedTrackId = "lastPlayedTrackId"
         static let lastPlaybackProgress = "lastPlaybackProgress"
     }
@@ -53,16 +59,10 @@ class DataManager: ObservableObject {
         // Load stats
         totalListeningSeconds = defaults.double(forKey: Keys.totalListeningSeconds)
         tracksPlayedCount = defaults.integer(forKey: Keys.tracksPlayedCount)
-        
-        // Load saved queue
-        if let data = defaults.data(forKey: Keys.savedQueue) {
-            do {
-                savedQueue = try decoder.decode([QueueItemSnapshot].self, from: data)
-            } catch {
-                print("⚠️ Failed to decode saved queue: \(error.localizedDescription)")
-                defaults.removeObject(forKey: Keys.savedQueue)
-            }
-        }
+
+        // S17-H: removed the JSON saved-queue load. PlaybackQueueManager
+        // (CoreData) is the source of truth; this branch was never
+        // read by the restore path and was duplicating writes.
     }
     
     // MARK: - Recently Played
@@ -214,50 +214,16 @@ class DataManager: ObservableObject {
     }
     
     // MARK: - Queue Persistence
-    
-    func saveQueue(_ items: [QueueItem]) {
-        // S17-G (perf 10 P0-F4): JSON-encode was on the calling
-        // thread (always main, from PlayerState.addToQueue /
-        // addToQueueNext). With a 200-item queue, the encode is
-        // ~10-15ms — enough to stutter a drag-to-reorder
-        // animation. 200 × 10ms = 2s of jank on a full reorder.
-        //
-        // Fix: snapshot stays synchronous (in-memory state, used
-        // by loadQueue on the next launch), the JSON encode +
-        // UserDefaults.set dispatch to a utility queue. UserDefaults
-        // batches its disk write, so defaults.set is fast; the
-        // encode was the hot path.
-        //
-        // `savedQueue` is a property write — Swift's atomic
-        // pointer copy is safe. `encoder` (JSONEncoder) is
-        // documented as thread-safe for encoding. `defaults` is
-        // thread-safe. `ErrorHandler.show` already dispatches to
-        // main, so it's safe to call from any thread.
-        savedQueue = items.map { QueueItemSnapshot(from: $0) }
-        let snapshot = savedQueue
-        DispatchQueue.global(qos: .utility).async { [weak self] in
-            guard let self = self else { return }
-            do {
-                let data = try self.encoder.encode(snapshot)
-                self.defaults.set(data, forKey: Keys.savedQueue)
-            } catch {
-                ErrorHandler.shared.show(.parsing("Couldn't save your queue (\(snapshot.count) tracks). Resume may not work next time."))
-                print("⚠️ Failed to encode queue (\(snapshot.count) items): \(error.localizedDescription)")
-            }
-        }
-    }
-    
-    func loadQueue() -> [QueueItemSnapshot] {
-        return savedQueue
-    }
-    
-    func clearSavedQueue() {
-        savedQueue.removeAll()
-        defaults.removeObject(forKey: Keys.savedQueue)
-    }
-    
+    // S17-H: removed the entire JSON queue persistence layer
+    // (saveQueue / loadQueue / clearSavedQueue / QueueItemSnapshot).
+    // PlaybackQueueManager (CoreData) is the only restore path the
+    // app reads on launch; the JSON path was written on every
+    // addToQueue / addToQueueNext and was never read, drifting
+    // from the CoreData truth. PlayerState.addToQueue /
+    // addToQueueNext no longer call dataManager.saveQueue.
+
     // MARK: - Last Playback State
-    
+
     func saveLastPlaybackState(trackId: String, progress: Double) {
         defaults.set(trackId, forKey: Keys.lastPlayedTrackId)
         defaults.set(progress, forKey: Keys.lastPlaybackProgress)
@@ -278,12 +244,12 @@ class DataManager: ObservableObject {
     
     func resetAllData() {
         recentlyPlayed.removeAll()
-        savedQueue.removeAll()
         totalListeningSeconds = 0
         tracksPlayedCount = 0
-        
+
         defaults.removeObject(forKey: Keys.recentlyPlayed)
-        defaults.removeObject(forKey: Keys.savedQueue)
+        // S17-H: removed the savedQueue defaults cleanup (no
+        // longer writing the key).
         defaults.removeObject(forKey: Keys.totalListeningSeconds)
         defaults.removeObject(forKey: Keys.tracksPlayedCount)
         defaults.removeObject(forKey: Keys.lastPlayedTrackId)
@@ -327,43 +293,5 @@ struct RecentTrack: Codable, Identifiable {
     
     var artworkURL: URL? {
         thumbnails.last?.url
-    }
-}
-
-/// A persisted snapshot of a queue item (videoId only - stream URLs expire)
-struct QueueItemSnapshot: Codable {
-    let videoId: String
-    let title: String
-    let artists: [String]
-    let album: String
-    let durationSeconds: Int
-    let thumbnails: [Thumbnail]
-    let isExplicit: Bool
-    let videoType: String
-    let savedAt: Date
-    
-    init(from item: QueueItem) {
-        self.videoId = item.track.videoId
-        self.title = item.track.title
-        self.artists = item.track.artists
-        self.album = item.track.album
-        self.durationSeconds = item.track.durationSeconds
-        self.thumbnails = item.track.thumbnails
-        self.isExplicit = item.track.isExplicit
-        self.videoType = item.track.videoType
-        self.savedAt = Date()
-    }
-    
-    var track: Track {
-        Track(
-            videoId: videoId,
-            title: title,
-            artists: artists,
-            album: album,
-            durationSeconds: durationSeconds,
-            thumbnails: thumbnails,
-            isExplicit: isExplicit,
-            videoType: videoType
-        )
     }
 }

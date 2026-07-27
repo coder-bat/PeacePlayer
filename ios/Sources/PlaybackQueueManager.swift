@@ -185,6 +185,16 @@ class PlaybackQueueManager: ObservableObject {
 
         var restoredItems: [QueueItem?] = Array(repeating: nil, count: savedItems.count)
         let group = DispatchGroup()
+        // S17-H: track which tracks failed to restore so we can
+        // surface a one-time error toast at the end. The previous
+        // code silently dropped failed restores (the `nil` slots
+        // fell out via `compactMap` with no signal to the user).
+        // Now: a single toast if any track failed, naming the
+        // count, so the user knows why the queue has fewer items
+        // than they saved.
+        let failedTitles = NSLock()
+        var failedCount = 0
+        var failedNames: [String] = []
 
         for (index, item) in savedItems.enumerated() {
             // If it was a local file and still exists, use the local path
@@ -208,6 +218,14 @@ class PlaybackQueueManager: ObservableObject {
                         streamUrl: url,
                         source: .stream
                     )
+                } else {
+                    // Track the failure for the summary toast.
+                    failedTitles.lock()
+                    failedCount += 1
+                    if failedNames.count < 3 {
+                        failedNames.append(item.track.title)
+                    }
+                    failedTitles.unlock()
                 }
                 group.leave()
             }
@@ -216,6 +234,13 @@ class PlaybackQueueManager: ObservableObject {
         group.notify(queue: .main) {
             let validItems = restoredItems.compactMap { $0 }
             print("✅ Restored \(validItems.count)/\(savedItems.count) queue items")
+            if failedCount > 0 {
+                let names = failedNames.joined(separator: ", ")
+                let more = failedCount > failedNames.count ? " and \(failedCount - failedNames.count) more" : ""
+                ErrorHandler.shared.show(
+                    .parsing("Couldn't restore \(failedCount) track\(failedCount == 1 ? "" : "s") from your last session: \(names)\(more). They may be region-locked or temporarily unavailable.")
+                )
+            }
             completion(validItems)
         }
     }

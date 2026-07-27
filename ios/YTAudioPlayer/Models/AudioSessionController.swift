@@ -43,6 +43,12 @@ final class AudioSessionController {
     /// and restart the current track.
     var onMediaServicesReset: (() -> Void)?
 
+    /// The output route went away (e.g., headphones unplugged).
+    /// Apple recommends pausing in this case so audio doesn't blast
+    /// out of the speaker. S17-H: previously the route-change
+    /// handler just called `activate()` regardless of the reason.
+    var onRouteChangeShouldPause: (() -> Void)?
+
     private var observerTokens: [NSObjectProtocol] = []
 
     init() {}
@@ -86,10 +92,17 @@ final class AudioSessionController {
     private func configureCategory() {
         do {
             let session = AVAudioSession.sharedInstance()
+            // S17-H: add `.allowBluetoothA2DP`. The previous
+            // options enabled only HFP (Hands-Free Profile) on
+            // Bluetooth, which is mono and low quality. A2DP is
+            // the high-quality stereo path used by AirPods and
+            // most BT headphones. With just `.allowBluetooth`,
+            // AirPods would route through the low-quality
+            // hands-free codec.
             try session.setCategory(
                 .playback,
                 mode: .default,
-                options: [.allowAirPlay, .allowBluetooth]
+                options: [.allowAirPlay, .allowBluetooth, .allowBluetoothA2DP]
             )
         } catch {
             print("❌ AudioSessionController category setup failed: \(error)")
@@ -168,8 +181,18 @@ final class AudioSessionController {
               let reason = AVAudioSession.RouteChangeReason(rawValue: reasonValue) else { return }
 
         switch reason {
-        case .newDeviceAvailable, .oldDeviceUnavailable:
-            print("🎧 Audio route changed, ensuring session is active")
+        case .oldDeviceUnavailable:
+            // S17-H: pause on headphone unplug. Apple's
+            // recommended behavior is to pause so audio doesn't
+            // blast out of the device speaker. The previous code
+            // just called activate() for both newDeviceAvailable
+            // and oldDeviceUnavailable, leaving audio playing
+            // through the speaker when headphones were pulled.
+            print("🎧 Headphones/old device disconnected — pausing")
+            onRouteChangeShouldPause?()
+            activate()
+        case .newDeviceAvailable:
+            print("🎧 New audio route available, ensuring session is active")
             activate()
         default:
             break

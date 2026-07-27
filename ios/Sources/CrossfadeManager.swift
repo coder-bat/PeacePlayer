@@ -216,6 +216,16 @@ class CrossfadeManager: ObservableObject {
         nextPlayer?.pause()
         nextPlayer?.volume = 0
 
+        // S17-H: nil out nextPlayer. The previous code left it
+        // as a non-nil paused reference, which made the next
+        // prepareNextTrack call return early on the
+        // `nextPlayer == nil` guard at line 81. After a
+        // cancelled crossfade, no future pre-prep happened for
+        // the rest of the track, so when the current track
+        // ended the user heard a hard cut instead of a
+        // crossfade.
+        nextPlayer = nil
+
         isCrossfading = false
 
         print("🔊 Crossfade cancelled")

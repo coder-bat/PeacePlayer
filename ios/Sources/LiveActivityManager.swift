@@ -6,8 +6,20 @@
 //  playback begins, updates it as state changes, ends it
 //  when playback stops or the user signs out.
 //
-//  iOS 16.1+ only. Older devices silently no-op (the activity
+//  iOS 16.2+ only. Older devices silently no-op (the activity
 //  just never appears).
+//
+//  Duplicate-notification fix (S17-H, see ios/LIVE_ACTIVITY_DUPLICATE_BUG.md):
+//  - `pendingLifecycle: Task<Void, Never>?` serializes the end+request
+//    sequence so concurrent $currentItem emissions cannot both observe
+//    the same `existing` activity and each fire their own
+//    `Activity.request`. Without this, rapid skipping leaks N
+//    activities to the lock screen.
+//  - `refreshActivityForCurrentTrack` compares the *new* attributes
+//    against `existing.attributes` and short-circuits to an in-place
+//    `update` when the track is the same. This kills the duplicate
+//    created by the `loadingItem` → `realItem` transition (same
+//    videoId, just stream URL resolves).
 //
 
 import Foundation
@@ -22,6 +34,13 @@ final class LiveActivityManager {
 
     private var activity: Activity<NowPlayingActivityAttributes>?
     private var cancellables = Set<AnyCancellable>()
+
+    /// Serializes activity lifecycle (end + start) so concurrent
+    /// `$currentItem` emissions cannot both observe the same
+    /// `existing` activity and each fire their own `Activity.request`.
+    /// Without this, rapid skipping leaks N activities to the lock
+    /// screen — the duplicate-notification bug.
+    private var pendingLifecycle: Task<Void, Never>?
 
     private init() {
         // Start a Live Activity whenever the current track
@@ -64,35 +83,91 @@ final class LiveActivityManager {
     private func refreshActivityForCurrentTrack() {
         guard #available(iOS 16.1, *) else { return }
         guard let item = PlayerState.shared.currentItem else {
-            endActivity()
+            scheduleEnd()
             return
         }
         let track = item.track
-        let attributes = NowPlayingActivityAttributes(
+        let newAttributes = NowPlayingActivityAttributes(
             trackTitle: track.title,
             trackArtist: track.displayArtist,
             trackAlbum: track.album,
             artworkURLString: track.artworkURL?.absoluteString
         )
-        let state = NowPlayingActivityAttributes.ContentState(
+        let newState = NowPlayingActivityAttributes.ContentState(
             isPlaying: PlayerState.shared.playbackState.isPlaying,
             currentTime: PlayerState.shared.progress,
             duration: Double(track.durationSeconds),
             updatedAt: Date()
         )
 
-        if let existing = activity {
-            // Track changed while activity was running. End the
-            // old one and start a new one — Live Activities
-            // don't support changing their static attributes
-            // (track title etc.) in place.
-            Task {
-                await existing.end(nil, dismissalPolicy: .immediate)
-                self.startNewActivity(attributes: attributes, state: state)
-            }
-        } else {
-            startNewActivity(attributes: attributes, state: state)
+        // FIX-1: only end+restart when the track actually changed.
+        // The previous code assumed `existing != nil` meant "track
+        // changed", which is false during the `loadingItem` →
+        // `realItem` transition (same videoId, just stream URL
+        // resolves) and false during a `playbackState` change that
+        // happens to be routed through this method. In both cases,
+        // end+request creates a brand-new Activity visible on the
+        // lock screen for no reason. The existing activity for the
+        // same track gets a `update(...)` push instead.
+        if let existing = activity,
+           existing.attributes.trackTitle == newAttributes.trackTitle,
+           existing.attributes.trackArtist == newAttributes.trackArtist,
+           existing.attributes.artworkURLString == newAttributes.artworkURLString {
+            updateActivityState()
+            return
         }
+
+        // FIX-2: chain the end+request through `pendingLifecycle`
+        // so concurrent $currentItem emissions cannot both observe
+        // the same `existing` and both call `Activity.request` for
+        // the new track. The previous code's `Task { await ... }`
+        // did not serialize against later
+        // `refreshActivityForCurrentTrack` calls — the next
+        // emission would see the same `existing` and schedule
+        // another Task, leaking two `Activity.request` calls.
+        let old = pendingLifecycle
+        pendingLifecycle = Task { [weak self] in
+            await old?.value
+            guard let self else { return }
+            await self.performEndAndStart(
+                existing: self.activity,
+                attributes: newAttributes,
+                state: newState
+            )
+        }
+    }
+
+    private func performEndAndStart(
+        existing: Activity<NowPlayingActivityAttributes>?,
+        attributes: NowPlayingActivityAttributes,
+        state: NowPlayingActivityAttributes.ContentState
+    ) async {
+        if let existing = existing {
+            // Clear `self.activity` BEFORE awaiting end so
+            // concurrent `refreshActivityForCurrentTrack()` calls
+            // don't see a ghost "existing" that is already being
+            // torn down.
+            self.activity = nil
+            await existing.end(nil, dismissalPolicy: .immediate)
+        }
+        startNewActivity(attributes: attributes, state: state)
+    }
+
+    private func scheduleEnd() {
+        let old = pendingLifecycle
+        pendingLifecycle = Task { [weak self] in
+            await old?.value
+            guard let self else { return }
+            await self.performEnd(existing: self.activity)
+        }
+    }
+
+    private func performEnd(
+        existing: Activity<NowPlayingActivityAttributes>?
+    ) async {
+        guard let existing = existing else { return }
+        self.activity = nil
+        await existing.end(nil, dismissalPolicy: .immediate)
     }
 
     private func startNewActivity(
@@ -143,10 +218,11 @@ final class LiveActivityManager {
     /// when playback ends naturally.
     func endActivity() {
         guard #available(iOS 16.1, *) else { return }
-        guard let activity = activity else { return }
-        Task {
-            await activity.end(nil, dismissalPolicy: .immediate)
+        let old = pendingLifecycle
+        pendingLifecycle = Task { [weak self] in
+            await old?.value
+            guard let self else { return }
+            await self.performEnd(existing: self.activity)
         }
-        self.activity = nil
     }
 }
