@@ -314,8 +314,14 @@ class PlayerState: ObservableObject {
     private let maxRetries = 2
     private var originalQueue: [QueueItem] = []
     private var dataManager = DataManager.shared
-    private var accumulatedListeningTime: TimeInterval = 0
-    private var lastProgressUpdate: Date = Date()
+    // S17-H / Tier 4: listening-time accounting is now owned by
+    // `ListeningTimeTracker`. The tracker encapsulates the
+    // accumulator, the last-tick timestamp, the 5s max-tick-delta
+    // guard, the 10s save cadence, and the `player.rate > 0`
+    // ground-truth check. PlayerState just pushes ticks to it from
+    // the time observer and calls `reset()` / `flush()` on track
+    // boundaries.
+    private let listeningTimeTracker = ListeningTimeTracker()
 
     // C-2 fix: token-based observer tracking. The previous code used
     // `NotificationCenter.default.removeObserver(self)` in the
@@ -1183,8 +1189,12 @@ class PlayerState: ObservableObject {
             self?.prepareNextTrackForCrossfade()
         }
         
-        // Reset listening time tracking
-        lastProgressUpdate = Date()
+        // S17-H: reset the listening-time tracker for the new track.
+        // The tracker's `reset()` clears the accumulator and sets
+        // `lastTick` to now, so the first tick after this point has
+        // a ~0s delta (a no-op) instead of the multi-second gap from
+        // the previous track.
+        listeningTimeTracker.reset()
 
         // Start adaptive quality timer if enabled
         if isAdaptiveQualityEnabled && item.source == .stream {
@@ -2870,30 +2880,18 @@ class PlayerState: ObservableObject {
             if timeRemaining <= CrossfadeManager.shared.duration && timeRemaining > CrossfadeManager.shared.duration - 1 {
                 prepareNextTrackForCrossfade()
             }
-            // Track listening time (only count when audio is
-            // actually playing and progress is moving forward)
-            // S17-H: use player.rate > 0 instead of
-            // playbackState == .playing. The previous check
-            // credited listening time during phone calls and
-            // headphone unplugs, because the AVPlayer auto-pauses
-            // on interruption but playbackState doesn't flip until
-            // pause() is explicitly called. The player.rate is the
-            // ground truth for "is audio actually being produced".
-            // Note: in this scope `player` is shadowed by the
-            // `guard let player = player` at the top of
-            // updateProgress, so it's non-optional here.
-            let now = Date()
-            let timeDelta = now.timeIntervalSince(lastProgressUpdate)
-            let isAudioPlaying = player.rate > 0
-            if timeDelta > 0 && timeDelta < 5 && isAudioPlaying {
-                accumulatedListeningTime += timeDelta
-                // Save to DataManager every 10 seconds
-                if accumulatedListeningTime >= 10 {
-                    dataManager.addListeningTime(accumulatedListeningTime)
-                    accumulatedListeningTime = 0
-                }
-            }
-            lastProgressUpdate = now
+            // S17-H / Tier 4: listening-time accounting is now
+            // delegated to `ListeningTimeTracker`. The tracker
+            // reads `player.rate` itself (the ground-truth
+            // check for "audio is actually being produced"),
+            // applies the 5s max-tick-delta guard, and saves to
+            // DataManager every 10s. PlayerState just pushes the
+            // tick. The earlier inline implementation here had
+            // the same logic but coupled to PlayerState's
+            // state vars (`accumulatedListeningTime`,
+            // `lastProgressUpdate`); see commit `88c6de9` for
+            // the original S17-H `player.rate` fix.
+            listeningTimeTracker.tick(player: player)
 
             // Save progress periodically (every 5% progress)
             if Int(newProgress * 100) % 5 == 0 {
@@ -3111,11 +3109,12 @@ class PlayerState: ObservableObject {
         // background this gap is exactly when iOS suspends the app
         // before the new player can take over.
 
-        // Save final listening time
-        if accumulatedListeningTime > 0 {
-            dataManager.addListeningTime(accumulatedListeningTime)
-            accumulatedListeningTime = 0
-        }
+        // S17-H / Tier 4: flush the listening-time tracker on
+        // track completion so the last partial batch (typically
+        // < 10s of accumulated time) is persisted before the
+        // next track starts. The tracker's `flush()` is
+        // idempotent: it no-ops if there's nothing accumulated.
+        listeningTimeTracker.flush()
         // Mark as completed
         if let item = currentItem {
             dataManager.updatePlaybackProgress(for: item.track.videoId, progress: 1.0)
