@@ -350,6 +350,11 @@ class PlayerState: ObservableObject {
     private let maxQueueSize = 100
     private let trimQueueToSize = 50
     private let maxItemAge: TimeInterval = 7 * 24 * 60 * 60 // 7 days
+    /// S17-H: prev-press within this window of the current
+    /// track's start restarts the current track (seek to 0)
+    /// instead of going to the previous index. Matches Apple
+    /// Music / Spotify UX.
+    private let previousTrackRestartGracePeriod: TimeInterval = 3
     private var cleanupTimer: Timer?  // Store reference for proper cleanup
 
     // Serial queue for completion handling to prevent race conditions
@@ -1556,9 +1561,29 @@ class PlayerState: ObservableObject {
         loadingTimeoutWorkItem?.cancel()
         loadingTimeoutWorkItem = nil
 
+        // S17-H: end the track-transition BG task if one is held.
+        // Otherwise a BG task acquired by an in-flight nextTrack /
+        // autoplay (held until isPlaybackLikelyToKeepUp fires on the
+        // new track) would be orphaned when the user navigates away
+        // or switches content type mid-transition. The 30s OS
+        // timeout would eventually release it, but in the meantime
+        // iOS could background-suspend the app before the new track
+        // had a chance to start.
+        endTrackTransitionBackgroundTask()
+
         player?.pause()
-        player?.replaceCurrentItem(with: nil)
+        // S17-H: remove the time observer and the .AVPlayerItem*
+        // notification tokens BEFORE replacing the current item
+        // with nil. The previous order (replace first, then
+        // removeTimeObserver) left the .AVPlayerItemDidPlayToEndTime
+        // observer registered while the item was being dealloc'd,
+        // and a KVO update on the old item could fire one last
+        // time into the soon-to-be-removed observer. The fix
+        // matches C-2 (observer token teardown before item
+        // teardown) and means no spurious callbacks can fire
+        // after the player is gone.
         removeTimeObserver()
+        player?.replaceCurrentItem(with: nil)
 
         // Cancel quality upgrade timer
         cancelQualityUpgrade()
@@ -1628,6 +1653,11 @@ class PlayerState: ObservableObject {
         // Clean up previous playback state
         removeTimeObserver()
         cancelQualityUpgrade()
+        // S17-H: release the BG task if a track-transition is
+        // mid-flight. Without this, a queued nextTrack/autoplay
+        // BG task would be orphaned when the user switches from a
+        // track to a radio station.
+        endTrackTransitionBackgroundTask()
         cancellables.removeAll()
         // C-2 fix: removed `NotificationCenter.default.removeObserver(self)` —
         // it was stripping audio session observers (interruption / route
@@ -1679,6 +1709,9 @@ class PlayerState: ObservableObject {
         // Clean up previous playback state
         removeTimeObserver()
         cancelQualityUpgrade()
+        // S17-H: see playRadioStation — release BG task on
+        // content-type switch.
+        endTrackTransitionBackgroundTask()
         cancellables.removeAll()
         // C-2 fix: removed `NotificationCenter.default.removeObserver(self)` —
         // it was stripping audio session observers for the rest of the app's
@@ -1747,6 +1780,9 @@ class PlayerState: ObservableObject {
 
         removeTimeObserver()
         cancelQualityUpgrade()
+        // S17-H: see playRadioStation — release BG task on
+        // content-type switch.
+        endTrackTransitionBackgroundTask()
         cancellables.removeAll()
         // C-2 fix: removed `NotificationCenter.default.removeObserver(self)` —
         // see project-playback-gap-analysis-2026-06-16.md.
@@ -2390,14 +2426,29 @@ class PlayerState: ObservableObject {
     
     func previousTrack() {
         guard !queue.isEmpty else { return }
-        
+
         if repeatMode == .one {
             seek(to: 0)
             return
         }
-        
+
+        // S17-H: Apple Music / Spotify UX. If the user is more
+        // than `previousTrackRestartGracePeriod` into the
+        // current track, the first prev-press restarts the
+        // current track (seek to 0) instead of going back to
+        // the previous one. Without this, the user has to
+        // re-find the previous track from the queue, which is
+        // jarring after they accidentally tapped a track and
+        // want to undo.
+        let currentPosition = player?.currentTime().seconds ?? 0
+        if currentPosition > previousTrackRestartGracePeriod {
+            print("⏮️ previousTrack: more than \(Int(previousTrackRestartGracePeriod))s into track — restarting current")
+            seek(to: 0)
+            return
+        }
+
         let prevIndex = currentIndex - 1
-        
+
         if prevIndex >= 0 {
             playQueue(at: prevIndex)
         } else if repeatMode == .all {
@@ -2808,25 +2859,26 @@ class PlayerState: ObservableObject {
                 }
             }
 
-            // Check if track has reached the end - trigger on either actual AVPlayer duration
-            // OR effective duration (metadata), whichever is reached first
-            let actualDuration = player.currentItem?.duration.seconds ?? 0
-            let isNearActualEnd = actualDuration.isFinite && actualDuration > 0 && current >= actualDuration - 0.5
-            let isNearEffectiveEnd = effectiveTotal > 0 && current >= effectiveTotal - 0.5
-            let shouldTriggerCompletion = isNearActualEnd || isNearEffectiveEnd
-
-            if shouldTriggerCompletion && !playbackState.isLoading {
-                print("🏁 Track reached end (current: \(current), actual: \(actualDuration), effective: \(effectiveTotal))")
-                // S11 fix (Bug 3): Trigger B (1s polling) was not
-                // beginning the BG task like Trigger A did. In an
-                // edge case where the polling fires first, completion
-                // proceeded without any background-task protection.
-                beginTrackTransitionBackgroundTask()
-                completionQueue.async { [weak self] in
-                    self?.handleTrackCompletion()
-                }
-                return
-            }
+            // S17-H: removed the polling-based end-of-track trigger
+            // (was here, ~lines 2811-2828). The polling was firing
+            // 0.5s before the actual AVPlayer end of stream when
+            // `effectiveDuration` (from track metadata) was shorter
+            // than the actual audio file, which produced an audible
+            // "two songs overlapping" symptom. The
+            // `.AVPlayerItemDidPlayToEndTime` notification wired up
+            // in setupPlayerObservers → playerDidFinishPlaying() is
+            // the canonical end signal and fires at the actual end
+            // of the audio buffer. Polling is no longer needed and
+            // was also missing the content-type special cases
+            // (live radio / podcast / audiobook) that
+            // playerDidFinishPlaying handles — so a polling fire
+            // during a podcast would have auto-advanced to music
+            // via the recently-played fallback.
+            // The `isHandlingCompletion` flag is still set in
+            // handleTrackCompletion (line 2919) as a safety net
+            // for any future re-introduction of a polling path or
+            // for the case where the AVPlayer notification arrives
+            // twice (e.g. on stream-URL refresh).
         }
 
         // Auto-save podcast position every ~10 seconds
