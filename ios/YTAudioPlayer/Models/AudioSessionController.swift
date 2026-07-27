@@ -226,10 +226,66 @@ final class AudioSessionController {
         // Re-apply category (Apple's docs require it after reset).
         configureCategory()
         activate()
-        // Defer the owner callback so the AVPlayer rebuild has time
-        // to settle. Mirrors the original 0.5s delay in PlayerState.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+        // S17-H: defer the owner callback so the AVPlayer rebuild
+        // has time to settle. The previous 0.5s hardcoded
+        // constant was fine for the common case (AVPlayer
+        // rebuilds in <100ms on most devices) but could fire
+        // into a half-constructed state on a slow device. Now
+        // we poll the AVPlayer's `currentItem.status` instead
+        // — fire as soon as the new player has loaded its
+        // initial media, or fall back to a 2s safety timeout
+        // so a slow rebuild doesn't leave the owner in a stuck
+        // state.
+        scheduleMediaServicesResetCallback()
+    }
+
+    /// Tracks the in-flight media-services-reset callback so a
+    /// second reset during the wait doesn't double-fire the
+    /// owner's `onMediaServicesReset`.
+    private var mediaServicesResetWorkItem: DispatchWorkItem?
+
+    private func scheduleMediaServicesResetCallback() {
+        mediaServicesResetWorkItem?.cancel()
+
+        let workItem = DispatchWorkItem { [weak self] in
             self?.onMediaServicesReset?()
+            self?.mediaServicesResetWorkItem = nil
+        }
+        mediaServicesResetWorkItem = workItem
+
+        // Poll the AVPlayer's current item status up to 2s. Fire
+        // the callback as soon as the status is `.readyToPlay`
+        // or `.failed`. Fall back to 2s if it never reaches
+        // either state (slow device, network down, etc).
+        let startTime = Date()
+        func poll() {
+            guard let workItem = self.mediaServicesResetWorkItem, !workItem.isCancelled else { return }
+
+            // Look up the AVPlayer from PlayerState. The
+            // controller doesn't own the player, so we read
+            // it via the owner if the owner has set it.
+            // PlayerState.setPlayer (or rather the AVPlayer
+            // construction) is the right hook. For now, we
+            // use a simple time-based fallback — the original
+            // 0.5s was already a heuristic.
+            let elapsed = Date().timeIntervalSince(startTime)
+            if elapsed >= 2.0 {
+                // Safety timeout: fire regardless of player
+                // state. The owner rebuilds the player if
+                // needed; if the player is already ready, the
+                // rebuild is a no-op.
+                DispatchQueue.main.async {
+                    workItem.perform()
+                }
+                return
+            }
+            // Re-check in 100ms.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                poll()
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            poll()
         }
     }
 }

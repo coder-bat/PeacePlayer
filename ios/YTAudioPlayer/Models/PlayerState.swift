@@ -484,6 +484,34 @@ class PlayerState: ObservableObject {
             }
             .store(in: &lifetimeCancellables)
 
+        // S17-H: re-enqueue upcoming items for the gapless
+        // AVQueuePlayer whenever the queue changes. The first-track-
+        // after-launch case is the obvious one — `play(item:)`
+        // creates the AVQueuePlayer with only the current track
+        // (queue count = 1) so the initial `enqueueUpcomingItemsForGapless`
+        // bails on its `guard queueCount > 1`. Then
+        // `QueuePrefetcher.autoPopulateQueue` populates the queue
+        // a few hundred ms later via async `addToQueue` calls, but
+        // by then `play(item:)` has already moved on. Without this
+        // subscription, the first track ends, the AVQueuePlayer
+        // has no next item, and the auto-advance path is the
+        // clunky one (rebuild via `advanceGaplessState`).
+        //
+        // The debounce coalesces bursts from the prefetcher (which
+        // may add 5+ tracks within a few hundred ms). The
+        // `lifetimeCancellables` set survives `stop()` /
+        // `setupPlayerObservers` so this subscription persists
+        // across the player-observation churn.
+        queueStore.$items
+            .debounce(for: .milliseconds(300), scheduler: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self = self else { return }
+                guard CrossfadeManager.shared.gaplessEnabled,
+                      self.player is AVQueuePlayer else { return }
+                self.enqueueUpcomingItemsForGapless()
+            }
+            .store(in: &lifetimeCancellables)
+
         restoreQueue()
 
         // C-2 fix: register memory warning via token (so we can clean up
@@ -974,14 +1002,17 @@ class PlayerState: ObservableObject {
         // when there's no active player. In the background, an inactive
         // session causes iOS to suspend the app before the new player has
         // buffered enough to start producing audio.
-        do {
-            try AVAudioSession.sharedInstance().setActive(true)
-            #if DEBUG
-            PlayCrashDiagnostics.log(.playback, "play(item:) POST-audioSession.setActive")
-            #endif
-        } catch {
-            print("❌ S10: failed to reactivate audio session: \(error)")
-        }
+        //
+        // S17-H: route through the controller instead of
+        // calling `AVAudioSession.sharedInstance().setActive(true)`
+        // directly. The previous code bypassed the controller
+        // — both `play(track:)` and `play(item:)` were activating
+        // the session via two different paths. Now the
+        // controller is the single owner of session activation.
+        // `play(track:)` calls `audioSessionController.activate()`
+        // upstream, and `play(item:)` does the same. Idempotent
+        // — AVAudioSession ignores repeat activations.
+        audioSessionController.activate()
 
         currentItem = item
         #if DEBUG
