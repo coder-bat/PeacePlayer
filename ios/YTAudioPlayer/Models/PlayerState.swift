@@ -1148,11 +1148,15 @@ class PlayerState: ObservableObject {
         PlayCrashDiagnostics.log(.playback, "play(item:) POST-QueuePrefetcher")
         #endif
 
-        // Setup remote controls
-        print("🔊 Setting up remote controls...")
-        setupRemoteControls()
+        // S17-H: removed the call to the empty
+        // `setupRemoteControls()` stub. Remote-command setup is
+        // handled by NowPlayingService on every currentItem
+        // change (see `updateRemoteControls`). The print and
+        // PlayCrashDiagnostics log are also removed since
+        // nothing was happening between them.
+        updateRemoteControls()
         #if DEBUG
-        PlayCrashDiagnostics.log(.playback, "play(item:) POST-setupRemoteControls")
+        PlayCrashDiagnostics.log(.playback, "play(item:) POST-updateRemoteControls")
         #endif
         print("✅ Remote controls set up")
 
@@ -2139,8 +2143,20 @@ class PlayerState: ObservableObject {
                 // track. Same helper is used by every other
                 // play/crossfade path.
                 updateExpectedDuration(Double(nextItem.track.durationSeconds))
-                dataManager.addToRecentlyPlayed(nextItem.track)
-                NotificationCenter.default.post(name: .trackPlayed, object: nil)
+                // S17-H: removed the premature
+                // `addToRecentlyPlayed` and
+                // `NotificationCenter.default.post(.trackPlayed)`
+                // calls here. Previously the user's Next tap
+                // was recording the upcoming track in
+                // recently-played and notifying PlaylistManager
+                // before the track actually started playing —
+                // the user would see the new track in the
+                // recently-played list while the previous track
+                // was still playing. Now both happen in
+                // `advanceGaplessState` (line 2314) when the
+                // AVQueuePlayer reports the new track has
+                // actually started, which is the user-visible
+                // "track changed" moment.
                 queuePlayer.advanceToNextItem()
                 // Re-enqueue to refill the queue player
                 enqueueUpcomingItemsForGapless()
@@ -3156,11 +3172,12 @@ class PlayerState: ObservableObject {
 
 // MARK: - Remote Controls
 extension PlayerState {
-    private func setupRemoteControls() {
-        // Remote commands are now handled by NowPlayingService
-        // This method is called to ensure backward compatibility
-        // All remote command setup is centralized in NowPlayingService
-    }
+    // S17-H: removed the empty `setupRemoteControls()` stub.
+    // Remote commands are handled by NowPlayingService, and
+    // this function had been a no-op for several sprints. The
+    // call site at line 1153 is gone too. `updateRemoteControls`
+    // (below) is the real one — it calls NowPlayingService on
+    // every currentItem change.
 
     private func updateRemoteControls() {
         guard let item = currentItem else {
