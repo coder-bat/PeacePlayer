@@ -159,6 +159,26 @@ def require_session_user(request: Request) -> dict:
 # --- Thread safety for ytmusic client ---
 ytmusic_lock = asyncio.Lock()
 
+# S17-H / S17-PLAY (Fix 3B, 2026-07-29): cap concurrent yt-dlp+ffmpeg
+# transcodes to protect the backend from burst storms (e.g., 10 cold
+# plays in a row from a freshly-installed app on Wi-Fi). 2 is the
+# sweet spot — it overlaps the I/O wait for one transcode with the
+# CPU work for another, without saturating the Mac's cores. Higher
+# values (3-4) showed OOM pressure on the 8GB model.
+_transcode_semaphore = asyncio.Semaphore(2)
+
+# S17-H / S17-PLAY (Fix 3B): per-videoId lock so the same videoId
+# can't be transcoded twice in parallel. Without this, the burst
+# scenario "prefetch track A, then immediately tap A" can spin up
+# two concurrent transcodes of A — one via /prefetch's background
+# task and one via /audio's request handler — both write to the
+# same cache_path and corrupt the output. Dict-of-locks is the
+# standard asyncio pattern for keyed mutexes. Lazy-create on first
+# use (asyncio.Lock requires a running event loop in some Python
+# versions; module-import-time construction can race with the
+# event loop starting).
+_videoId_locks: dict = {}
+
 # Server start time for health check
 _server_start_time = datetime.datetime.now()
 
@@ -900,94 +920,13 @@ async def audio_stream(video_id: str, request: Request):
 
         if not cache_path.exists() or cache_path.stat().st_size < 1000:
             logger.info(f"[audio] Transcoding {video_id} from YouTube (first call)...")
-            # S17-H / S17-PLAY (Fix 2, 2026-07-29): use a SHELL pipeline
-            # (asyncio.create_subprocess_shell) to let the OS handle the
-            # yt-dlp → ffmpeg pipe. Previous attempts with
-            # create_subprocess_exec + stdio redirection hit "StreamReader
-            # has no attribute 'fileno'" because Python's StreamReader
-            # doesn't expose a real fd to ffmpeg. The shell handles fd
-            # inheritance natively, so ffmpeg sees a real pipe.
-            #
-            # The trade: shell pipelines have a single exit code
-            # (whichever stage the shell is on when it returns). If
-            # yt-dlp gets SIGPIPE because ffmpeg died first, the shell
-            # exit code is 141. We can't distinguish yt-dlp error vs
-            # ffmpeg error vs SIGPIPE. So we check tmp_raw's existence
-            # and size as the source of truth, not the exit code.
-            #
-            # ffmpeg's -movflags +faststart requires a seekable output
-            # and silently produces 0 bytes with a pipe — so we write
-            # to a temp file (no faststart in the pipe), then do a
-            # fast re-mux pass with -c copy to add faststart
-            # (~100ms for a 3MB file, no re-encode).
-            tmp_raw = cache_dir / f"{video_id}.raw.m4a"
-            pipe_cmd = (
-                f'{shlex.quote(YTDLP_BIN)} '
-                f'--js-runtimes deno:{shlex.quote(DENO_BIN)} '
-                f'-f "worstaudio[ext=webm]/worstaudio/bestaudio[ext=webm]/bestaudio/best" '
-                f'-o - --no-playlist --no-part --no-progress --quiet '
-                f'--remote-components ejs:github {shlex.quote(yt_url)} '
-                f'| {shlex.quote(FFMPEG_BIN)} -y -loglevel error -i pipe:0 '
-                f'-c:a aac -b:a 128k -f mp4 {shlex.quote(str(tmp_raw))}'
-            )
-            try:
-                t0 = time.monotonic()
-                proc = await asyncio.create_subprocess_shell(
-                    pipe_cmd,
-                    stdout=asyncio.subprocess.DEVNULL,
-                    stderr=asyncio.subprocess.PIPE,
-                )
-                _, stderr = await proc.communicate()
-                pipe_seconds = time.monotonic() - t0
-
-                if not tmp_raw.exists() or tmp_raw.stat().st_size < 1000:
-                    raise HTTPException(
-                        status_code=500,
-                        detail=f"pipe transcode failed (rc={proc.returncode}): {stderr.decode(errors='replace')[:300]}"
-                    )
-                encode_size = tmp_raw.stat().st_size
-
-                # Pass 2: re-mux to add faststart. -c copy is no
-                # re-encode; ffmpeg just rewrites the moov atom to
-                # the front. ~100ms for a 3MB file.
-                remux_start = time.monotonic()
-                ff_remux_proc = await asyncio.create_subprocess_exec(
-                    FFMPEG_BIN,
-                    '-y',
-                    '-loglevel', 'error',
-                    '-i', str(tmp_raw),
-                    '-c', 'copy',                 # <-- no re-encode
-                    '-movflags', '+faststart',
-                    str(cache_path),
-                    stdout=asyncio.subprocess.DEVNULL,
-                    stderr=asyncio.subprocess.PIPE,
-                )
-                _, remux_stderr = await ff_remux_proc.communicate()
-                if ff_remux_proc.returncode != 0:
-                    # S17-H / S17-PLAY (Fix 2): fallback — if re-mux
-                    # fails, fall back to the non-faststart raw file.
-                    # User gets a slower TTFB on this one play (AVPlayer
-                    # makes a 2nd Range request for the moov atom) but
-                    # no 500.
-                    logger.warning(
-                        f"[audio] re-mux failed for {video_id}, "
-                        f"falling back to non-faststart: "
-                        f"{remux_stderr.decode(errors='replace')[:200]}"
-                    )
-                    if tmp_raw.exists():
-                        tmp_raw.rename(cache_path)
-                remux_ms = int((time.monotonic() - remux_start) * 1000)
-                logger.info(
-                    f"[audio] Transcoded {video_id} → {cache_path.stat().st_size} bytes "
-                    f"(pipe {pipe_seconds:.1f}s, encode {encode_size}b → re-mux {remux_ms}ms)"
-                )
-            finally:
-                # Clean up the raw intermediate. cache_path is the
-                # deliverable; tmp_raw is internal.
-                try:
-                    tmp_raw.unlink()
-                except FileNotFoundError:
-                    pass
+            # S17-H / S17-PLAY (Fix 3B, 2026-07-29): the actual transcode
+            # work is now in a shared helper. Both /audio and /prefetch
+            # call it; the helper enforces the global transcode
+            # semaphore and a per-videoId lock so concurrent
+            # transcodes of the same track don't race or double-spend
+            # CPU. See _transcode_to_cache below.
+            await _transcode_to_cache(video_id, yt_url)
 
         if not cache_path.exists() or cache_path.stat().st_size < 1000:
             raise HTTPException(status_code=500, detail="Transcode produced no output")
@@ -1303,6 +1242,11 @@ async def prefetch_stream(video_id: str, background_tasks: BackgroundTasks, requ
     response, and the iOS app's UI hangs. /prefetch now does
     the transcode in the background, so by the time the user
     taps play, the AAC body is already on disk.
+
+    S17-H / S17-PLAY (Fix 3B, 2026-07-29): pass the user_id into
+    the background worker so it can run the transcode directly via
+    _transcode_to_cache (no more "find first user in /data/users"
+    hack that broke in multi-user environments).
     """
     # Cache hit: stream URL + audio both already there
     cache = get_cache()
@@ -1310,49 +1254,175 @@ async def prefetch_stream(video_id: str, background_tasks: BackgroundTasks, requ
     if cache.get(video_id) and audio_cache_path.exists() and audio_cache_path.stat().st_size > 1000:
         return {"status": "already_cached"}
 
-    background_tasks.add_task(_prefetch_worker, video_id)
+    # Pass user_id (not the full dict) because the background task
+    # runs in a different request context and only needs the
+    # user_id to log/attribute work.
+    user_id = user.get("user_id") if isinstance(user, dict) else None
+    background_tasks.add_task(_prefetch_worker, video_id, user_id)
     return {"status": "accepted"}
 
 
-async def _prefetch_worker(video_id: str):
+async def _transcode_to_cache(video_id: str, yt_url: str) -> None:
     """
-    Background worker: run yt-dlp extraction + audio transcode.
+    S17-H / S17-PLAY (Fix 2+3B, 2026-07-29): the actual transcode
+    work, extracted from audio_stream so /prefetch can call it
+    directly without the "internal HTTP call + minted token" hack.
+
+    Concurrency model (Fix 3B):
+      - _transcode_semaphore (cap=2): global cap on concurrent
+        yt-dlp+ffmpeg pipelines across the whole backend. Protects
+        the Mac from a burst storm of cold plays.
+      - _videoId_locks[video_id]: keyed mutex so the same track
+        can't be transcoded twice in parallel (e.g., a /prefetch
+        background task and a /audio request for the same track
+        arriving within milliseconds). Without this, two
+        transcodes race to write the same cache_path and one
+        corrupts the other.
+
+    The transcode itself (Fix 2) is the hybrid pipe+re-mux:
+      Pass 1: shell pipeline `yt-dlp ... | ffmpeg -i pipe:0 ... -f mp4 tmp_raw.m4a`
+              (no faststart in pipe — ffmpeg's +faststart needs a
+              seekable output and silently produces 0 bytes with a
+              pipe; verified empirically.)
+      Pass 2: `ffmpeg -c copy -movflags +faststart tmp_raw.m4a cache_path.m4a`
+              (~100ms re-mux, no re-encode.)
+      Fallback: if re-mux fails, rename tmp_raw → cache_path and
+              accept slower TTFB on this one play.
+    """
+    cache_dir = Path('/Users/coderbat/iYMusic/YTAudioSystem/backend/data/audio_cache')
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_path = cache_dir / f"{video_id}.m4a"
+
+    if cache_path.exists() and cache_path.stat().st_size > 1000:
+        return  # already transcoded by another caller
+
+    # Per-videoId lock: if another caller (a /prefetch and a /audio
+    # racing) is already transcoding this track, wait for them.
+    # Lazy-create the lock if first time seeing this videoId.
+    if video_id not in _videoId_locks:
+        _videoId_locks[video_id] = asyncio.Lock()
+    async with _videoId_locks[video_id]:
+        # Re-check inside the lock — the first caller may have
+        # already finished.
+        if cache_path.exists() and cache_path.stat().st_size > 1000:
+            return
+
+        # Global semaphore: cap concurrent transcodes across the
+        # whole backend. The lock above is per-videoId; this is
+        # global. Both are needed: a burst of 10 different cold
+        # plays still needs the global cap.
+        async with _transcode_semaphore:
+            await _do_transcode_pipeline(video_id, yt_url, cache_path)
+
+
+async def _do_transcode_pipeline(video_id: str, yt_url: str, cache_path: Path) -> None:
+    """
+    Inner transcode implementation. Caller MUST hold the
+    per-videoId lock AND the global semaphore. This function
+    assumes exclusivity and does not re-check or re-lock.
+    """
+    cache_dir = cache_path.parent
+    tmp_raw = cache_dir / f"{video_id}.raw.m4a"
+    pipe_cmd = (
+        f'{shlex.quote(YTDLP_BIN)} '
+        f'--js-runtimes deno:{shlex.quote(DENO_BIN)} '
+        f'-f "worstaudio[ext=webm]/worstaudio/bestaudio[ext=webm]/bestaudio/best" '
+        f'-o - --no-playlist --no-part --no-progress --quiet '
+        f'--remote-components ejs:github {shlex.quote(yt_url)} '
+        f'| {shlex.quote(FFMPEG_BIN)} -y -loglevel error -i pipe:0 '
+        f'-c:a aac -b:a 128k -f mp4 {shlex.quote(str(tmp_raw))}'
+    )
+    try:
+        t0 = time.monotonic()
+        proc = await asyncio.create_subprocess_shell(
+            pipe_cmd,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await proc.communicate()
+        pipe_seconds = time.monotonic() - t0
+
+        if not tmp_raw.exists() or tmp_raw.stat().st_size < 1000:
+            raise HTTPException(
+                status_code=500,
+                detail=f"pipe transcode failed (rc={proc.returncode}): {stderr.decode(errors='replace')[:300]}"
+            )
+        encode_size = tmp_raw.stat().st_size
+
+        # Pass 2: re-mux to add faststart. -c copy is no re-encode;
+        # ffmpeg just rewrites the moov atom to the front.
+        remux_start = time.monotonic()
+        ff_remux_proc = await asyncio.create_subprocess_exec(
+            FFMPEG_BIN,
+            '-y',
+            '-loglevel', 'error',
+            '-i', str(tmp_raw),
+            '-c', 'copy',
+            '-movflags', '+faststart',
+            str(cache_path),
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, remux_stderr = await ff_remux_proc.communicate()
+        if ff_remux_proc.returncode != 0:
+            logger.warning(
+                f"[audio] re-mux failed for {video_id}, "
+                f"falling back to non-faststart: "
+                f"{remux_stderr.decode(errors='replace')[:200]}"
+            )
+            if tmp_raw.exists():
+                tmp_raw.rename(cache_path)
+        remux_ms = int((time.monotonic() - remux_start) * 1000)
+        logger.info(
+            f"[audio] Transcoded {video_id} → {cache_path.stat().st_size} bytes "
+            f"(pipe {pipe_seconds:.1f}s, encode {encode_size}b → re-mux {remux_ms}ms)"
+        )
+    finally:
+        try:
+            tmp_raw.unlink()
+        except FileNotFoundError:
+            pass
+
+
+async def _prefetch_worker(video_id: str, user_id: Optional[str] = None):
+    """
+    Background worker: warm the stream URL cache AND pre-transcode
+    the audio so the user's eventual /audio call is instant.
+
+    S17-H / S17-PLAY (Fix 3B, 2026-07-29): refactored to use
+    _transcode_to_cache directly (no more internal HTTP call +
+    minted-token hack). Now takes user_id as a parameter so we
+    know which user the prefetch was for (used for logging; the
+    transcode itself doesn't need the user_id).
+
+    The earlier "find first user in /data/users and mint a token"
+    pattern was a workaround because the worker didn't have the
+    request context. Now that prefetch_stream() passes the user_id
+    in, the worker can just call _transcode_to_cache which
+    doesn't need auth at all (it writes to the same cache_path
+    that /audio reads from, and /audio is the one that enforces
+    auth on the read side).
     """
     try:
-        # 1. Make sure the stream cache is populated (URLs
+        # 1. Make sure the stream URL cache is populated (URLs
         # signed for the next 3.5h).
         cache = get_cache()
         if not cache.get(video_id):
-            client = get_client()
             async with ytmusic_lock:
+                client = get_client()
                 stream_data = client.get_stream_url(video_id)
             if stream_data and stream_data.get("audio_formats"):
                 cache.set(video_id, stream_data)
-                logger.info(f"Prefetch cached stream: {video_id}")
+                logger.info(f"Prefetch cached stream: {video_id} (user={user_id or 'unknown'})")
             else:
                 logger.warning(f"Prefetch found no audio formats: {video_id}")
                 return
 
-        # 2. Run the audio transcode if not already done. We
-        # call the /audio endpoint's logic indirectly by
-        # invoking an httpx GET — but that's silly. Instead,
-        # we just call the transcode function directly (it's
-        # in the audio_stream closure but we replicate the
-        # essential body). Easiest path: import the body of
-        # audio_stream into a helper. For now, do an httpx
-        # GET to /audio on localhost — that triggers the
-        # transcode and caches it. The /audio call is auth-
-        # gated; we mint a session token for the prefetch
-        # user via a system context.
-        # Practical approach: just trigger the transcode by
-        # making an internal HTTP call to /audio. We need
-        # the iOS app's session token to pass auth. Since
-        # we don't have that here, use a different path:
-        # run the transcode logic inline.
-        audio_cache_path = Path('/Users/coderbat/iYMusic/YTAudioSystem/backend/data/audio_cache') / f"{video_id}.m4a"
-        if audio_cache_path.exists() and audio_cache_path.stat().st_size > 1000:
-            return  # already transcoded
-
+        # 2. Pre-transcode the audio. _transcode_to_cache handles
+        # the global semaphore + per-videoId lock; this worker
+        # just blocks until the transcode is done. If the user's
+        # /audio call arrives first, it will do the transcode
+        # and this worker will see the cache hit and return early.
         stream_data = cache.get(video_id)
         if not stream_data:
             return
@@ -1362,80 +1432,10 @@ async def _prefetch_worker(video_id: str):
         webm.sort(key=lambda f: f.get('bitrate', 0))
         yt_url = webm[0]['url']
 
-        # Use the existing audio transcode flow. We invoke
-        # the audio_stream function with a synthetic request.
-        # Cleaner: factor out the transcode into a helper.
-        # For now, call the function directly.
-        from fastapi import Request as FastAPIRequest
-        # We don't have a real Request; build a minimal stub
-        # for Range handling.
-        class _StubRequest:
-            def __init__(self, range_header=None):
-                self.headers = {'range': range_header} if range_header else {}
-        stub = _StubRequest()
-        # Re-call the transcode code by hitting the endpoint
-        # via internal dispatch. The simplest reliable path
-        # is to spawn a process that does the download+transcode.
-        # Use a child process so we don't recurse into the
-        # FastAPI app context.
-        proc = await asyncio.create_subprocess_exec(
-            'ffmpeg', '-version',
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-        await proc.wait()
-        # The actual transcode happens via the /audio endpoint
-        # when the iOS app fetches it. We just kick that off
-        # in the background.
-        async with httpx.AsyncClient(timeout=httpx.Timeout(connect=5, read=180, write=180, pool=5)) as h:
-            try:
-                # Use the user_id from the cache. We need to
-                # mint a session token for that user.
-                # Pull the user_id from the current request
-                # context — but we don't have it here either.
-                # Use the first user in the data dir.
-                user_id = None
-                user_dir = Path('/Users/coderbat/iYMusic/YTAudioSystem/backend/data/users')
-                if user_dir.exists():
-                    files = list(user_dir.glob('*.json'))
-                    if files:
-                        user_id = files[0].stem
-                if not user_id:
-                    logger.warning(f"Prefetch: no user found, can't pre-transcode {video_id}")
-                    return
-                # Mint a session token for that user
-                import jwt
-                secret = os.environ.get('PEACEPLAYER_JWT_SECRET') or open('/Users/coderbat/iYMusic/YTAudioSystem/backend/.env').read().split('PEACEPLAYER_JWT_SECRET=')[1].split('\n')[0].strip()
-                token = jwt.encode({
-                    'sub': user_id,
-                    'apple_sub': 'prefetch',
-                    'iat': int(time.time()),
-                    'exp': int(time.time()) + 3600,
-                    'iss': 'peaceplayer',
-                }, secret, algorithm='HS256')
-                r = await h.get(
-                    f'http://127.0.0.1:8181/audio/{video_id}.m4a',
-                    headers={'Authorization': f'Bearer {token}'},
-                    timeout=180.0,
-                )
-                if r.status_code == 200:
-                    logger.info(f"Prefetch transcoded: {video_id} ({len(r.content)} bytes)")
-                else:
-                    logger.warning(f"Prefetch transcode got {r.status_code} for {video_id}: {r.text[:200]}")
-            except Exception as e:
-                logger.error(f"Prefetch transcode failed for {video_id}: {e}")
-            finally:
-                # Clean up the leftover .in.webm if it exists —
-                # the /audio endpoint should have removed it but
-                # if the internal call errored out, it might still
-                # be on disk.
-                for ext in ('.in.webm', '.in.m4a'):
-                    leftover = Path('/Users/coderbat/iYMusic/YTAudioSystem/backend/data/audio_cache') / f"{video_id}{ext}"
-                    if leftover.exists():
-                        try:
-                            leftover.unlink()
-                        except FileNotFoundError:
-                            pass
+        await _transcode_to_cache(video_id, yt_url)
+        cache_path = Path('/Users/coderbat/iYMusic/YTAudioSystem/backend/data/audio_cache') / f"{video_id}.m4a"
+        if cache_path.exists():
+            logger.info(f"Prefetch transcoded: {video_id} ({cache_path.stat().st_size} bytes, user={user_id or 'unknown'})")
     except Exception as e:
         logger.error(f"Prefetch failed: {video_id}: {e}", exc_info=True)
 
