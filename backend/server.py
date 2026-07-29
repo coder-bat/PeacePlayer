@@ -69,6 +69,18 @@ TRENDING_CACHE_TTL = int(os.environ.get("TRENDING_CACHE_TTL", "900"))
 MAX_WAVEFORM_CACHE_MB = int(os.environ.get("MAX_WAVEFORM_CACHE_MB", "100"))
 CACHE_TTL_HOURS = float(os.environ.get("CACHE_TTL_HOURS", "3.5"))
 
+# S17-H / S17-PLAY (Fix 1, 2026-07-29): Use absolute paths for
+# external binaries. The backend runs under launchd as a Background
+# process, which IGNORES the EnvironmentVariables.PATH override in the
+# plist — verified empirically (the running process PATH is just
+# /usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin, missing both
+# /Library/Frameworks/Python.framework/Versions/3.10/bin where yt-dlp
+# lives, and /opt/homebrew/bin where ffmpeg + deno live). Using
+# absolute paths is more robust than relying on PATH at all.
+YTDLP_BIN = os.environ.get("YTDLP_BIN", "/Library/Frameworks/Python.framework/Versions/3.10/bin/yt-dlp")
+FFMPEG_BIN = os.environ.get("FFMPEG_BIN", "/opt/homebrew/bin/ffmpeg")
+DENO_BIN = os.environ.get("DENO_BIN", "/opt/homebrew/bin/deno")
+
 # --- Structured JSON logging ---
 class JSONFormatter(logging.Formatter):
     def format(self, record):
@@ -901,14 +913,21 @@ async def audio_stream(video_id: str, request: Request):
             # the URL signature.
             tmp_in = cache_dir / f"{video_id}.in.webm"
             try:
-                # Run yt-dlp in a thread (it's sync). Use
-                # youtube-dl's "dump-single-file" with
-                # output to a template path; but we want raw
-                # audio, no post-processing. The simplest
-                # reliable path: yt-dlp -f "bestaudio[ext=webm]"
-                # -o tmp_in --no-playlist --no-part
+                # S17-H / S17-PLAY (Fix 1, 2026-07-29): yt-dlp 2025.11.12+
+                # requires a JS runtime (Deno or Node) for YouTube extraction
+                # to get full format support. Without it, extraction still
+                # works but with degraded formats and possible retries —
+                # which was the main contributor to the 110s cold-path
+                # latency. Deno is installed at /opt/homebrew/bin/deno on
+                # this Mac. Pass the explicit path for robustness (works
+                # in launchd context where PATH may differ from shell).
+                # Use the YTDLP_BIN absolute path (see top of file) — the
+                # bare 'yt-dlp' failed under launchd because the plist
+                # EnvironmentVariables.PATH is ignored for Background
+                # ProcessType.
                 proc = await asyncio.create_subprocess_exec(
-                    'yt-dlp',
+                    YTDLP_BIN,
+                    '--js-runtimes', f'deno:{DENO_BIN}',
                     '-f', 'worstaudio[ext=webm]/worstaudio/bestaudio[ext=webm]/bestaudio/best',
                     '-o', str(tmp_in),
                     '--no-playlist',
