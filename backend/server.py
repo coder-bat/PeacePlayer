@@ -22,6 +22,7 @@ import time
 import uuid
 import glob as _glob
 import datetime
+import shlex
 import requests as _requests
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -899,80 +900,92 @@ async def audio_stream(video_id: str, request: Request):
 
         if not cache_path.exists() or cache_path.stat().st_size < 1000:
             logger.info(f"[audio] Transcoding {video_id} from YouTube (first call)...")
-            # S17-H (2026-07-27 13:30): switched from a raw
-            # httpx download to yt-dlp's own downloader.
-            # YouTube is rate-limiting / dropping connections
-            # on raw httpx downloads (peer closes the
-            # connection mid-body after ~300-440KB of a 1-2MB
-            # file, leaving the body truncated and ffmpeg
-            # failing to transcode). yt-dlp's downloader
-            # handles YouTube's rate limiting, retry logic,
-            # and the SABR / PO-Token / chunked transfer
-            # machinery that bare httpx doesn't. It also picks
-            # the right range-headers and User-Agent to match
-            # the URL signature.
-            tmp_in = cache_dir / f"{video_id}.in.webm"
+            # S17-H / S17-PLAY (Fix 2, 2026-07-29): use a SHELL pipeline
+            # (asyncio.create_subprocess_shell) to let the OS handle the
+            # yt-dlp → ffmpeg pipe. Previous attempts with
+            # create_subprocess_exec + stdio redirection hit "StreamReader
+            # has no attribute 'fileno'" because Python's StreamReader
+            # doesn't expose a real fd to ffmpeg. The shell handles fd
+            # inheritance natively, so ffmpeg sees a real pipe.
+            #
+            # The trade: shell pipelines have a single exit code
+            # (whichever stage the shell is on when it returns). If
+            # yt-dlp gets SIGPIPE because ffmpeg died first, the shell
+            # exit code is 141. We can't distinguish yt-dlp error vs
+            # ffmpeg error vs SIGPIPE. So we check tmp_raw's existence
+            # and size as the source of truth, not the exit code.
+            #
+            # ffmpeg's -movflags +faststart requires a seekable output
+            # and silently produces 0 bytes with a pipe — so we write
+            # to a temp file (no faststart in the pipe), then do a
+            # fast re-mux pass with -c copy to add faststart
+            # (~100ms for a 3MB file, no re-encode).
+            tmp_raw = cache_dir / f"{video_id}.raw.m4a"
+            pipe_cmd = (
+                f'{shlex.quote(YTDLP_BIN)} '
+                f'--js-runtimes deno:{shlex.quote(DENO_BIN)} '
+                f'-f "worstaudio[ext=webm]/worstaudio/bestaudio[ext=webm]/bestaudio/best" '
+                f'-o - --no-playlist --no-part --no-progress --quiet '
+                f'--remote-components ejs:github {shlex.quote(yt_url)} '
+                f'| {shlex.quote(FFMPEG_BIN)} -y -loglevel error -i pipe:0 '
+                f'-c:a aac -b:a 128k -f mp4 {shlex.quote(str(tmp_raw))}'
+            )
             try:
-                # S17-H / S17-PLAY (Fix 1, 2026-07-29): yt-dlp 2025.11.12+
-                # requires a JS runtime (Deno or Node) for YouTube extraction
-                # to get full format support. Without it, extraction still
-                # works but with degraded formats and possible retries —
-                # which was the main contributor to the 110s cold-path
-                # latency. Deno is installed at /opt/homebrew/bin/deno on
-                # this Mac. Pass the explicit path for robustness (works
-                # in launchd context where PATH may differ from shell).
-                # Use the YTDLP_BIN absolute path (see top of file) — the
-                # bare 'yt-dlp' failed under launchd because the plist
-                # EnvironmentVariables.PATH is ignored for Background
-                # ProcessType.
-                proc = await asyncio.create_subprocess_exec(
-                    YTDLP_BIN,
-                    '--js-runtimes', f'deno:{DENO_BIN}',
-                    '-f', 'worstaudio[ext=webm]/worstaudio/bestaudio[ext=webm]/bestaudio/best',
-                    '-o', str(tmp_in),
-                    '--no-playlist',
-                    '--no-part',
-                    '--no-progress',
-                    '--quiet',
-                    '--remote-components', 'ejs:github',
-                    yt_url,
-                    stdout=asyncio.subprocess.PIPE,
+                t0 = time.monotonic()
+                proc = await asyncio.create_subprocess_shell(
+                    pipe_cmd,
+                    stdout=asyncio.subprocess.DEVNULL,
                     stderr=asyncio.subprocess.PIPE,
                 )
                 _, stderr = await proc.communicate()
-                if proc.returncode != 0:
+                pipe_seconds = time.monotonic() - t0
+
+                if not tmp_raw.exists() or tmp_raw.stat().st_size < 1000:
                     raise HTTPException(
                         status_code=500,
-                        detail=f"yt-dlp download failed: {stderr.decode(errors='replace')[:300]}"
+                        detail=f"pipe transcode failed (rc={proc.returncode}): {stderr.decode(errors='replace')[:300]}"
                     )
-                # yt-dlp might append an extension. Find the actual file.
-                possible = [tmp_in, tmp_in.with_suffix('.webm'),
-                           cache_dir / f"{video_id}.in.webm.webm"]
-                actual_in = next((p for p in possible if p.exists()), None)
-                if not actual_in:
-                    raise HTTPException(status_code=500, detail="yt-dlp download produced no file")
-                if actual_in != tmp_in:
-                    actual_in.rename(tmp_in)
-                # Transcode. ffmpeg is sync, run in a thread.
-                proc = await asyncio.create_subprocess_exec(
-                    'ffmpeg', '-y', '-loglevel', 'error',
-                    '-i', str(tmp_in),
-                    '-c:a', 'aac', '-b:a', '128k',
+                encode_size = tmp_raw.stat().st_size
+
+                # Pass 2: re-mux to add faststart. -c copy is no
+                # re-encode; ffmpeg just rewrites the moov atom to
+                # the front. ~100ms for a 3MB file.
+                remux_start = time.monotonic()
+                ff_remux_proc = await asyncio.create_subprocess_exec(
+                    FFMPEG_BIN,
+                    '-y',
+                    '-loglevel', 'error',
+                    '-i', str(tmp_raw),
+                    '-c', 'copy',                 # <-- no re-encode
                     '-movflags', '+faststart',
                     str(cache_path),
-                    stdout=asyncio.subprocess.PIPE,
+                    stdout=asyncio.subprocess.DEVNULL,
                     stderr=asyncio.subprocess.PIPE,
                 )
-                _, stderr = await proc.communicate()
-                if proc.returncode != 0:
-                    raise HTTPException(
-                        status_code=500,
-                        detail=f"ffmpeg failed: {stderr.decode(errors='replace')[:200]}"
+                _, remux_stderr = await ff_remux_proc.communicate()
+                if ff_remux_proc.returncode != 0:
+                    # S17-H / S17-PLAY (Fix 2): fallback — if re-mux
+                    # fails, fall back to the non-faststart raw file.
+                    # User gets a slower TTFB on this one play (AVPlayer
+                    # makes a 2nd Range request for the moov atom) but
+                    # no 500.
+                    logger.warning(
+                        f"[audio] re-mux failed for {video_id}, "
+                        f"falling back to non-faststart: "
+                        f"{remux_stderr.decode(errors='replace')[:200]}"
                     )
-                logger.info(f"[audio] Transcoded {video_id} → {cache_path.stat().st_size} bytes")
+                    if tmp_raw.exists():
+                        tmp_raw.rename(cache_path)
+                remux_ms = int((time.monotonic() - remux_start) * 1000)
+                logger.info(
+                    f"[audio] Transcoded {video_id} → {cache_path.stat().st_size} bytes "
+                    f"(pipe {pipe_seconds:.1f}s, encode {encode_size}b → re-mux {remux_ms}ms)"
+                )
             finally:
+                # Clean up the raw intermediate. cache_path is the
+                # deliverable; tmp_raw is internal.
                 try:
-                    tmp_in.unlink()
+                    tmp_raw.unlink()
                 except FileNotFoundError:
                     pass
 
