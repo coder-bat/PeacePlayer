@@ -16,17 +16,38 @@ import SwiftUI
 enum PlaybackState: Equatable {
     case idle
     case loading
+    // S17-H / S17-PLAY (Fix 6, 2026-07-29): distinct from `.loading`.
+    // `.loading` is the brief "fetching stream URL" state (~1s on
+    // warm cache). `.transcoding` is the longer "backend is
+    // downloading + transcoding the audio for the first time"
+    // state (~20-30s after Fix 1+2). UI shows a different message
+    // so the user knows what's happening, and the 15s loading-
+    // state timeout is bypassed for this state (it would fire
+    // mid-transcode and surface a false error).
+    case transcoding
     case playing
     case paused
     case buffering
     case error(String)
-    
+
     var isPlaying: Bool {
         self == .playing
     }
-    
+
+    // S17-H / S17-PLAY (Fix 6): `.transcoding` is "loading-like"
+    // from the UI's perspective — show the spinner/overlay. But
+    // the loading-state timeout is a separate concept; see
+    // `isColdPlay` below.
     var isLoading: Bool {
-        self == .loading || self == .buffering
+        self == .loading || self == .buffering || self == .transcoding
+    }
+
+    /// True if this is a cold-play state where the user is waiting
+    /// for a backend transcode (Fix 1+2: ~20-30s). Used to opt out
+    /// of the 15s "loading timed out" error toast that would fire
+    /// before the transcode is done.
+    var isColdPlay: Bool {
+        self == .transcoding
     }
 }
 
@@ -1165,7 +1186,37 @@ class PlayerState: ObservableObject {
         // loading icon forever with no error — exactly the user
         // report. Now we surface a real error with a retry so the
         // user can recover without killing the app.
-        scheduleLoadingStateTimeout(after: 15.0, for: item)
+        // S17-H / S17-PLAY (Fix 6, 2026-07-29): bump the timeout
+        // from 15s to 60s. After Fix 1+2, a cold transcode
+        // (backend downloads webm from YouTube + transcodes to
+        // m4a) takes 20-30s for a typical track. The previous
+        // 15s timeout would fire mid-transcode and surface a
+        // false "playback didn't start" error. 60s gives a
+        // generous buffer; the timeout still fires for true
+        // stalls (network unreachable, YouTube blocking the
+        // IP, etc.). For the warm path (~1s to fetch the stream
+        // URL) this is a no-op — the timeout gets cancelled the
+        // moment playback actually starts.
+        scheduleLoadingStateTimeout(after: 60.0, for: item)
+
+        // S17-H / S17-PLAY (Fix 6): if we're still in .loading
+        // after 2 seconds, transition to .transcoding. The 2s
+        // window lets warm plays (~1s to fetch stream URL) stay
+        // on "Loading..." without the more alarming "Preparing
+        // your audio..." message. Cold plays (Fix 1+2: 20-30s)
+        // flip to .transcoding at 2s, showing the longer-form
+        // message with a clearer sub-text.
+        let videoId = item.track.videoId
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+            guard let self = self else { return }
+            // Only transition if the same track is still loading
+            // (not playing, not a different track, not already
+            // .transcoding).
+            if self.playbackState == .loading
+                && self.currentItem?.track.videoId == videoId {
+                self.playbackState = .transcoding
+            }
+        }
 
         print("🔊 Auto-populating queue...")
         QueuePrefetcher.shared.autoPopulateQueue(startingFrom: item.track)

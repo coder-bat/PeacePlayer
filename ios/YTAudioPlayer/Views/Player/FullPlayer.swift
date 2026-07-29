@@ -462,9 +462,24 @@ struct FullPlayer: View {
                             ProgressView()
                                 .scaleEffect(1.5)
                                 .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                            Text("Loading...")
-                                .font(.subheadline)
-                                .foregroundColor(.white)
+                            // S17-H / S17-PLAY (Fix 6): show a
+                            // different message for the cold-play
+                            // case where the backend is transcoding
+                            // the audio for the first time. Warm
+                            // plays stay on "Loading..." (the
+                            // ~1s fetching-stream-URL window).
+                            if playerState.playbackState.isColdPlay {
+                                Text("Preparing your audio...")
+                                    .font(.subheadline)
+                                    .foregroundColor(.white)
+                                Text("First time may take ~30 seconds")
+                                    .font(.caption2)
+                                    .foregroundColor(.white.opacity(0.7))
+                            } else {
+                                Text("Loading...")
+                                    .font(.subheadline)
+                                    .foregroundColor(.white)
+                            }
                         }
                     }
                 }

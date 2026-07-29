@@ -158,6 +158,8 @@ enum PlayerStateAccessor {
         switch s {
         case .idle: return "idle"
         case .loading: return "loading"
+        // S17-H / S17-PLAY (Fix 6): new .transcoding state.
+        case .transcoding: return "transcoding"
         case .playing: return "playing"
         case .paused: return "paused"
         case .buffering: return "buffering"
