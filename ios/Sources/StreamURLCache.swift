@@ -212,6 +212,33 @@ class StreamURLCache {
         }
     }
 
+    /// S17-H / S17-PLAY (Fix 3A, 2026-07-29): prefetch the next N
+    /// queue items after the currently-playing one. Called from the
+    /// play-time paths in HomeView/SearchView/PlaylistDetailView/etc
+    /// so the user almost never pays the cold-path transcode cost —
+    /// the next 3 tracks are likely already in the cache by the time
+    /// the user taps Next.
+    ///
+    /// The existing `prefetchBatch` (list-load path) is wired in 6 view
+    /// sites already. THIS path is the play-time equivalent: the
+    /// "queue already has items, but the user just tapped track N, so
+    /// prefetch N+1..N+3" case. Without this, taps at queue position
+    /// > 5 still pay full cold-path cost.
+    ///
+    /// Network gate: same as `prefetch` — only runs on Wi-Fi to
+    /// protect metered connections. The plan calls for a 3-track
+    /// lookahead; cover 3 because that's the typical
+    /// listen-to-70%-then-tap-Next window.
+    func prefetchUpNext(queue: [QueueItem], currentIndex: Int, lookahead: Int = 3) {
+        guard NetworkMonitor.shared.connectionType == .wifi else { return }
+        let upNext = queue
+            .dropFirst(currentIndex + 1)   // skip current and earlier
+            .prefix(lookahead)
+            .map { $0.track.videoId }
+        guard !upNext.isEmpty else { return }
+        prefetchBatch(videoIds: upNext)
+    }
+
     // MARK: - Disk Cache
 
     private func loadFromDisk(key: NSString) -> StreamInfoWrapper? {

@@ -383,6 +383,12 @@ struct PlaylistDetailView: View {
                 )
                 playerState.play(item: item)
                 loadingTrackId = nil
+                // S17-H / S17-PLAY (Fix 3A): prefetch the next 3 likely
+                // plays so the cold-path transcode rarely runs.
+                StreamURLCache.shared.prefetchUpNext(
+                    queue: playerState.queue,
+                    currentIndex: playerState.currentIndex
+                )
             })
             .store(in: &playlistManager.cancellables)
     }
@@ -413,6 +419,13 @@ struct PlaylistDetailView: View {
                     source: .stream
                 )
                 playerState.addToQueueNext(item)
+                // S17-H / S17-PLAY (Fix 3A): after addToQueueNext the
+                // queue may have grown; prefetch the next 3 likely
+                // plays from current position. Wi-Fi gate is inside.
+                StreamURLCache.shared.prefetchUpNext(
+                    queue: playerState.queue,
+                    currentIndex: playerState.currentIndex
+                )
             })
             .store(in: &playlistManager.cancellables)
     }

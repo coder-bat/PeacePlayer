@@ -53,6 +53,12 @@ struct RecentlyPlayedView: View {
                     source: .stream
                 )
                 playerState.play(item: item)
+                // S17-H / S17-PLAY (Fix 3A): prefetch the next 3 likely
+                // plays so the cold-path transcode rarely runs.
+                StreamURLCache.shared.prefetchUpNext(
+                    queue: playerState.queue,
+                    currentIndex: playerState.currentIndex
+                )
             })
             .store(in: &cancellables)
     }

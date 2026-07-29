@@ -1322,6 +1322,13 @@ class HomeViewModel: ObservableObject {
                     source: .stream
                 )
                 PlayerState.shared.play(item: item)
+                // S17-H / S17-PLAY (Fix 3A): prefetch the next 3 likely
+                // plays so the cold-path transcode rarely runs. Wi-Fi
+                // gate is inside prefetchUpNext.
+                StreamURLCache.shared.prefetchUpNext(
+                    queue: PlayerState.shared.queue,
+                    currentIndex: PlayerState.shared.currentIndex
+                )
                 // S11 fix (Bug 8): seek to saved progress if the caller
                 // passed one (e.g., resume block tapping the most-
                 // recently-played track at its last-known position).

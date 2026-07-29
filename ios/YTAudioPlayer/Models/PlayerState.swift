@@ -903,6 +903,14 @@ class PlayerState: ObservableObject {
                 contentSource: .local
             )
             play(item: item)
+            // S17-H / S17-PLAY (Fix 3A): prefetch the next 3 likely
+            // plays so the cold-path transcode rarely runs. Local-file
+            // plays don't need a transcode, but the *next* track is
+            // almost always a stream — still benefits from prefetch.
+            StreamURLCache.shared.prefetchUpNext(
+                queue: self.queue,
+                currentIndex: self.currentIndex
+            )
         } else {
             // Stream from backend - fetch stream URL first
             #if DEBUG
@@ -951,6 +959,17 @@ class PlayerState: ObservableObject {
                             replayGain: streamInfo.replayGain
                         )
                         self?.play(item: item)
+                        // S17-H / S17-PLAY (Fix 3A): prefetch the next 3
+                        // likely plays. Wi-Fi gate is inside.
+                        // This catches HistoryView.playTrack (which
+                        // delegates to play(track:)) in addition to the
+                        // direct call sites in HomeView/SearchView/etc.
+                        if let self = self {
+                            StreamURLCache.shared.prefetchUpNext(
+                                queue: self.queue,
+                                currentIndex: self.currentIndex
+                            )
+                        }
                     }
                 )
                 .store(in: &cancellables)
