@@ -2594,6 +2594,221 @@ async def startup_event():
         logger.warning("PEACEPLAYER_JWT_SECRET is empty!")
     logger.info("Server started")
 
+    # S17-H / S17-PLAY (Fix 5, 2026-07-29): kick off the
+    # pre-warm background task. It runs every hour, pre-warming
+    # the audio cache for the user's most-recently-played tracks
+    # so the first play after a cold start is instant. This is
+    # the server-side companion to Fix 3A's play-time prefetch —
+    # pre-warm handles "I haven't opened the app in a while",
+    # prefetch handles "I just tapped a track".
+    #
+    # Implementation note: we use a daemon Thread instead of
+    # asyncio.create_task. The deprecated @app.on_event("startup")
+    # pattern doesn't seem to play well with task creation here —
+    # the server shuts down within milliseconds of calling
+    # asyncio.create_task. A daemon thread is decoupled from the
+    # event loop and runs cleanly in the background. The thread
+    # needs its own event loop to call async helpers; use
+    # asyncio.new_event_loop() + loop.run_until_complete().
+    if PREWARM_ENABLED:
+        import threading
+        t = threading.Thread(target=_prewarm_thread_main, daemon=True, name="prewarm")
+        t.start()
+        logger.info(f"Pre-warm thread started (interval={PREWARM_INTERVAL}s, top_n={PREWARM_TOP_N})")
+
+
+# S17-H / S17-PLAY (Fix 5): pre-warm configuration. Defaults
+# chosen to be safe for a single-user Tailscale backend — 1
+# concurrent transcode, top-10 tracks per user, hourly cycle.
+# Override via env vars if you have more headroom.
+PREWARM_ENABLED = os.environ.get("PREWARM_ENABLED", "true").lower() in ("1", "true", "yes")
+PREWARM_INTERVAL = int(os.environ.get("PREWARM_INTERVAL", "3600"))   # 1 hour
+PREWARM_TOP_N = int(os.environ.get("PREWARM_TOP_N", "10"))           # top 10 per user
+PREWARM_USER_LOOKBACK_DAYS = int(os.environ.get("PREWARM_USER_LOOKBACK_DAYS", "7"))
+
+
+def _prewarm_thread_main():
+    """
+    S17-H / S17-PLAY (Fix 5): entry point for the pre-warm daemon
+    thread. Sets up a private event loop and runs the async loop
+    on it. Daemon=True means the thread is killed when the main
+    process exits.
+    """
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        loop.run_until_complete(_prewarm_loop())
+    finally:
+        loop.close()
+
+
+async def _prewarm_loop():
+    """
+    S17-H / S17-PLAY (Fix 5): pre-warm background task. Runs
+    every PREWARM_INTERVAL seconds. For each user seen in the
+    last PREWARM_USER_LOOKBACK_DAYS days, reads the user's
+    recently-played list from the iOS sync blob and calls
+    /prefetch for the top N entries that aren't already cached.
+
+    Stage 1 (this implementation): just the last 10 recently
+    played videoIds per user. No play-count analysis needed —
+    the sync blob already has the data. Stage 2 (deferred):
+    smarter selection by play count over 30 days, requires
+    adding play_count tracking.
+
+    Pre-warming the cache is opt-in by default (PREWARM_ENABLED).
+    On a single-Mac dev box, 10 tracks per user * hourly cycle
+    is fine (10 transcodes/hour is well within the global
+    semaphore cap of 2). For a busier deployment, lower the
+    interval or the top_n.
+    """
+    # Wait a bit on first start so the server has time to bind
+    # the port and the iOS app (if it was the trigger) has
+    # time to make its first request. Otherwise we'd race with
+    # the just-completed startup and pre-warm the same track
+    # the user just opened.
+    await asyncio.sleep(60)
+    while True:
+        try:
+            await _prewarm_cycle()
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            # Never let an exception kill the pre-warm loop.
+            # Just log and try again next interval.
+            logger.error(f"Pre-warm cycle failed: {e}", exc_info=True)
+        await asyncio.sleep(PREWARM_INTERVAL)
+
+
+async def _prewarm_cycle():
+    """
+    S17-H / S17-PLAY (Fix 5): one pre-warm cycle. Lists active
+    users, reads each user's recently-played list, calls
+    /prefetch for the top N that aren't already cached.
+
+    Concurrency: respects _transcode_semaphore (cap=2) by
+    delegating to _prefetch_worker (which awaits the helper,
+    which awaits the semaphore). So 10 pre-warm calls
+    serialize through the same 2-concurrent cap as a real
+    user request — the burst is not amplified by pre-warm.
+
+    Privacy: this runs on the user's own server. The data is
+    not exposed externally. No leak.
+    """
+    t0 = time.monotonic()
+    user_dir = Path('/Users/coderbat/iYMusic/YTAudioSystem/backend/data/users')
+    if not user_dir.exists():
+        logger.info("Pre-warm: no users yet, skipping cycle")
+        return
+
+    user_files = list(user_dir.glob('*.json'))
+    if not user_files:
+        logger.info("Pre-warm: no users found, skipping cycle")
+        return
+
+    cache = get_cache()
+    audio_cache_dir = Path('/Users/coderbat/iYMusic/YTAudioSystem/backend/data/audio_cache')
+
+    # Collect (videoId, user_id) pairs to pre-warm. Dedup by
+    # videoId — if two users have the same track, only
+    # pre-warm it once.
+    to_warm: dict[str, str] = {}  # videoId -> first user_id (for logging)
+    skipped_cached = 0
+    skipped_old = 0
+
+    for user_file in user_files:
+        user_id = user_file.stem
+        try:
+            user_blob = json.loads(user_file.read_text())
+        except (json.JSONDecodeError, OSError) as e:
+            logger.warning(f"Pre-warm: couldn't read {user_file.name}: {e}")
+            continue
+
+        # Skip users not seen in the last N days. The user file
+        # stores the unix timestamp as `last_seen_at` (older
+        # versions used ISO-format `last_seen`).
+        last_seen_ts = user_blob.get("last_seen_at") or user_blob.get("last_seen")
+        if last_seen_ts is not None:
+            try:
+                # If it's a float, treat as unix timestamp; if string,
+                # try ISO parse.
+                if isinstance(last_seen_ts, (int, float)):
+                    age_days = (datetime.datetime.utcnow() - datetime.datetime.utcfromtimestamp(float(last_seen_ts))).days
+                else:
+                    last_seen_dt = datetime.datetime.fromisoformat(str(last_seen_ts))
+                    age_days = (datetime.datetime.utcnow() - last_seen_dt).days
+                if age_days > PREWARM_USER_LOOKBACK_DAYS:
+                    continue
+            except (ValueError, TypeError):
+                pass  # bad/missing date — try the user anyway
+
+        # Get the recently-played list. The sync blob (separate
+        # file) has a "history" array of {videoId, playedAt, progress}
+        # entries sorted ascending by playedAt — so the most-recent
+        # is at the END. Take the last PREWARM_TOP_N.
+        sync_file = Path('/Users/coderbat/iYMusic/YTAudioSystem/backend/data/sync') / f"{user_id}.json"
+        if not sync_file.exists():
+            continue
+        try:
+            sync_blob = json.loads(sync_file.read_text())
+        except (json.JSONDecodeError, OSError) as e:
+            logger.warning(f"Pre-warm: couldn't read sync blob for {user_id}: {e}")
+            continue
+        history = sync_blob.get("history") or []
+        if not isinstance(history, list):
+            continue
+        # Sort by playedAt descending, take top N
+        sorted_history = sorted(
+            [e for e in history if isinstance(e, dict) and e.get("videoId")],
+            key=lambda e: e.get("playedAt") or 0,
+            reverse=True,
+        )
+        recent = sorted_history[:PREWARM_TOP_N]
+
+        for entry in recent:
+            video_id = entry.get("videoId") or entry.get("video_id")
+            if not video_id:
+                continue
+            # Already queued (dedup across users)?
+            if video_id in to_warm:
+                continue
+            # Already cached?
+            cache_path = audio_cache_dir / f"{video_id}.m4a"
+            if cache_path.exists() and cache_path.stat().st_size > 1000:
+                skipped_cached += 1
+                continue
+            to_warm[video_id] = user_id
+
+    if not to_warm:
+        logger.info(
+            f"Pre-warm cycle: nothing to warm "
+            f"({skipped_cached} already cached, {skipped_old} skipped). "
+            f"{time.monotonic() - t0:.1f}s"
+        )
+        return
+
+    logger.info(
+        f"Pre-warm cycle: warming {len(to_warm)} tracks "
+        f"({skipped_cached} already cached)"
+    )
+
+    # Fire-and-forget the workers. _prefetch_worker respects
+    # _transcode_semaphore, so even with 10 concurrent calls
+    # the actual transcode work is capped at 2.
+    for video_id, user_id in to_warm.items():
+        try:
+            # Reuse the existing worker. The user_id is for
+            # logging only — the transcode doesn't need auth.
+            asyncio.create_task(_prefetch_worker(video_id, user_id))
+        except Exception as e:
+            logger.warning(f"Pre-warm: failed to enqueue {video_id}: {e}")
+
+    logger.info(
+        f"Pre-warm cycle: enqueued {len(to_warm)} tracks "
+        f"in {time.monotonic() - t0:.1f}s (transcodes will run "
+        f"serially via the cap=2 semaphore)"
+    )
+
 
 @app.on_event("shutdown")
 async def shutdown_event():
