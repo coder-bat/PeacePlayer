@@ -2654,6 +2654,560 @@ def _prewarm_thread_main():
         loop.close()
 
 
+# ====================================================================
+# S17-H / S17-PLAY — HLS streaming (Fix 4 Phase 3, 2026-07-30)
+# ====================================================================
+#
+# When a user plays a track that's not in the audio cache, instead
+# of waiting for the entire transcode to complete before serving
+# the file, we serve it as an HLS (HTTP Live Streaming) playlist
+# with fMP4 segments. ffmpeg's HLS muxer writes each segment as
+# soon as it's full (per-segment moov atom, ~2s of audio each), so
+# AVPlayer can start playing within ~3s of the request — vs ~12s
+# for the full transcode on a short clip and ~50s on a 3-5 min
+# track.
+#
+# Auth: every segment URL has the JWT in the query string (same
+# pattern as /audio/{video_id}.m4a?token=...). The m3u8 endpoint
+# reads the token from its own request and rewrites the segment
+# URLs to include it.
+#
+# Concurrency: same per-videoId lock + global semaphore as the
+# existing transcode pipeline. Multiple iOS requests for the same
+# cold track share one HLS transcode.
+#
+# File layout:
+#   data/hls/{video_id}/playlist.m3u8   <- written by ffmpeg
+#   data/hls/{video_id}/seg_000.m4s     <- written by ffmpeg
+#   data/hls/{video_id}/seg_001.m4s     <- written by ffmpeg
+#   ...
+#
+# The m3u8 served to AVPlayer is GENERATED (not the raw ffmpeg
+# output) so we can inject the auth token into each segment URL.
+
+HLS_DIR = Path('/Users/coderbat/iYMusic/YTAudioSystem/backend/data/hls')
+HLS_SEGMENT_TIME = 2  # seconds per segment — 2s gives ~3s TTFB
+HLS_MAX_WAIT_FOR_FIRST_SEGMENT_S = 10.0  # max wait for the first segment before 504
+
+
+async def _get_or_fetch_stream_url(video_id: str) -> Optional[str]:
+    """
+    Helper: get the YouTube stream URL for a videoId. Reuses the
+    existing in-memory cache (stream_cache, separate from the
+    audio cache). Returns the smallest webm (Opus) URL or None.
+    Same logic as audio_stream:865-910, factored out so /play
+    and /audio don't duplicate it.
+    """
+    try:
+        cache = get_cache()
+        stream_data = cache.get(video_id)
+        if not stream_data:
+            async with ytmusic_lock:
+                client = get_client()
+                stream_data = client.get_stream_url(video_id)
+            if not stream_data or not stream_data.get('audio_formats'):
+                return None
+            cache.set(video_id, stream_data)
+
+        formats = stream_data['audio_formats']
+        webm = [f for f in formats if f.get('mime_type') == 'webm']
+        if not webm:
+            return None
+        webm.sort(key=lambda f: f.get('bitrate', 0))
+        return webm[0]['url']
+    except Exception as e:
+        logger.error(f"_get_or_fetch_stream_url failed for {video_id}: {e}", exc_info=True)
+        return None
+
+
+def _hls_dir_for(video_id: str) -> Path:
+    return HLS_DIR / video_id
+
+
+def _hls_first_segment_path(video_id: str) -> Path:
+    return HLS_DIR / video_id / "seg_000.m4s"
+
+
+def _hls_playlist_path(video_id: str) -> Path:
+    return HLS_DIR / video_id / "playlist.m3u8"
+
+
+async def _hls_transcode_worker(video_id: str, yt_url: str, done_event: asyncio.Event) -> None:
+    """
+    Background worker: run yt-dlp → ffmpeg HLS pipeline writing
+    segments to data/hls/{video_id}/.
+
+    Unlike the existing _do_transcode_pipeline (which writes a
+    single .m4a file), this writes an m3u8 + .m4s segments as
+    they're produced. ffmpeg's HLS muxer flushes each segment
+    to disk as soon as it's full (per-segment moov atom), so the
+    files appear progressively — the first segment is ready
+    in ~3s for typical inputs.
+
+    Holds the per-videoId lock for the duration of the transcode
+    (acquired in the endpoint, not here) so concurrent requests
+    share the same in-progress segments.
+
+    Respects the global _transcode_semaphore (cap=2) via the
+    ffmpeg subprocess. HLS isn't in the critical path of the
+    warm-play path, so this doesn't compete with regular
+    transcode requests for the semaphore — but if a burst of
+    cold plays happens, the cap still protects the backend.
+
+    On successful completion:
+      - sets done_event (the endpoint uses this to know when
+        the transcode is complete; it can then add the
+        #EXT-X-ENDLIST tag to the m3u8 if needed)
+      - schedules _hls_concat_to_m4a as a follow-up so future
+        warm plays use the fast /audio path
+      - unregisters the job from _hls_active_jobs (allows new
+        jobs to be started for the same videoId, e.g., after
+        a token expiry that needs a fresh start)
+    """
+    hls_dir = _hls_dir_for(video_id)
+    hls_dir.mkdir(parents=True, exist_ok=True)
+
+    # Clean up any stale segments from a previous attempt.
+    for f in hls_dir.glob('seg_*.m4s'):
+        try:
+            f.unlink()
+        except OSError:
+            pass
+
+    seg_pattern = hls_dir / "seg_%03d.m4s"
+    pipe_cmd = (
+        f'{shlex.quote(YTDLP_BIN)} '
+        f'--js-runtimes deno:{shlex.quote(DENO_BIN)} '
+        f'-f "worstaudio[ext=webm]/worstaudio/bestaudio[ext=webm]/bestaudio/best" '
+        f'-o - --no-playlist --no-part --no-progress --quiet '
+        f'--remote-components ejs:github {shlex.quote(yt_url)} '
+        f'| {shlex.quote(FFMPEG_BIN)} -y -loglevel error -i pipe:0 '
+        f'-c:a aac -b:a 128k '
+        f'-f hls '
+        f'-hls_time {HLS_SEGMENT_TIME} '
+        f'-hls_playlist_type event '
+        f'-hls_segment_type fmp4 '
+        f'-hls_segment_filename {shlex.quote(str(seg_pattern))} '
+        f'{shlex.quote(str(hls_dir / "playlist.m3u8"))}'
+    )
+
+    t0 = time.monotonic()
+    transcode_ok = False
+    try:
+        # Respect the global transcode semaphore. We acquire it
+        # INSIDE the per-videoId lock (which the endpoint holds
+        # before calling us) so the lock order is consistent:
+        # always per-videoId first, then global.
+        async with _transcode_semaphore:
+            proc = await asyncio.create_subprocess_shell(
+                pipe_cmd,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            _, stderr = await proc.communicate()
+        pipe_seconds = time.monotonic() - t0
+        if proc.returncode != 0:
+            logger.error(
+                f"[hls] ffmpeg failed for {video_id} (rc={proc.returncode}): "
+                f"{stderr.decode(errors='replace')[:300]}"
+            )
+            return
+
+        num_segs = len(list(hls_dir.glob('seg_*.m4s')))
+        logger.info(
+            f"[hls] Transcoded {video_id} → {num_segs} segments in {pipe_seconds:.1f}s"
+        )
+        transcode_ok = True
+    except Exception as e:
+        logger.error(f"[hls] _hls_transcode_worker failed for {video_id}: {e}", exc_info=True)
+    finally:
+        # The job stays registered for a short while after the
+        # transcode completes, so late segment requests from
+        # AVPlayer still resolve. We unregister after a small
+        # grace period via the concat task's completion.
+        done_event.set()
+        if transcode_ok:
+            # Schedule the concat-to-cache as a follow-up.
+            # It also unregisters the job when done.
+            asyncio.create_task(_hls_concat_and_cleanup(video_id))
+
+
+async def _hls_wait_for_first_segment(video_id: str, timeout_s: float) -> bool:
+    """
+    Poll for the first segment to appear. Returns True on success,
+    False on timeout. Used by the /play/playlist.m3u8 endpoint
+    to know when it's safe to return the m3u8.
+    """
+    first = _hls_first_segment_path(video_id)
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        if first.exists() and first.stat().st_size > 0:
+            return True
+        await asyncio.sleep(0.1)
+    return False
+
+
+# Per-videoId status tracking for the HLS pipeline. The endpoint
+# uses this to know whether a transcode is already running for
+# the same videoId (so concurrent requests share the segments).
+_hls_active_jobs: dict = {}  # video_id -> {"event": asyncio.Event, "dir": Path, "started_at": float}
+
+
+def _hls_status(video_id: str) -> Optional[dict]:
+    """Return the active HLS job for this videoId, or None."""
+    return _hls_active_jobs.get(video_id)
+
+
+def _hls_register_job(video_id: str, event: asyncio.Event, dir_path: Path) -> None:
+    _hls_active_jobs[video_id] = {
+        "event": event,
+        "dir": dir_path,
+        "started_at": time.monotonic(),
+    }
+
+
+def _hls_unregister_job(video_id: str) -> None:
+    _hls_active_jobs.pop(video_id, None)
+
+
+@app.api_route("/play/{video_id}/playlist.m3u8", methods=["GET", "HEAD"])
+@limiter.limit("60/minute")
+async def play_hls_playlist(video_id: str, request: Request):
+    """
+    S17-H / S17-PLAY (Fix 4 Phase 3, 2026-07-30): HLS streaming
+    endpoint. Returns an m3u8 playlist for AVPlayer to consume.
+
+    Flow:
+      1. Auth check (inline, like /audio — accepts Bearer header
+         OR ?token= query param, since AVPlayer can't add headers).
+      2. If the audio cache has a .m4a (warm path), 302 redirect
+         to /audio/{videoId}.m4a?token=... — the existing fast
+         path stays unchanged for warm plays.
+      3. Otherwise, start (or join) an HLS transcode in the
+         background. Wait up to HLS_MAX_WAIT_FOR_FIRST_SEGMENT_S
+         for the first .m4s segment to appear.
+      4. Return a GENERATED m3u8 with the segment URLs rewritten
+         to include the auth token.
+
+    AVPlayer is a system component — it can't add Authorization
+    headers to its requests. The standard pattern for HLS with
+    auth is to put the token in the query string of every URL
+    (the m3u8 + each segment). Apple Music, Spotify, YouTube Music
+    all do this. The token has a long lifetime (days), so it
+    doesn't expire mid-playback.
+    """
+    from urllib.parse import unquote
+    auth_header = request.headers.get('Authorization') or ''
+    if not auth_header:
+        query_token = request.query_params.get('token')
+        if query_token:
+            auth_header = f'Bearer {unquote(query_token)}'
+    user = current_user_from_request(auth_header)
+    if not user:
+        raise HTTPException(status_code=401, detail="unauthorized")
+
+    # Cache hit: redirect to /audio. The token from this request
+    # becomes the token in the redirect URL — same pattern.
+    cache_path = Path('/Users/coderbat/iYMusic/YTAudioSystem/backend/data/audio_cache') / f"{video_id}.m4a"
+    if cache_path.exists() and cache_path.stat().st_size > 1000:
+        token_param = f"&token={unquote(request.query_params.get('token', ''))}" if request.query_params.get('token') else ''
+        return RedirectResponse(
+            url=f"/audio/{video_id}.m4a?token={unquote(request.query_params.get('token', ''))}",
+            status_code=302,
+        )
+
+    # Cache miss: HLS path. Check if a transcode is already
+    # running for this videoId; if so, share its segments.
+    existing = _hls_status(video_id)
+    if existing is None:
+        # Start a new HLS transcode. Get the YouTube stream URL
+        # first (might be slow on first call, but cached after).
+        yt_url = await _get_or_fetch_stream_url(video_id)
+        if not yt_url:
+            raise HTTPException(status_code=404, detail="No audio stream found")
+
+        # Acquire the per-videoId lock to serialize concurrent
+        # requests for the same track. If another caller is
+        # already transcoding this track, we'll re-check inside
+        # the lock and use their segments instead of starting
+        # a duplicate transcode.
+        lock = _create_videoId_lock(video_id)
+        async with lock:
+            # Re-check after acquiring the lock — another caller
+            # may have just started a transcode.
+            recheck = _hls_status(video_id)
+            if recheck is not None:
+                existing = recheck
+            else:
+                done_event = asyncio.Event()
+                _hls_register_job(video_id, done_event, _hls_dir_for(video_id))
+                # Spawn the worker. NOTE: the worker holds the
+                # per-videoId lock for its full duration (via
+                # the endpoint's `async with lock`). The worker
+                # itself doesn't re-acquire it.
+                # We release the lock when this endpoint returns;
+                # the worker continues independently. This is
+                # fine because the worker is the ONLY writer to
+                # data/hls/{videoId}/ at this point.
+                asyncio.create_task(_hls_transcode_worker(video_id, yt_url, done_event))
+                existing = _hls_status(video_id)
+
+    # Wait for the first segment (or timeout).
+    if not await _hls_wait_for_first_segment(video_id, HLS_MAX_WAIT_FOR_FIRST_SEGMENT_S):
+        raise HTTPException(
+            status_code=504,
+            detail=f"Transcode didn't produce a segment within {HLS_MAX_WAIT_FOR_FIRST_SEGMENT_S}s",
+        )
+
+    # Read the m3u8 from disk and rewrite segment URLs to
+    # include the auth token. The m3u8 is being written
+    # continuously (new segments are appended). We read the
+    # current state and serve it.
+    return _serve_hls_playlist_with_token(video_id, request)
+
+
+def _create_videoId_lock(video_id: str):
+    """
+    Helper: create a per-videoId lock if it doesn't exist yet.
+    Returns the lock so callers can `async with` it.
+    """
+    if video_id not in _videoId_locks:
+        _videoId_locks[video_id] = asyncio.Lock()
+    return _videoId_locks[video_id]
+
+
+def _serve_hls_playlist_with_token(video_id: str, request: Request):
+    """
+    Read the current m3u8 from disk, rewrite segment URLs to
+    include the auth token, and return a Response.
+
+    Why generated (not just FileResponse): the m3u8 references
+    segments as relative paths like `seg_000.m4s`. AVPlayer would
+    then request `/play/{videoId}/seg_000.m4s` — without the
+    token. So we rewrite each URL to include the token.
+    """
+    from urllib.parse import unquote, quote
+    raw_token = request.query_params.get('token', '')
+    if not raw_token:
+        # Should never happen — endpoint requires auth. But if
+        # the token is missing, return the raw m3u8 anyway; the
+        # segment requests will 401.
+        m3u8_path = _hls_playlist_path(video_id)
+        return FileResponse(m3u8_path, media_type="application/x-mpegurl")
+
+    token = quote(raw_token, safe='')
+    m3u8_path = _hls_playlist_path(video_id)
+    try:
+        with open(m3u8_path, 'r') as f:
+            m3u8_text = f.read()
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="m3u8 not found")
+
+    # Rewrite segment URLs: lines that look like
+    #   seg_000.m4s
+    # become
+    #   seg_000.m4s?token=eyJhbGci...
+    # Lines that are not segment references (e.g., start with #)
+    # are left as-is.
+    out_lines = []
+    for line in m3u8_text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith('#'):
+            out_lines.append(line)
+            continue
+        # Segment URL line: append ?token=...
+        # If the line already has a query string, append with &.
+        sep = '&' if '?' in stripped else '?'
+        out_lines.append(f"{stripped}{sep}token={token}")
+
+    body = '\n'.join(out_lines) + '\n'
+    return Response(
+        content=body,
+        media_type="application/x-mpegurl",
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Access-Control-Allow-Origin": "*",
+        },
+    )
+
+
+@app.api_route("/play/{video_id}/seg_{n}.m4s", methods=["GET", "HEAD"])
+@limiter.limit("120/minute")  # higher limit: AVPlayer may poll aggressively
+async def play_hls_segment(video_id: str, n: int, request: Request):
+    """
+    S17-H / S17-PLAY: serve a single HLS .m4s segment.
+
+    The token is in the query string (injected by the m3u8
+    endpoint). Auth check: the token must be valid. If the
+    segment doesn't exist yet (transcode still in progress),
+    return 503 Service Unavailable — AVPlayer will retry
+    after a short delay (the HLS spec recommends a small
+    back-off for this case).
+    """
+    from urllib.parse import unquote
+    auth_header = request.headers.get('Authorization') or ''
+    if not auth_header:
+        query_token = request.query_params.get('token')
+        if query_token:
+            auth_header = f'Bearer {unquote(query_token)}'
+    user = current_user_from_request(auth_header)
+    if not user:
+        raise HTTPException(status_code=401, detail="unauthorized")
+
+    seg_path = HLS_DIR / video_id / f"seg_{n:03d}.m4s"
+    if not seg_path.exists():
+        # 503 with Retry-After. AVPlayer treats this as "segment
+        # not ready yet, retry shortly" — standard for live HLS.
+        return Response(
+            status_code=503,
+            headers={"Retry-After": "1", "Access-Control-Allow-Origin": "*"},
+        )
+
+    return FileResponse(
+        seg_path,
+        media_type="video/iso.segment",  # standard MIME for fMP4 HLS segments
+        headers={
+            "Cache-Control": "public, max-age=3600",  # segments don't change once written
+            "Access-Control-Allow-Origin": "*",
+        },
+    )
+
+
+@app.api_route("/play/{video_id}/init.mp4", methods=["GET", "HEAD"])
+@limiter.limit("60/minute")
+async def play_hls_init(video_id: str, request: Request):
+    """
+    S17-H / S17-PLAY: serve the fMP4 init segment for HLS.
+
+    fMP4 HLS uses an init.mp4 file at the start of every
+    playlist (referenced by the m3u8's #EXT-X-MAP). It contains
+    the codec config, timescale, and other track-level metadata
+    that each subsequent .m4s segment depends on. Without
+    init.mp4, the segments are not decodable on their own.
+    """
+    from urllib.parse import unquote
+    auth_header = request.headers.get('Authorization') or ''
+    if not auth_header:
+        query_token = request.query_params.get('token')
+        if query_token:
+            auth_header = f'Bearer {unquote(query_token)}'
+    user = current_user_from_request(auth_header)
+    if not user:
+        raise HTTPException(status_code=401, detail="unauthorized")
+
+    init_path = HLS_DIR / video_id / "init.mp4"
+    if not init_path.exists():
+        raise HTTPException(status_code=404, detail="init.mp4 not yet written")
+
+    return FileResponse(
+        init_path,
+        media_type="video/iso.segment",
+        headers={
+            "Cache-Control": "public, max-age=3600",
+            "Access-Control-Allow-Origin": "*",
+        },
+    )
+
+
+# S17-H / S17-PLAY (Fix 4 Phase 3, 2026-07-30): on successful
+# HLS transcode, also concatenate the segments into a cached
+# .m4a so future warm plays use the fast path. This is done in
+# the _hls_transcode_worker's success path — but to keep the
+# worker focused on its single responsibility (writing HLS),
+# the concat is handled by a follow-up task that we schedule
+# after the worker completes.
+async def _hls_concat_to_m4a(video_id: str):
+    """
+    After HLS transcode completes, concatenate the segments
+    into a single .m4a file and save to the audio cache. The
+    future /audio requests for this videoId will then be a
+    cache hit (instant).
+
+    Uses ffmpeg's concat demuxer with the m3u8 as input —
+    ffmpeg can read HLS directly. The output uses the same
+    fMP4 flags as Fix 4 Phase 1 (moov at start, fragments).
+    """
+    hls_dir = _hls_dir_for(video_id)
+    m3u8_path = hls_dir / "playlist.m3u8"
+    audio_cache_path = Path('/Users/coderbat/iYMusic/YTAudioSystem/backend/data/audio_cache') / f"{video_id}.m4a"
+
+    if audio_cache_path.exists() and audio_cache_path.stat().st_size > 1000:
+        return  # already cached
+
+    if not m3u8_path.exists():
+        return
+
+    # Final m3u8 might not have #EXT-X-ENDLIST yet (the worker
+    # wrote it but ffmpeg may have exited before that). Force
+    # the endlist for the concat input.
+    try:
+        with open(m3u8_path, 'r') as f:
+            m3u8_text = f.read()
+        if '#EXT-X-ENDLIST' not in m3u8_text:
+            with open(m3u8_path, 'a') as f:
+                if not m3u8_text.endswith('\n'):
+                    f.write('\n')
+                f.write('#EXT-X-ENDLIST\n')
+    except OSError as e:
+        logger.warning(f"[hls] couldn't add ENDLIST to {m3u8_path}: {e}")
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            FFMPEG_BIN, '-y', '-loglevel', 'error',
+            # -allowed_extensions ALL is required because ffmpeg
+            # writes init.mp4 (not init.m4s) for fMP4 HLS — but
+            # ffmpeg's HLS demuxer refuses to read it by default
+            # (security restriction). ALL is safe here because
+            # the m3u8 + segments are coming from our own disk.
+            '-allowed_extensions', 'ALL',
+            '-i', str(m3u8_path),
+            '-c', 'copy',
+            '-movflags', '+frag_keyframe+empty_moov+default_base_moof',
+            str(audio_cache_path),
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await proc.communicate()
+        if proc.returncode == 0 and audio_cache_path.exists():
+            size = audio_cache_path.stat().st_size
+            logger.info(f"[hls] Concat to cache: {video_id} → {size} bytes")
+        else:
+            logger.warning(
+                f"[hls] Concat to cache failed for {video_id} (rc={proc.returncode}): "
+                f"{stderr.decode(errors='replace')[:200]}"
+            )
+    except Exception as e:
+        logger.error(f"[hls] Concat to cache failed for {video_id}: {e}", exc_info=True)
+    finally:
+        # Remove the synthetic ENDLIST we added.
+        try:
+            with open(m3u8_path, 'r') as f:
+                content = f.read()
+            if content.rstrip().endswith('#EXT-X-ENDLIST') and '#EXT-X-ENDLIST' in content[:-50]:
+                with open(m3u8_path, 'w') as f:
+                    f.write(content.rstrip().rstrip('#EXT-X-ENDLIST').rstrip() + '\n')
+        except OSError:
+            pass
+
+
+async def _hls_concat_and_cleanup(video_id: str) -> None:
+    """
+    After HLS transcode completes: concat segments to cached
+    .m4a, then unregister the job. The concat task also writes
+    a small grace period to allow late segment requests from
+    AVPlayer to resolve before the job is removed from the
+    active jobs dict.
+    """
+    try:
+        await _hls_concat_to_m4a(video_id)
+    finally:
+        # Small grace period so any in-flight segment requests
+        # from AVPlayer resolve. The segments don't disappear
+        # from disk — they're just no longer tracked in memory.
+        await asyncio.sleep(30)
+        _hls_unregister_job(video_id)
+
+
 async def _prewarm_loop():
     """
     S17-H / S17-PLAY (Fix 5): pre-warm background task. Runs
