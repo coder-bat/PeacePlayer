@@ -319,9 +319,18 @@ class PlayerState: ObservableObject {
     // anything outside Models/; if a future refactor wants stricter
     // encapsulation, a protocol that exposes only the
     // AVQueuePlayer view would be the right next step.
-    var player: AVPlayer?
-    private var timeObserver: Any?
-    private var cancellables = Set<AnyCancellable>()
+    //
+    // S17-H / Tier 4: the actual `AVPlayer?` reference (plus the
+    // 1Hz time observer, the per-item notification tokens, and
+    // the per-player Combine `cancellables`) now lives on
+    // `AVPlayerController`. This computed property is a forwarding
+    // shim so the ~50 existing call sites
+    // (`self.player?.play()`, `self.player = AVPlayer(...)`)
+    // continue to work without a sweep of the file.
+    var player: AVPlayer? {
+        get { avPlayerController.player }
+        set { avPlayerController.player = newValue }
+    }
 
     /// S17-H (P1-FF6 follow-up): lifetime subscriptions that must
     /// survive `stop()` and `setupPlayerObservers()`. The mirror
@@ -339,8 +348,13 @@ class PlayerState: ObservableObject {
     /// mirror here means it lives for the lifetime of the
     /// singleton — exactly what we want.
     private var lifetimeCancellables = Set<AnyCancellable>()
-    private var retryCount = 0
-    private let maxRetries = 2
+    // S17-H / Tier 4: was `private`; promoted to internal for
+    // `AVPlayerController` (which reads these in
+    // `handlePlayerItemStatus` to drive the retry-after-failure
+    // path). The internal access is module-wide but only
+    // AVPlayerController (in Models/) actually reads them.
+    var retryCount = 0
+    let maxRetries = 2
     private var originalQueue: [QueueItem] = []
     // S17-H / Tier 4: was `private var dataManager`; promoted to
     // internal for `GaplessController.handleAutoAdvance()` which
@@ -364,6 +378,15 @@ class PlayerState: ObservableObject {
     // properties are initialized" rule. The controller holds a
     // weak ref back to self, so the lazy doesn't form a cycle.
     private lazy var gaplessController = GaplessController(playerState: self)
+
+    // S17-H / Tier 4: the AVPlayer instance + the 1Hz time
+    // observer + per-item notification tokens + per-player
+    // Combine `cancellables` are now owned by
+    // `AVPlayerController`. Same lazy-init pattern as
+    // `gaplessController` above (pass self to init, weak
+    // ref back from controller). The forwarding `var player`
+    // computed property above routes through this controller.
+    private lazy var avPlayerController = AVPlayerController(playerState: self)
 
     // C-2 fix: token-based observer tracking. The previous code used
     // `NotificationCenter.default.removeObserver(self)` in the
@@ -412,7 +435,11 @@ class PlayerState: ObservableObject {
     private var trackTransitionBackgroundTask: UIBackgroundTaskIdentifier = .invalid
 
     // Stall recovery
-    private var isPlaybackStalled = false
+    // S17-H / Tier 4: was `private`; promoted to internal for
+    // `AVPlayerController` (which reads this in
+    // `handleIsPlaybackLikelyToKeepUp` to drive the stall
+    // recovery path).
+    var isPlaybackStalled = false
 
     // MARK: - Computed Properties
     
@@ -613,7 +640,7 @@ class PlayerState: ObservableObject {
                 self.snapshotPlaybackRate = self.playbackRate
                 self.snapshotCurrentIndex = self.currentIndex
             }
-            .store(in: &cancellables)
+            .store(in: &avPlayerController.cancellables)
 
         // Phase 2 / ios-qa: register the @Snapshotable mirrors with the
         // embedded StateServer. This must happen AFTER `self` is fully
@@ -765,7 +792,10 @@ class PlayerState: ObservableObject {
     /// Clears isHandlingCompletion immediately. Called by the new
     /// player's status observer when playbackState transitions out
     /// of .loading — the equivalent of "new track is now playing".
-    private func clearCompletionFlag() {
+    // S17-H / Tier 4: was `private`; promoted to internal for
+    // `AVPlayerController` (which calls this in
+    // `handlePlayerItemStatus` and `handleIsPlaybackLikelyToKeepUp`).
+    func clearCompletionFlag() {
         completionFlagResetWorkItem?.cancel()
         completionFlagResetWorkItem = nil
         if isHandlingCompletion {
@@ -804,7 +834,11 @@ class PlayerState: ObservableObject {
     /// AVError.unknown (-11829) we also surface a few of the
     /// userInfo keys AVPlayer does populate, since that's the
     /// case users see most often.
-    private static func describeAVPlayerError(_ error: NSError) -> String {
+    // S17-H / Tier 4: was `private`; promoted to internal for
+    // `AVPlayerController` (which calls this in
+    // `handlePlayerItemStatus` to surface a one-line error
+    // description in the retry-exhausted toast).
+    static func describeAVPlayerError(_ error: NSError) -> String {
         let domain = error.domain
         let code = error.code
 
@@ -900,7 +934,12 @@ class PlayerState: ObservableObject {
         }
     }
 
-    private func endTrackTransitionBackgroundTask() {
+    // S17-H / Tier 4: was `private`; promoted to internal for
+    // `AVPlayerController` (which calls this in
+    // `handlePlayerItemStatus` and `handleIsPlaybackLikelyToKeepUp`
+    // to release the BG task we acquired during a track
+    // transition).
+    func endTrackTransitionBackgroundTask() {
         guard trackTransitionBackgroundTask != .invalid else { return }
         UIApplication.shared.endBackgroundTask(trackTransitionBackgroundTask)
         trackTransitionBackgroundTask = .invalid
@@ -1014,7 +1053,7 @@ class PlayerState: ObservableObject {
                         }
                     }
                 )
-                .store(in: &cancellables)
+                .store(in: &avPlayerController.cancellables)
         }
     }
 
@@ -1165,7 +1204,7 @@ class PlayerState: ObservableObject {
         
         // Setup observers
         print("🔊 Setting up observers...")
-        setupPlayerObservers()
+        avPlayerController.setupObservers()
         #if DEBUG
         PlayCrashDiagnostics.log(.playback, "play(item:) POST-setupPlayerObservers")
         #endif
@@ -1314,7 +1353,12 @@ class PlayerState: ObservableObject {
     ///     observers didn't surface
     /// We surface a real error with retry so the user can recover
     /// without killing the app.
-    private var loadingTimeoutWorkItem: DispatchWorkItem?
+    // S17-H / Tier 4: was `private`; promoted to internal for
+    // `AVPlayerController` (which cancels this in the
+    // readyToPlay / isPlaybackLikelyToKeepUp paths so the
+    // 15s safety net doesn't fire if the player reached
+    // ready first).
+    var loadingTimeoutWorkItem: DispatchWorkItem?
 
     private func scheduleLoadingStateTimeout(after seconds: TimeInterval, for item: QueueItem) {
         loadingTimeoutWorkItem?.cancel()
@@ -1388,7 +1432,7 @@ class PlayerState: ObservableObject {
                     self.performSeamlessQualitySwitch(to: streamInfo.streamUrl, for: item)
                 }
             )
-            .store(in: &cancellables)
+            .store(in: &avPlayerController.cancellables)
     }
 
     private func performSeamlessQualitySwitch(to newUrl: String, for originalItem: QueueItem) {
@@ -1560,10 +1604,13 @@ class PlayerState: ObservableObject {
                     // observer when the new track is actually playing.
                 }
             )
-            .store(in: &cancellables)
+            .store(in: &avPlayerController.cancellables)
     }
     
-    private func refreshAndPlayCurrentItem() {
+    // S17-H / Tier 4: was `private`; promoted to internal for
+    // `AVPlayerController` (which calls this in
+    // `handlePlayerItemStatus` to retry after a failure).
+    func refreshAndPlayCurrentItem() {
         guard let item = currentItem else {
             print("⚠️ [S11] refreshAndPlayCurrentItem: no currentItem — no-op")
             return
@@ -1611,7 +1658,7 @@ class PlayerState: ObservableObject {
                     self.play(item: refreshedItem, addToQueue: false)
                 }
             )
-            .store(in: &cancellables)
+            .store(in: &avPlayerController.cancellables)
     }
     
     func togglePlayPause() {
@@ -1726,7 +1773,7 @@ class PlayerState: ObservableObject {
         // matches C-2 (observer token teardown before item
         // teardown) and means no spurious callbacks can fire
         // after the player is gone.
-        removeTimeObserver()
+        avPlayerController.removeTimeObserver()
         player?.replaceCurrentItem(with: nil)
 
         // Cancel quality upgrade timer
@@ -1736,7 +1783,7 @@ class PlayerState: ObservableObject {
         AudioVisualizerEngine.shared.removeTap()
 
         // CRITICAL FIX: Cancel all Combine subscriptions to prevent duplicate observers
-        cancellables.removeAll()
+        avPlayerController.clearCancellables()
 
         player = nil
         // S11 fix (Bug 9): clear currentItem so the UI doesn't keep
@@ -1795,14 +1842,14 @@ class PlayerState: ObservableObject {
         guard let url = URL(string: station.urlResolved) else { return }
 
         // Clean up previous playback state
-        removeTimeObserver()
+        avPlayerController.removeTimeObserver()
         cancelQualityUpgrade()
         // S17-H: release the BG task if a track-transition is
         // mid-flight. Without this, a queued nextTrack/autoplay
         // BG task would be orphaned when the user switches from a
         // track to a radio station.
         endTrackTransitionBackgroundTask()
-        cancellables.removeAll()
+        avPlayerController.clearCancellables()
         // C-2 fix: removed `NotificationCenter.default.removeObserver(self)` —
         // it was stripping audio session observers (interruption / route
         // change / media services reset) for the rest of the app's lifetime.
@@ -1833,7 +1880,7 @@ class PlayerState: ObservableObject {
         // QW-13 fix: install the visualizer tap on the new player item
         // (was previously only called in play(item:), missing radio/podcast/audiobook)
         AudioVisualizerEngine.shared.installTap(on: playerItem)
-        setupPlayerObservers()
+        avPlayerController.setupObservers()
         // S11 fix (Bug 2): refresh Lock Screen / Control Center with
         // the radio station's metadata. Previously Lock Screen kept
         // showing the previous track.
@@ -1851,12 +1898,12 @@ class PlayerState: ObservableObject {
 
         savePodcastPosition()  // Save current position before cleanup
         // Clean up previous playback state
-        removeTimeObserver()
+        avPlayerController.removeTimeObserver()
         cancelQualityUpgrade()
         // S17-H: see playRadioStation — release BG task on
         // content-type switch.
         endTrackTransitionBackgroundTask()
-        cancellables.removeAll()
+        avPlayerController.clearCancellables()
         // C-2 fix: removed `NotificationCenter.default.removeObserver(self)` —
         // it was stripping audio session observers for the rest of the app's
         // lifetime. See C-2 in project-playback-gap-analysis-2026-06-16.md.
@@ -1886,7 +1933,7 @@ class PlayerState: ObservableObject {
         playbackState = .playing
         // QW-13 fix: install the visualizer tap on the new player item
         AudioVisualizerEngine.shared.installTap(on: playerItem)
-        setupPlayerObservers()
+        avPlayerController.setupObservers()
         // S11 fix (Bug 2): refresh Lock Screen / Control Center with
         // the podcast metadata. Without this, the Lock Screen kept
         // showing whatever track was playing before.
@@ -1922,12 +1969,12 @@ class PlayerState: ObservableObject {
         savePodcastPosition()
         saveAudiobookPosition()
 
-        removeTimeObserver()
+        avPlayerController.removeTimeObserver()
         cancelQualityUpgrade()
         // S17-H: see playRadioStation — release BG task on
         // content-type switch.
         endTrackTransitionBackgroundTask()
-        cancellables.removeAll()
+        avPlayerController.clearCancellables()
         // C-2 fix: removed `NotificationCenter.default.removeObserver(self)` —
         // see project-playback-gap-analysis-2026-06-16.md.
 
@@ -1960,7 +2007,7 @@ class PlayerState: ObservableObject {
         playbackState = .playing
         // QW-13 fix: install the visualizer tap on the new player item
         AudioVisualizerEngine.shared.installTap(on: playerItem)
-        setupPlayerObservers()
+        avPlayerController.setupObservers()
         // S11 fix (Bug 2): refresh Lock Screen / Control Center with
         // audiobook chapter metadata.
         NowPlayingService.shared.updateNowPlaying(
@@ -2412,7 +2459,7 @@ class PlayerState: ObservableObject {
                 AudioVisualizerEngine.shared.installTap(on: newItem)
             } 
             // Setup observers on new player
-            self.setupPlayerObservers()
+            self.avPlayerController.setupObservers()
 
             // Update state
             self.playbackState = .playing
@@ -2562,259 +2609,25 @@ class PlayerState: ObservableObject {
     private func applyVolume() {
         player?.volume = Float(volume) * currentReplayGainLinear
     }
-    
-    // MARK: - Private Methods
-    
-    private func setupPlayerObservers() {
-        guard let player = player else { return }
 
-        // S15: cancel any prior player observers before wiring the
-        // new ones. `setupPlayerObservers` adds 4 cancellables per
-        // call; some call sites (play(item:), gapless crossfade)
-        // don't clear the set first, so dead subscriptions
-        // accumulated over a long session (200+ after 50 plays).
-        // Clearing here means the function is idempotent: it
-        // represents "the current player has exactly these 4
-        // observers, and nothing else."
-        //
-        // S17-H: removed the dead `cancellables = cancellables.filter { _ in true }`
-        // that preceded the `removeAll()`. The filter was a
-        // no-op (predicate returns true for every element), and
-        // the 25-line comment block describing an aspiration
-        // ("addToPlayerObservers" that was never implemented)
-        // was misleading. The `removeAll()` below is what
-        // actually does the work. Lifetime-only observers
-        // (queueStore mirror, etc.) live in `lifetimeCancellables`
-        // and are not touched here.
-        let priorPlayerCancellableCount = cancellables.count
-        print("🔊 setupPlayerObservers: clearing \(priorPlayerCancellableCount) prior cancellables")
-        cancellables.removeAll()
-        
-        print("🔊 setupPlayerObservers: player exists")
-        
-        // Observe player item status and errors
-        player.currentItem?.publisher(for: \.status)
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] status in
-                print("🔊 Player item status changed: \(status)")
-                switch status {
-                case .readyToPlay:
-                    print("✅ Player item ready to play")
-                    self?.retryCount = 0  // Reset retry count on success
-                    // S17-H follow-up: clear the loading-state timeout —
-                    // the player reached ready before the 15s safety net.
-                    self?.loadingTimeoutWorkItem?.cancel()
-                    // Defer showing .playing until audio is actually ready.
-                    if self?.playbackState == .loading {
-                        self?.playbackState = .playing
-                    }
-                case .failed:
-                    if let error = self?.player?.currentItem?.error as NSError? {
-                        print("❌ Player item failed: \(error)")
-                        print("❌ Error domain: \(error.domain), code: \(error.code)")
-                        print("❌ Error userInfo: \(error.userInfo)")
-
-                        // Retry with fresh URL if possible
-                        if let self = self, self.retryCount < self.maxRetries,
-                           let item = self.currentItem {
-                            self.retryCount += 1
-                            print("🔄 Retrying playback (attempt \(self.retryCount)/\(self.maxRetries))...")
-                            self.refreshAndPlayCurrentItem()
-                        } else {
-                            // CRITICAL FIX: After max retries, skip to next track instead of staying in error
-                            print("❌ Max retries reached, skipping to next track")
-                            // C-3 fix: surface the error to the user with a
-                            // longer pause before auto-skip so they have a
-                            // chance to read the message and tap retry. The
-                            // original 1.0s skip was too short to even see
-                            // the error in the previous silent flow.
-                            //
-                            // S17-H follow-up: include the underlying
-                            // AVPlayer error details so the user can tell
-                            // "network timed out" from "track not
-                            // streamable" from "backend 500". The previous
-                            // generic "Couldn't play this track after
-                            // multiple attempts" hid the actual cause —
-                            // particularly the recent S17-H bug where
-                            // the AsyncClient closed mid-stream and
-                            // surfaced as a generic AVPlayer failure.
-                            let nsError = self?.player?.currentItem?.error as NSError?
-                            let detail = nsError.map { Self.describeAVPlayerError($0) } ?? "unknown error"
-                            self?.playbackState = .error("Playback failed: \(detail)")
-                            ErrorHandler.shared.show(
-                                .playbackFailed("Couldn't play this track (\(detail)). Skipping to the next one."),
-                                retry: { [weak self] in
-                                    self?.refreshAndPlayCurrentItem()
-                                }
-                            )
-                            // S11 fix (Bug 4): end the BG task we acquired
-                            // (via Trigger A or Trigger B) so it doesn't
-                            // leak for the 2.5s wait. The nextTrack()
-                            // dispatch below will re-acquire via
-                            // nextTrack's beginTrackTransitionBackgroundTask().
-                            self?.endTrackTransitionBackgroundTask()
-                            self?.clearCompletionFlag()
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
-                                self?.nextTrack()
-                            }
-                        }
-                    }
-                case .unknown:
-                    print("⚠️ Player item status unknown")
-                @unknown default:
-                    print("⚠️ Player item status unknown default")
-                }
-            }
-            .store(in: &cancellables)
-        
-        // Note: Asset loading observation removed - using standard URL initialization
-        
-        // Time observer for progress updates
-        // C-2026-06-28: 1.0s instead of 0.5s. The lock screen / Control
-        // Center / scrubber all display in 1s increments (the iOS Music
-        // app's periodic time observer also runs at 1s). Going to 0.5s
-        // doubled the @Published churn on PlaybackClock and starved
-        // the main thread — UI taps were lost because SwiftUI never
-        // got a turn to dispatch them. 1s is the precision floor the
-        // user can perceive.
-        let interval = CMTime(seconds: 1.0, preferredTimescale: CMTimeScale(NSEC_PER_SEC))
-        timeObserver = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
-            self?.updateProgress()
-        }
-        
-        // Observe item duration
-        player.currentItem?.publisher(for: \.duration)
-            .compactMap { $0.seconds > 0 ? $0.seconds : nil }
-            // C-2026-06-28: for HTTP streams the duration publisher emits
-            // many times in rapid succession as the server resolves
-            // chunks. Each call to updateRemoteControls() runs the full
-            // updateNowPlaying pipeline (MPNowPlayingInfoCenter write +
-            // 5 widget reloads + SharedNowPlayingState JSON encode).
-            // On a saturated main thread this exhausts the 5-second
-            // gesture gate and iOS SIGKILLs the process.
-            //
-            // Fix: only call updateRemoteControls() when the duration
-            // changes by more than 1 second, and skip calls that would
-            // be redundant with the existing updatePlaybackTime path.
-            // The per-second scrubber ticks still drive updatePlaybackTime.
-            .removeDuplicates(by: { abs($0 - $1) < 1.0 })
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] duration in
-                print("🔊 Duration updated: \(duration)")
-                self?.duration = duration
-                // Update Now Playing info with the new duration
-                self?.updateRemoteControls()
-            }
-            .store(in: &cancellables)
-        
-        // Observe playback end
-        // C-2 fix: token-based observer. We scope to the specific item so
-        // old observers don't fire on a new player after a track change.
-        if let item = player.currentItem {
-            playerItemObserverTokens.append(
-                NotificationCenter.default.addObserver(
-                    forName: .AVPlayerItemDidPlayToEndTime,
-                    object: item,
-                    queue: .main
-                ) { [weak self] _ in
-                    self?.playerDidFinishPlaying()
-                }
-            )
-
-            // Observe playback failure mid-track
-            playerItemObserverTokens.append(
-                NotificationCenter.default.addObserver(
-                    forName: .AVPlayerItemFailedToPlayToEndTime,
-                    object: item,
-                    queue: .main
-                ) { [weak self] notification in
-                    self?.playerFailedToPlayToEndTime(notification)
-                }
-            )
-
-            // Observe playback stall
-            playerItemObserverTokens.append(
-                NotificationCenter.default.addObserver(
-                    forName: .AVPlayerItemPlaybackStalled,
-                    object: item,
-                    queue: .main
-                ) { [weak self] notification in
-                    self?.playerPlaybackStalled(notification)
-                }
-            )
-        }
-
-        // Observe buffering / stall recovery
-        player.currentItem?.publisher(for: \.isPlaybackLikelyToKeepUp)
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] isLikelyToKeepUp in
-                guard let self = self else { return }
-                print("🔊 isPlaybackLikelyToKeepUp: \(isLikelyToKeepUp)")
-                if isLikelyToKeepUp {
-                    // S17-H follow-up: clear the loading-state timeout
-                    // — the player buffered enough before the 15s safety net.
-                    self.loadingTimeoutWorkItem?.cancel()
-                    if self.isPlaybackStalled {
-                        self.isPlaybackStalled = false
-                        print("🔄 Recovery from stall: resuming playback")
-                        self.player?.play()
-                        self.player?.rate = self.playbackRate
-                        self.playbackState = .playing
-                    } else if self.playbackState == .buffering {
-                        self.playbackState = .playing
-                    } else if self.playbackState == .loading {
-                        self.playbackState = .playing
-                        // S10: the new track has buffered enough to start
-                        // producing audio. It's now safe to release the
-                        // 30-second background task we acquired in
-                        // nextTrack / playerDidFinishPlaying — the audio
-                        // session's "audio" background mode keeps the app
-                        // alive on its own. Releasing earlier meant we
-                        // could be suspended before any audio flowed,
-                        // especially in the background after autoplay.
-                        self.endTrackTransitionBackgroundTask()
-                        print("🔓 S10: BG task released — new track is playing")
-                        // S11 fix (Bug 14): pair with the flag reset.
-                        // The handleTrackCompletion defer scheduled a
-                        // 5s safety timeout; we can clear that and the
-                        // isHandlingCompletion flag right now since the
-                        // new track is confirmed playing.
-                        self.clearCompletionFlag()
-                    }
-                }
-            }
-            .store(in: &cancellables)
-
-        print("✅ setupPlayerObservers completed")
-    }
-    
-    private func removeTimeObserver() {
-        if let observer = timeObserver {
-            player?.removeTimeObserver(observer)
-            timeObserver = nil
-        }
-        // C-2 fix: only remove the player-item-scoped observers, not all
-        // observers. Audio session observers (interruption / route change /
-        // media services reset) must remain registered for the lifetime of
-        // the PlayerState singleton, otherwise phone calls / AirPods
-        // disconnect / Siri would stop pausing playback after a content-type
-        // switch.
-        playerItemObserverTokens.forEach { NotificationCenter.default.removeObserver($0) }
-        playerItemObserverTokens.removeAll()
-    }
-    
-    private var progressLogCounter = 0
-    
-    private func updateProgress() {
+    /// S17-H / Tier 4: 1Hz tick handler. Called by
+    /// `AVPlayerController.setupObservers` via the periodic
+    /// time observer. Reads from `self.player` (forwards to
+    /// the controller) and fans out to PlaybackClock,
+    /// NowPlayingService, the listening-time tracker, and
+    /// the crossfade / podcast / audiobook position
+    /// bookkeeping. Kept on PlayerState (not moved into the
+    /// controller) because most of the fan-out writes to
+    /// PlayerState-owned state.
+    func updateProgress() {
         guard let player = player else { return }
 
         let current = player.currentTime().seconds
         let total = player.currentItem?.duration.seconds ?? 0
 
         // Log every 10th call (every 5 seconds) to avoid spam
-        progressLogCounter += 1
-        if progressLogCounter >= 10 {
-            progressLogCounter = 0
+        let effectiveTotal = effectiveDuration > 0 ? effectiveDuration : total
+        if Int(current) > 0 && Int(current) % 5 == 0 {
             print("⏱️ Progress: \(String(format: "%.1f", current))s / \(String(format: "%.1f", total))s, state: \(playbackState)")
         }
 
@@ -2826,11 +2639,10 @@ class PlayerState: ObservableObject {
         // LyricsView polls via its own timer. The legacy @Published
         // mirrors remain as a debug affordance but are no longer
         // updated on the hot path.
-        let effectiveTotal = effectiveDuration > 0 ? effectiveDuration : total
         _ = playbackClock.tick(currentSeconds: current, totalSeconds: total, effectiveDuration: effectiveTotal)
 
         // Update Now Playing info periodically (every ~1 second)
-        if progressLogCounter % 2 == 0 {
+        if Int(current) % 2 == 0 {
             NowPlayingService.shared.updatePlaybackTime(
                 currentTime: current,
                 isPlaying: playbackState.isPlaying,
@@ -2838,10 +2650,6 @@ class PlayerState: ObservableObject {
             )
         }
 
-        // Use effective duration (from track metadata) for progress calculation
-        if progressLogCounter == 0 {  // Log every 5 seconds
-            print("🎵 updateProgress: current=\(current), total=\(total), expectedDuration=\(expectedDuration), effectiveTotal=\(effectiveTotal)")
-        }
         if effectiveTotal > 0 {
             // C-2026-06-28: progress is computed from PlaybackClock now;
             // this function does not write to `progress` on PlayerState
@@ -2889,10 +2697,10 @@ class PlayerState: ObservableObject {
             // (live radio / podcast / audiobook) that
             // playerDidFinishPlaying handles — so a polling fire
             // during a podcast would have auto-advanced to music
-            // via the recently-played fallback.
-            // The `isHandlingCompletion` flag is still set in
-            // handleTrackCompletion (line 2919) as a safety net
-            // for any future re-introduction of a polling path or
+            // (live radio reconnects to the stream; podcast stops;
+            // audiobook auto-advances to the next chapter).
+            // The polling logic was removed but the comment
+            // remains for historical context — see commit 88c6de9
             // for the case where the AVPlayer notification arrives
             // twice (e.g. on stream-URL refresh).
         }
@@ -2913,8 +2721,15 @@ class PlayerState: ObservableObject {
             }
         }
     }
-    
-    @objc private func playerDidFinishPlaying() {
+
+    // S17-H / Tier 4: was `@objc private`; promoted to
+    // `@objc internal` for `AVPlayerController` (which calls
+    // this from the `.AVPlayerItemDidPlayToEndTime`
+    // notification observer). The @objc is required because
+    // the observer is registered with
+    // `NotificationCenter.default.addObserver(forName:...)`
+    // which is Objective-C bridged.
+    @objc func playerDidFinishPlaying() {
         print("🏁 AVPlayer reported song finished playing")
         // Live radio: reconnect instead of advancing
         if contentType == .liveRadio {
@@ -2988,7 +2803,10 @@ class PlayerState: ObservableObject {
         }
     }
 
-    @objc private func playerFailedToPlayToEndTime(_ notification: Notification) {
+    // S17-H / Tier 4: was `@objc private`; promoted for
+    // `AVPlayerController` (which calls this from the
+    // `.AVPlayerItemFailedToPlayToEndTime` observer).
+    @objc func playerFailedToPlayToEndTime(_ notification: Notification) {
         let error = notification.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? Error
         print("❌ Player failed to play to end time: \(error?.localizedDescription ?? "Unknown error")")
 
@@ -3018,7 +2836,10 @@ class PlayerState: ObservableObject {
         }
     }
 
-    @objc private func playerPlaybackStalled(_ notification: Notification) {
+    // S17-H / Tier 4: was `@objc private`; promoted for
+    // `AVPlayerController` (which calls this from the
+    // `.AVPlayerItemPlaybackStalled` observer).
+    @objc func playerPlaybackStalled(_ notification: Notification) {
         print("⚠️ Playback stalled (buffer underrun)")
         DispatchQueue.main.async { [weak self] in
             self?.isPlaybackStalled = true
@@ -3153,7 +2974,11 @@ extension PlayerState {
     // (below) is the real one — it calls NowPlayingService on
     // every currentItem change.
 
-    private func updateRemoteControls() {
+    // S17-H / Tier 4: was `private`; promoted for
+    // `AVPlayerController` (which calls this in
+    // `setupObservers` when the duration publisher fires
+    // so the Lock Screen shows the new duration).
+    func updateRemoteControls() {
         guard let item = currentItem else {
             NowPlayingService.shared.clearNowPlaying()
             return
