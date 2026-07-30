@@ -3081,11 +3081,32 @@ def _serve_hls_playlist_with_token(video_id: str, request: Request):
     # become
     #   seg_000.m4s?token=eyJhbGci...
     # Lines that are not segment references (e.g., start with #)
-    # are left as-is.
+    # are left as-is, EXCEPT for #EXT-X-MAP which references
+    # init.mp4 — that ALSO needs the token. (Bug found 2026-07-30:
+    # without rewriting URI="init.mp4", AVPlayer would GET init.mp4
+    # without a token and get 401. The audio would still play
+    # for a couple of seconds, then fail with a cryptic
+    # "operation could not be completed" because init.mp4 is
+    # needed to decode the segments.)
     out_lines = []
     for line in m3u8_text.splitlines():
         stripped = line.strip()
-        if not stripped or stripped.startswith('#'):
+        if not stripped:
+            out_lines.append(line)
+            continue
+        if stripped.startswith('#EXT-X-MAP:'):
+            # Rewrite URI="init.mp4" → URI="init.mp4?token=..."
+            # Preserves the rest of the line (e.g. #EXT-X-MAP:URI="init.mp4",BYTERANGE="...")
+            import re
+            new_line = re.sub(
+                r'URI="([^"]+)"',
+                lambda m: f'URI="{m.group(1)}?token={token}"' if '?' not in m.group(1)
+                else f'URI="{m.group(1)}&token={token}"',
+                line,
+            )
+            out_lines.append(new_line)
+            continue
+        if stripped.startswith('#'):
             out_lines.append(line)
             continue
         # Segment URL line: append ?token=...
