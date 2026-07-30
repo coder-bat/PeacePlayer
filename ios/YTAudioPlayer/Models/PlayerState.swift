@@ -181,7 +181,7 @@ class PlayerState: ObservableObject {
     /// Sprint 2 / C-4 helper: every place that sets expectedDuration
     /// should also call this so PlaybackClock's published value stays
     /// in sync with PlayerState's private mirror.
-    private func updateExpectedDuration(_ value: Double) {
+    func updateExpectedDuration(_ value: Double) {
         expectedDuration = value
         playbackClock.setExpectedDuration(value)
     }
@@ -311,7 +311,15 @@ class PlayerState: ObservableObject {
     // it's a regular AVPlayer and we use the two-player crossfade path.
     // The type stays as `AVPlayer?` because AVQueuePlayer IS-A AVPlayer;
     // only construction and item-management differ.
-    private var player: AVPlayer?
+    // S17-H / Tier 4: was `private var player`; promoted to internal
+    // for `GaplessController` (which lives in Models/ too, but in
+    // a separate file — `private` is per-file, not per-type).
+    // GaplessController reads the player to cast to AVQueuePlayer
+    // and mutate its pre-queue. We don't need to expose this to
+    // anything outside Models/; if a future refactor wants stricter
+    // encapsulation, a protocol that exposes only the
+    // AVQueuePlayer view would be the right next step.
+    var player: AVPlayer?
     private var timeObserver: Any?
     private var cancellables = Set<AnyCancellable>()
 
@@ -334,7 +342,12 @@ class PlayerState: ObservableObject {
     private var retryCount = 0
     private let maxRetries = 2
     private var originalQueue: [QueueItem] = []
-    private var dataManager = DataManager.shared
+    // S17-H / Tier 4: was `private var dataManager`; promoted to
+    // internal for `GaplessController.handleAutoAdvance()` which
+    // calls `dataManager.addToRecentlyPlayed(_:)`. The class
+    // already exists as a singleton; the only thing that changes
+    // is who can see the property reference.
+    var dataManager = DataManager.shared
     // S17-H / Tier 4: listening-time accounting is now owned by
     // `ListeningTimeTracker`. The tracker encapsulates the
     // accumulator, the last-tick timestamp, the 5s max-tick-delta
@@ -343,6 +356,14 @@ class PlayerState: ObservableObject {
     // the time observer and calls `reset()` / `flush()` on track
     // boundaries.
     private let listeningTimeTracker = ListeningTimeTracker()
+
+    // S17-H / Tier 4: gapless mode (AVQueuePlayer pre-queue +
+    // auto-advance state sync) is now owned by `GaplessController`.
+    // `lazy` so we can pass `self` to the controller's init
+    // without fighting Swift's "self used before all stored
+    // properties are initialized" rule. The controller holds a
+    // weak ref back to self, so the lazy doesn't form a cycle.
+    private lazy var gaplessController = GaplessController(playerState: self)
 
     // C-2 fix: token-based observer tracking. The previous code used
     // `NotificationCenter.default.removeObserver(self)` in the
@@ -515,14 +536,14 @@ class PlayerState: ObservableObject {
         // AVQueuePlayer whenever the queue changes. The first-track-
         // after-launch case is the obvious one — `play(item:)`
         // creates the AVQueuePlayer with only the current track
-        // (queue count = 1) so the initial `enqueueUpcomingItemsForGapless`
+        // (queue count = 1) so the initial `enqueueUpcomingItems`
         // bails on its `guard queueCount > 1`. Then
         // `QueuePrefetcher.autoPopulateQueue` populates the queue
         // a few hundred ms later via async `addToQueue` calls, but
         // by then `play(item:)` has already moved on. Without this
         // subscription, the first track ends, the AVQueuePlayer
         // has no next item, and the auto-advance path is the
-        // clunky one (rebuild via `advanceGaplessState`).
+        // clunky one (rebuild via `handleAutoAdvance`).
         //
         // The debounce coalesces bursts from the prefetcher (which
         // may add 5+ tracks within a few hundred ms). The
@@ -535,7 +556,7 @@ class PlayerState: ObservableObject {
                 guard let self = self else { return }
                 guard CrossfadeManager.shared.gaplessEnabled,
                       self.player is AVQueuePlayer else { return }
-                self.enqueueUpcomingItemsForGapless()
+                self.gaplessController.enqueueUpcomingItems()
             }
             .store(in: &lifetimeCancellables)
 
@@ -1136,7 +1157,7 @@ class PlayerState: ObservableObject {
         // S3-5: Pre-queue upcoming items in the AVQueuePlayer so the
         // auto-advance to next track is gapless.
         if CrossfadeManager.shared.gaplessEnabled {
-            enqueueUpcomingItemsForGapless()
+            gaplessController.enqueueUpcomingItems()
         }
 
         // Attach audio visualizer tap to this player item
@@ -2102,7 +2123,7 @@ class PlayerState: ObservableObject {
         // in the AVQueuePlayer (gapless mode), remove the
         // matching AVPlayerItem too. Otherwise the AVQueuePlayer
         // would play the removed track as if nothing happened,
-        // and `advanceGaplessState`'s lookup in `queueStore.items`
+        // and `handleAutoAdvance`'s lookup in `queueStore.items`
         // would return nil, leaving `currentIndex` stale and
         // breaking the next user-tap of Next.
         if !wasCurrent, let queuePlayer = player as? AVQueuePlayer {
@@ -2233,13 +2254,13 @@ class PlayerState: ObservableObject {
                 // the user would see the new track in the
                 // recently-played list while the previous track
                 // was still playing. Now both happen in
-                // `advanceGaplessState` (line 2314) when the
+                // `handleAutoAdvance` (in GaplessController) when the
                 // AVQueuePlayer reports the new track has
                 // actually started, which is the user-visible
                 // "track changed" moment.
                 queuePlayer.advanceToNextItem()
                 // Re-enqueue to refill the queue player
-                enqueueUpcomingItemsForGapless()
+                gaplessController.enqueueUpcomingItems()
                 endTrackTransitionBackgroundTask()
                 return
             } else if repeatMode == .all {
@@ -2412,122 +2433,6 @@ class PlayerState: ObservableObject {
     }
     
     private var isPreparingNextTrack = false
-
-    /// S3-5: Append upcoming tracks to the AVQueuePlayer so it can chain
-    /// them seamlessly. We append from currentIndex+1 forward, but stop
-    /// early if the user has `repeatMode == .one` (in which case the same
-    /// item would loop — no need to queue anything).
-    private func enqueueUpcomingItemsForGapless() {
-        guard let queuePlayer = player as? AVQueuePlayer else { return }
-        guard repeatMode != .one else {
-            print("🔊 Gapless: repeat-one, not enqueueing more items")
-            return
-        }
-
-        // Walk forward from the next index, taking into account repeat-all
-        // (which wraps the queue back to the start).
-        let queueCount = queue.count
-        guard queueCount > 1 else { return }
-
-        // S17-H: drop already-queued-but-not-current AVPlayerItems
-        // before re-enqueueing. The previous code blindly called
-        // `queuePlayer.insert(item, after: queuePlayer.items().last)`
-        // on every auto-advance / next-tap, leaving the items the
-        // AVQueuePlayer had already pre-queued for upcoming tracks
-        // in place. After 3 auto-advances in a row, the
-        // AVQueuePlayer's items[] would contain [3, 4, 5, 6, 4, 5,
-        // 6, 4, 5, 6] — same tracks appended multiple times. The
-        // user would hear track 4 played three times in a row.
-        // Strategy: remove every item except the current one. This
-        // is safe because AVQueuePlayer's `canInsert(_:after:)` is
-        // for inserting new items; what we need is the inverse
-        // operation on already-queued items. The simplest correct
-        // path: iterate `items()` after the current, remove each.
-        for queuedItem in queuePlayer.items().dropFirst() {
-            queuePlayer.remove(queuedItem)
-        }
-
-        let lookAhead = min(3, queueCount - 1)  // Pre-queue up to 3 tracks to limit memory
-        for offset in 1...lookAhead {
-            let nextIdx: Int
-            if repeatMode == .all {
-                nextIdx = (currentIndex + offset) % queueCount
-            } else {
-                nextIdx = currentIndex + offset
-                if nextIdx >= queueCount { break }
-            }
-
-            let nextItem = queue[nextIdx]
-            guard let url = URL(string: nextItem.streamUrl) else { continue }
-
-            let nextPlayerItem = AVPlayerItem(url: url)
-            nextPlayerItem.preferredForwardBufferDuration = 5
-            nextPlayerItem.canUseNetworkResourcesForLiveStreamingWhilePaused = false
-            queuePlayer.insert(nextPlayerItem, after: queuePlayer.items().last)
-            print("🔊 Gapless: pre-queued [\(nextIdx)] \(nextItem.track.title)")
-        }
-    }
-
-    /// S3-5: After AVQueuePlayer auto-advances to the next item, sync
-    /// PlayerState's currentIndex/currentItem with the new current item.
-    /// Called from the .AVPlayerItemDidPlayToEndTime notification handler
-    /// when gapless mode is on.
-    private func advanceGaplessState() {
-        guard let queuePlayer = player as? AVQueuePlayer else { return }
-        guard let nowPlaying = queuePlayer.currentItem,
-              let matchIdx = queueStore.items.firstIndex(where: { $0.track.videoId == trackIdentifier(for: nowPlaying) }) else {
-            return
-        }
-        // S17-G: set currentIndex via the store. The mirror
-        // subscription will keep currentItem in sync.
-        queueStore.setCurrentIndex(matchIdx)
-        if matchIdx < queueStore.items.count {
-            let item = queueStore.items[matchIdx]
-            currentItem = item
-            // S17-H: push expectedDuration through the helper so
-            // playbackClock (and the scrubber) follow the
-            // auto-advance. Without this the lock-screen / control-
-            // center duration stayed on the previous track for
-            // 1-3s after the auto-advance fired (NowPlayingService
-            // gets the new duration, but the in-app scrubber uses
-            // playbackClock).
-            updateExpectedDuration(Double(item.track.durationSeconds))
-            dataManager.addToRecentlyPlayed(item.track)
-            NotificationCenter.default.post(name: .trackPlayed, object: nil)
-            // S11 fix (Bug 2): refresh Lock Screen / Control Center
-            // immediately on gapless auto-advance. Without this the
-            // system Now Playing kept showing the previous track
-            // until the next duration-publisher tick (1-3s for HTTP
-            // streams).
-            NowPlayingService.shared.updateNowPlaying(
-                track: item.track,
-                duration: Double(item.track.durationSeconds),
-                currentTime: 0,
-                isPlaying: playbackState.isPlaying,
-                playbackRate: playbackRate
-            )
-        }
-        // Re-enqueue so we always have a few items in the queue player.
-        enqueueUpcomingItemsForGapless()
-    }
-
-    /// Best-effort: match an AVPlayerItem back to a videoId by inspecting
-    /// the URL path (we used AVPlayerItem(url:) so the videoId is encoded
-    /// in the URL — for streams, it's the path component after /proxy-stream/).
-    private func trackIdentifier(for playerItem: AVPlayerItem) -> String? {
-        guard let asset = playerItem.asset as? AVURLAsset else { return nil }
-        // S11 fix (Bug 7): previously only stripped .m4a; the proxy
-        // endpoint also serves .webm when preferM4A=false. Use the
-        // delegate's preferred bit depth via pathExtension rather than
-        // hardcoding the suffix.
-        let lastPath = asset.url.lastPathComponent
-        for ext in ["m4a", "webm", "mp4", "mp3"] {
-            if lastPath.hasSuffix(".\(ext)") {
-                return String(lastPath.dropLast(ext.count + 1))
-            }
-        }
-        return lastPath
-    }
 
     private func prepareNextTrackForCrossfade() {
         guard CrossfadeManager.shared.isEnabled else { return }
@@ -3215,7 +3120,7 @@ class PlayerState: ObservableObject {
         if CrossfadeManager.shared.gaplessEnabled, player is AVQueuePlayer {
             print("🔊 Gapless: AVQueuePlayer auto-advanced; syncing state")
             DispatchQueue.main.async { [weak self] in
-                self?.advanceGaplessState()
+                self?.gaplessController.handleAutoAdvance()
                 self?.endTrackTransitionBackgroundTask()
             }
             return
