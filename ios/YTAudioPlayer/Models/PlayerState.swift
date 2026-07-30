@@ -176,7 +176,10 @@ class PlayerState: ObservableObject {
     @Published var duration: Double = 0.0
 
     /// Expected duration from track metadata (more reliable)
-    private var expectedDuration: Double = 0.0
+    // S17-H / Tier 4: was `private`; promoted to internal for
+    // `QueueController.performCrossfadeToNextItem` which logs
+    // it for crossfade diagnostics.
+    var expectedDuration: Double = 0.0
 
     /// Sprint 2 / C-4 helper: every place that sets expectedDuration
     /// should also call this so PlaybackClock's published value stays
@@ -195,7 +198,12 @@ class PlayerState: ObservableObject {
     let playbackClock = PlaybackClock()
 
     /// Flag to prevent multiple completion triggers
-    private var isHandlingCompletion = false
+    // S17-H / Tier 4: was `private`; promoted to internal for
+    // `QueueController.next()` which reads this to decide
+    // whether the `next()` call was triggered by a track
+    // completing (so AntiAlgorithm + S17-H race-condition
+    // logic can branch accordingly).
+    var isHandlingCompletion = false
     /// S17-H: set by `nextTrack(userSkipped: true)` (and other
     /// user-initiated skip paths) so the in-flight
     /// `.AVPlayerItemDidPlayToEndTime` auto-advance can be
@@ -206,7 +214,13 @@ class PlayerState: ObservableObject {
     /// N+2, skipping a track the user wanted to hear. The flag
     /// is cleared in `play(item:)` once the new track is
     /// committed.
-    private var userSkippedPendingCompletion = false
+    // S17-H / Tier 4: was `private`; promoted to internal for
+    // `QueueController.next()` which sets this to true when
+    // the user tapped next (so the in-flight
+    // .AVPlayerItemDidPlayToEndTime handler skips its own
+    // auto-advance, preventing the user from hearing the
+    // track after the one they tapped for).
+    var userSkippedPendingCompletion = false
     
     /// Playback queue. S17-G (perf 10 P0-F1): backed by `queueStore`
     /// so that queue mutations don't fire `PlayerState.objectWillChange`
@@ -355,7 +369,19 @@ class PlayerState: ObservableObject {
     // AVPlayerController (in Models/) actually reads them.
     var retryCount = 0
     let maxRetries = 2
-    private var originalQueue: [QueueItem] = []
+    // S17-H / Tier 4: was `private`; promoted to internal for
+    // `QueueController.toggleShuffle()` which saves the
+    // original queue before shuffling, so toggling shuffle
+    // off can restore it.
+    var originalQueue: [QueueItem] = []
+
+    // S17-H / Tier 4: was `private`; promoted to internal for
+    // `QueueController.prepareNextTrackForCrossfade` (sets
+    // to true while preparing, false on completion). Lived
+    // between nextTrack and previousTrack on PlayerState
+    // pre-extraction; moved next to originalQueue so the
+    // QueueController-related state is grouped together.
+    var isPreparingNextTrack = false
     // S17-H / Tier 4: was `private var dataManager`; promoted to
     // internal for `GaplessController.handleAutoAdvance()` which
     // calls `dataManager.addToRecentlyPlayed(_:)`. The class
@@ -377,7 +403,11 @@ class PlayerState: ObservableObject {
     // without fighting Swift's "self used before all stored
     // properties are initialized" rule. The controller holds a
     // weak ref back to self, so the lazy doesn't form a cycle.
-    private lazy var gaplessController = GaplessController(playerState: self)
+    // S17-H / Tier 4: was `private`; promoted to internal for
+    // `QueueController.next()` which calls
+    // `gaplessController.enqueueUpcomingItems()` after a
+    // gapless advance.
+    lazy var gaplessController = GaplessController(playerState: self)
 
     // S17-H / Tier 4: the AVPlayer instance + the 1Hz time
     // observer + per-item notification tokens + per-player
@@ -386,7 +416,11 @@ class PlayerState: ObservableObject {
     // `gaplessController` above (pass self to init, weak
     // ref back from controller). The forwarding `var player`
     // computed property above routes through this controller.
-    private lazy var avPlayerController = AVPlayerController(playerState: self)
+    // S17-H / Tier 4: was `private`; promoted to internal for
+    // `QueueController.next()` which accesses the AVPlayer via
+    // `avPlayerController.player` to cast to AVQueuePlayer for
+    // the gapless advance path.
+    lazy var avPlayerController = AVPlayerController(playerState: self)
 
     // S17-H / Tier 4: the fan-out to `NowPlayingService.shared`
     // (Lock Screen / Control Center metadata) is now owned
@@ -395,6 +429,16 @@ class PlayerState: ObservableObject {
     // become 1-line `nowPlayingController.updateNowPlaying()`
     // calls. Same lazy-init pattern.
     private lazy var nowPlayingController = NowPlayingController(playerState: self)
+
+    // S17-H / Tier 4: queue navigation (next, previous) +
+    // repeat/shuffle state transitions are now owned by
+    // `QueueController`. The ~380 lines of conditional flow
+    // (gapless vs crossfade vs autoplay vs repeat-all wrap)
+    // that used to live as `nextTrack` / `previousTrack` /
+    // `toggleShuffle` / `toggleRepeat` on PlayerState (plus
+    // 3 private helpers) are now in QueueController. Same
+    // lazy-init pattern as the other controllers.
+    private lazy var queueController = QueueController(playerState: self)
 
     // C-2 fix: token-based observer tracking. The previous code used
     // `NotificationCenter.default.removeObserver(self)` in the
@@ -433,7 +477,11 @@ class PlayerState: ObservableObject {
     /// track's start restarts the current track (seek to 0)
     /// instead of going to the previous index. Matches Apple
     /// Music / Spotify UX.
-    private let previousTrackRestartGracePeriod: TimeInterval = 3
+    // S17-H / Tier 4: was `private`; promoted to internal for
+    // `QueueController.previous()` which reads this to decide
+    // "restart current track" vs "go to previous track" per
+    // the Apple Music / Spotify UX.
+    let previousTrackRestartGracePeriod: TimeInterval = 3
     private var cleanupTimer: Timer?  // Store reference for proper cleanup
 
     // Serial queue for completion handling to prevent race conditions
@@ -932,7 +980,11 @@ class PlayerState: ObservableObject {
         return "\(domain) \(code)"
     }
 
-    private func beginTrackTransitionBackgroundTask() {
+    // S17-H / Tier 4: was `private`; promoted to internal for
+    // `QueueController.next()` which calls this at the start
+    // of every track transition (gapless advance, crossfade,
+    // autoplay).
+    func beginTrackTransitionBackgroundTask() {
         endTrackTransitionBackgroundTask()
         trackTransitionBackgroundTask = UIApplication.shared.beginBackgroundTask(withName: "com.peaceplayer.trackTransition") { [weak self] in
             self?.endTrackTransitionBackgroundTask()
@@ -1322,7 +1374,7 @@ class PlayerState: ObservableObject {
         
         // Prepare next track for crossfade (with delay to allow queue to populate)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-            self?.prepareNextTrackForCrossfade()
+            self?.queueController.prepareNextTrackForCrossfade()
         }
         
         // S17-H: reset the listening-time tracker for the new track.
@@ -2234,379 +2286,34 @@ class PlayerState: ObservableObject {
         currentItem = nil
     }
     
-    // MARK: - Skip Control
-    
-    func nextTrack(useCrossfade: Bool = true, userSkipped: Bool = false) {
-        print("⏭️ nextTrack called. Queue count: \(queue.count), currentIndex: \(currentIndex)")
-        beginTrackTransitionBackgroundTask()
-
-        // S10 diagnostic: distinguish "user pressed next" from "track
-        // finished, autoplay kicked in". These take very different paths
-        // and we want to know which fired when reading the console after
-        // a background-track-transition repro.
-        let fromCompletion = !userSkipped && isHandlingCompletion
-        #if DEBUG
-        PlayCrashDiagnostics.log(.playback, "S10: nextTrack ENTRY fromCompletion=\(fromCompletion) queue.count=\(queue.count) currentIndex=\(currentIndex) userSkipped=\(userSkipped)")
-        #endif
-        print("⏭️ S10: nextTrack ENTRY fromCompletion=\(fromCompletion) queue.count=\(queue.count) currentIndex=\(currentIndex)")
-
-        // Anti-Algorithm: track skip/complete
-        if let currentVideoId = currentItem?.track.videoId {
-            if userSkipped {
-                AntiAlgorithmEngine.shared.trackSkipped(videoId: currentVideoId)
-            }
-        }
-        // S17-H: mark that a user-initiated skip just happened.
-        // The handleTrackCompletion path that fires from
-        // .AVPlayerItemDidPlayToEndTime (which is in flight on
-        // completionQueue at this very moment for tracks that
-        // are near the end) will see this flag and skip its own
-        // auto-advance, so the user hears the track they tapped
-        // for, not the one after it.
-        if userSkipped {
-            userSkippedPendingCompletion = true
-        }
-        guard !queue.isEmpty else {
-            print("⏭️ Queue is empty!")
-            endTrackTransitionBackgroundTask()
-            return
-        }
-
-        if repeatMode == .one {
-            // Repeat current
-            seek(to: 0)
-            endTrackTransitionBackgroundTask()
-            return
-        }
-
-        // S3-5: Gapless mode path. If the player is an AVQueuePlayer, the
-        // next item is already in the queue. Just call advanceToNextItem
-        // and let AVFoundation do the rest. We still update currentIndex
-        // / currentItem synchronously for the UI.
-        if CrossfadeManager.shared.gaplessEnabled, let queuePlayer = player as? AVQueuePlayer {
-            let nextIndex = currentIndex + 1
-            if nextIndex < queue.count {
-                print("⏭️ Gapless: advancing AVQueuePlayer to next track")
-                // S17-G: set currentIndex via the store. The mirror
-                // subscription updates `currentItem`. The expected
-                // duration is per-track metadata, not a queue
-                // property, so it stays on PlayerState.
-                queueStore.setCurrentIndex(nextIndex)
-                let nextItem = queueStore.items[nextIndex]
-                // S17-H: route through the helper so playbackClock
-                // (the focused observable that the scrubber
-                // subscribes to) also gets the new duration. A
-                // direct `expectedDuration =` write here was
-                // leaving the scrubber denominator stale across
-                // gapless transitions, so the progress bar
-                // visibly compressed when crossing into the next
-                // track. Same helper is used by every other
-                // play/crossfade path.
-                updateExpectedDuration(Double(nextItem.track.durationSeconds))
-                // S17-H: removed the premature
-                // `addToRecentlyPlayed` and
-                // `NotificationCenter.default.post(.trackPlayed)`
-                // calls here. Previously the user's Next tap
-                // was recording the upcoming track in
-                // recently-played and notifying PlaylistManager
-                // before the track actually started playing —
-                // the user would see the new track in the
-                // recently-played list while the previous track
-                // was still playing. Now both happen in
-                // `handleAutoAdvance` (in GaplessController) when the
-                // AVQueuePlayer reports the new track has
-                // actually started, which is the user-visible
-                // "track changed" moment.
-                queuePlayer.advanceToNextItem()
-                // Re-enqueue to refill the queue player
-                gaplessController.enqueueUpcomingItems()
-                endTrackTransitionBackgroundTask()
-                return
-            } else if repeatMode == .all {
-                // Loop — fall through to playQueue(at: 0) below
-                print("⏭️ Gapless: looping to beginning")
-            } else {
-                // S11 fix (Bug 6): previously went silent at end of
-                // queue when gapless was enabled. Now fall through to
-                // autoplay-from-recently-played, matching the non-
-                // gapless path so the user always has continuous music.
-                print("⏭️ End of queue reached (gapless) — falling through to autoplay")
-                autoplayNextFromRecentlyPlayed()
-                endTrackTransitionBackgroundTask()
-                clearCompletionFlag()
-                return
-            }
-        }
-
-        let nextIndex = currentIndex + 1
-        print("⏭️ Next index: \(nextIndex), queue.count: \(queue.count)")
-
-        if nextIndex < queue.count {
-            let nextItem = queue[nextIndex]
-            print("⏭️ Playing next: \(nextItem.track.title), streamUrl: \(nextItem.streamUrl.prefix(50))...")
-
-            // Check if we should use crossfade
-            if useCrossfade && CrossfadeManager.shared.isEnabled {
-                performCrossfadeToNextItem(nextItem, at: nextIndex)
-            } else {
-                playQueue(at: nextIndex)
-            }
-        } else if repeatMode == .all {
-            // Loop to beginning
-            print("⏭️ Looping to beginning")
-            playQueue(at: 0)
-        } else {
-            // 2026-06-29 (S9c): when the queue is exhausted (the
-            // common case is a single-track play from search or
-            // home), fall back to autoplay from the user's
-            // recently-played list. We pick the most recent track
-            // that isn't the one that just finished and start
-            // playback on it. This makes the listening experience
-            // continuous without requiring the user to manually
-            // queue tracks.
-            print("⏭️ End of queue reached — trying autoplay from recently played")
-            autoplayNextFromRecentlyPlayed()
-        }
-    }
-
-    /// 2026-06-29 (S9c): fall back to the user's recently-played
-    /// list when the queue is exhausted. Picks the most recent
-    /// track that isn't the one that just finished and starts
-    /// playback on it. If no candidates are available, leaves the
-    /// player in the .paused state on the last track.
-    ///
-    /// S10: do NOT release the track-transition background task here.
-    /// The previous code ended it the instant `play(track:)` returned,
-    /// which was BEFORE the new AVPlayer had buffered any audio. In the
-    /// background, iOS could then suspend the app while the stream was
-    /// still being fetched by yt-dlp. The task is now released in the
-    /// `isPlaybackLikelyToKeepUp` observer once the new track is
-    /// audibly playing (see setupPlayerObservers).
-    private func autoplayNextFromRecentlyPlayed() {
-        // S15: this is called from the AVPlayer KVO observer
-        // (`isPlaybackLikelyToKeepUp` on a background queue) via
-        // `handleTrackCompletion` -> `nextTrack`. Everything inside
-        // mutates @Published properties on `dataManager`,
-        // `currentItem`, etc. SwiftUI requires those mutations to
-        // happen on the main thread, otherwise the runtime emits
-        // 'Publishing changes from background threads is not
-        // allowed' warnings and views can render inconsistent
-        // state. Hop to main before reading or writing any UI
-        // state.
-        DispatchQueue.main.async { [weak self] in
-            self?._autoplayNextFromRecentlyPlayedOnMain()
-        }
-    }
-
-    private func _autoplayNextFromRecentlyPlayedOnMain() {
-        let justPlayedId = currentItem?.track.videoId
-        let candidates = dataManager.recentlyPlayed
-            .filter { $0.videoId != justPlayedId }
-            .compactMap { $0.toTrack }
-
-        #if DEBUG
-        PlayCrashDiagnostics.log(.playback, "S10: autoplayNextFromRecentlyPlayed candidates=\(candidates.count)")
-        #endif
-        print("⏭️ S10: autoplay candidates=\(candidates.count) justPlayed=\(justPlayedId ?? "nil")")
-
-        guard let nextTrack = candidates.first else {
-            print("⏭️ No recently-played candidates; staying on last track")
-            // No next track — release the background task so we don't
-            // hold it forever.
-            endTrackTransitionBackgroundTask()
-            return
-        }
-
-        print("⏭️ S10: Autoplaying next: \(nextTrack.title)")
-        play(track: nextTrack)
-        // Note: background task is released in setupPlayerObservers'
-        // isPlaybackLikelyToKeepUp observer when the new track is
-        // actually playing.
-    }
-    
-    private func performCrossfadeToNextItem(_ item: QueueItem, at index: Int) {
-        print("🔊 Performing crossfade to: \(item.track.title)")
-
-        // CRITICAL FIX: Set expectedDuration BEFORE updating UI so progress calculations use correct duration
-        updateExpectedDuration(Double(item.track.durationSeconds))
-        print("🎵 Crossfade: Set expectedDuration = \(expectedDuration) from track.durationSeconds = \(item.track.durationSeconds)")
-        
-        // CRITICAL FIX: Check if crossfade is possible BEFORE updating UI
-        // CrossfadeManager needs a prepared nextPlayer
-        guard CrossfadeManager.shared.canCrossfade() else {
-            print("⚠️ Cannot crossfade - nextPlayer not prepared. Falling back to regular playback.")
-            playQueue(at: index, isCrossfadeFallback: true)
-            endTrackTransitionBackgroundTask()
-            return
-        }
-        
-        // Now safe to update UI state
-        // S17-G: set currentIndex via the store. The mirror
-        // subscription will keep currentItem in sync (though
-        // the explicit assignment below is the more direct
-        // path for this code path).
-        queueStore.setCurrentIndex(index)
-        currentItem = item
-        
-        // Perform crossfade
-        CrossfadeManager.shared.crossfadeToNext { [weak self] in
-            guard let self = self else { return }
-
-            // Crossfade complete, update player reference
-            self.player = CrossfadeManager.shared.takeNextPlayer()
-
-            // CRITICAL FIX: Only proceed if we got a valid player
-            guard self.player != nil else {
-                print("❌ Crossfade completed but player is nil - forcing fallback")
-                self.playQueue(at: index, isCrossfadeFallback: true)
-                self.endTrackTransitionBackgroundTask()
-                return
-            }
-
-            // QW-13 fix: re-install the visualizer tap on the new player
-            // item. installTap is only called in play(item:), so after a
-            // crossfade the visualizer + haptic symphony engine would read
-            // silent buffers for the new track.
-            if let newItem = self.player?.currentItem {
-                AudioVisualizerEngine.shared.installTap(on: newItem)
-            } 
-            // Setup observers on new player
-            self.avPlayerController.setupObservers()
-
-            // Update state
-            self.playbackState = .playing
-
-            // Update remote controls
-            self.updateRemoteControls()
-
-            // Prepare next track for future crossfade
-            self.prepareNextTrackForCrossfade()
-
-            print("✅ Crossfade complete, now playing: \(item.track.title)")
-            self.endTrackTransitionBackgroundTask()
-        }
-        
-        // Add to recently played
-        dataManager.addToRecentlyPlayed(item.track)
-        NotificationCenter.default.post(name: .trackPlayed, object: nil)
-    }
-    
-    private var isPreparingNextTrack = false
-
-    private func prepareNextTrackForCrossfade() {
-        guard CrossfadeManager.shared.isEnabled else { return }
-
-        // Prevent duplicate preparation
-        guard !isPreparingNextTrack else {
-            print("🔊 Already preparing next track, skipping")
-            return
-        }
-
-        let nextIndex = currentIndex + 1
-        guard nextIndex < queue.count else {
-            print("🔊 No next track to prepare for crossfade")
-            return
-        }
-
-        let nextItem = queue[nextIndex]
-
-        // Check if already prepared (CrossfadeManager has a nextPlayer)
-        guard !CrossfadeManager.shared.hasNextPlayer() else {
-            print("🔊 Next track already prepared: \(nextItem.track.title)")
-            return
-        }
-
-        print("🔊 Preparing next track for crossfade: \(nextItem.track.title)")
-        isPreparingNextTrack = true
-        CrossfadeManager.shared.prepareNextTrack(nextItem) { [weak self] in
-            self?.isPreparingNextTrack = false
-        }
-    }
-    
-    func previousTrack() {
-        guard !queue.isEmpty else { return }
-
-        if repeatMode == .one {
-            seek(to: 0)
-            return
-        }
-
-        // S17-H: Apple Music / Spotify UX. If the user is more
-        // than `previousTrackRestartGracePeriod` into the
-        // current track, the first prev-press restarts the
-        // current track (seek to 0) instead of going back to
-        // the previous one. Without this, the user has to
-        // re-find the previous track from the queue, which is
-        // jarring after they accidentally tapped a track and
-        // want to undo.
-        let currentPosition = player?.currentTime().seconds ?? 0
-        if currentPosition > previousTrackRestartGracePeriod {
-            print("⏮️ previousTrack: more than \(Int(previousTrackRestartGracePeriod))s into track — restarting current")
-            seek(to: 0)
-            return
-        }
-
-        let prevIndex = currentIndex - 1
-
-        if prevIndex >= 0 {
-            playQueue(at: prevIndex)
-        } else if repeatMode == .all {
-            // Loop to end
-            playQueue(at: queue.count - 1)
-        }
-    }
-    
-    // MARK: - Shuffle & Repeat
-    
-    func toggleShuffle() {
-        isShuffled.toggle()
-
-        if isShuffled {
-            // Save original queue
-            originalQueue = queue
-            // Sprint 3 / S3-1 fix: smart shuffle — avoid tracks played in the
-            // last 50 plays. Pull the recent videoIds from DataManager's
-            // recentlyPlayed list (UserDefaults-backed, kept in sync with
-            // CDPlayHistory for stats). Tracks that have been played recently
-            // are pushed to the end of the shuffled order rather than
-            // appearing early. Without this, shuffle feels like a random
-            // rewind of "stuff you just heard".
-            let recentVideoIds: Set<String> = Set(
-                dataManager.recentlyPlayed.prefix(50).map { $0.videoId }
-            )
-
-            if currentIndex < queue.count - 1 {
-                let current = queue[currentIndex]
-                let remaining = Array(queue[(currentIndex + 1)...])
-                // Partition: fresh first, recent last
-                let fresh = remaining.filter { !recentVideoIds.contains($0.track.videoId) }
-                let recent = remaining.filter { recentVideoIds.contains($0.track.videoId) }
-                print("🔀 Smart shuffle: \(fresh.count) fresh + \(recent.count) recent (last 50 played)")
-                // S17-G: replace via the store. The mirror subscription
-                // updates `currentItem` from the store's new items +
-                // currentIndex (which we set below).
-                let newQueue = Array(queue[...currentIndex]) + fresh.shuffled() + recent.shuffled()
-                queueStore.replace(with: newQueue)
-                queueStore.setCurrentIndex(currentIndex)
-            }
-        } else {
-            // Restore original order
-            if let current = currentItem {
-                // S17-G: replace via the store. Find the current item
-                // in the original queue and set the store's index.
-                queueStore.replace(with: originalQueue)
-                if let newIndex = originalQueue.firstIndex(where: { $0.track.videoId == current.track.videoId }) {
-                    queueStore.setCurrentIndex(newIndex)
-                }
-            }
-        }
-    }
-    
-    func toggleRepeat() {
-        repeatMode.next()
-    }
-    
     // MARK: - Volume
+
+    /// S17-H / Tier 4: thin wrappers for the queue /
+    /// repeat / shuffle state transitions that now live in
+    /// `QueueController`. External callers (the remote
+    /// command handler in `YTAudioPlayerApp.swift`, the
+    /// previous-button in `FullPlayer.swift`, and the
+    /// auto-advance path in `AVPlayerController.handlePlayerItemStatus`)
+    /// still call these on `PlayerState`; PlayerState just
+    /// delegates to the controller. Keeping the wrappers
+    /// (vs. updating every call site) is a 1-commit
+    /// mechanical change that keeps the public API of
+    /// PlayerState stable.
+    func nextTrack(useCrossfade: Bool = true, userSkipped: Bool = false) {
+        queueController.next(useCrossfade: useCrossfade, userSkipped: userSkipped)
+    }
+
+    func previousTrack() {
+        queueController.previous()
+    }
+
+    func toggleShuffle() {
+        queueController.toggleShuffle()
+    }
+
+    func toggleRepeat() {
+        queueController.toggleRepeat()
+    }
 
     func setVolume(_ newVolume: Double) {
         volume = max(0.0, min(1.0, newVolume))
@@ -2672,7 +2379,7 @@ class PlayerState: ObservableObject {
             // Prepare next track for crossfade when near the end (use effective duration)
             let timeRemaining = effectiveTotal - current
             if timeRemaining <= CrossfadeManager.shared.duration && timeRemaining > CrossfadeManager.shared.duration - 1 {
-                prepareNextTrackForCrossfade()
+                queueController.prepareNextTrackForCrossfade()
             }
             // S17-H / Tier 4: listening-time accounting is now
             // delegated to `ListeningTimeTracker`. The tracker
