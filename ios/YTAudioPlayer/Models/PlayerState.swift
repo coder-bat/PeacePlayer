@@ -388,6 +388,14 @@ class PlayerState: ObservableObject {
     // computed property above routes through this controller.
     private lazy var avPlayerController = AVPlayerController(playerState: self)
 
+    // S17-H / Tier 4: the fan-out to `NowPlayingService.shared`
+    // (Lock Screen / Control Center metadata) is now owned
+    // by `NowPlayingController`. The 7 `NowPlayingService.*`
+    // callsites that were sprinkled through PlayerState
+    // become 1-line `nowPlayingController.updateNowPlaying()`
+    // calls. Same lazy-init pattern.
+    private lazy var nowPlayingController = NowPlayingController(playerState: self)
+
     // C-2 fix: token-based observer tracking. The previous code used
     // `NotificationCenter.default.removeObserver(self)` in the
     // playRadioStation / playPodcastEpisode / playAudiobookChapter entry
@@ -1303,13 +1311,11 @@ class PlayerState: ObservableObject {
         // isPlaying: false because state is .loading until readyToPlay;
         // NowPlayingService treats rate=0 as paused, which matches what
         // the Lock Screen should show during the brief buffer.
-        NowPlayingService.shared.updateNowPlaying(
-            track: item.track,
-            duration: Double(item.track.durationSeconds),
-            currentTime: 0,
-            isPlaying: playbackState.isPlaying,
-            playbackRate: playbackRate
-        )
+        //
+        // S17-H / Tier 4: was `NowPlayingService.shared.updateNowPlaying(...)`
+        // inline here. Now goes through NowPlayingController so the
+        // fan-out is in one place.
+        nowPlayingController.updateNowPlaying()
         #if DEBUG
         PlayCrashDiagnostics.log(.playback, "play(item:) POST-updateNowPlaying videoId=\(item.track.videoId)")
         #endif
@@ -1734,15 +1740,10 @@ class PlayerState: ObservableObject {
         player?.rate = rate
 
         // Update Now Playing info with new rate
-        if let item = currentItem {
-            NowPlayingService.shared.updateNowPlaying(
-                track: item.track,
-                duration: duration,
-                currentTime: currentTime,
-                isPlaying: playbackState.isPlaying,
-                playbackRate: rate
-            )
-        }
+        //
+        // S17-H / Tier 4: was inline `NowPlayingService.shared.updateNowPlaying(...)`.
+        // Now goes through NowPlayingController.
+        nowPlayingController.updateNowPlaying()
     }
 
     func stop() {
@@ -1884,7 +1885,12 @@ class PlayerState: ObservableObject {
         // S11 fix (Bug 2): refresh Lock Screen / Control Center with
         // the radio station's metadata. Previously Lock Screen kept
         // showing the previous track.
-        NowPlayingService.shared.updateNowPlaying(
+        //
+        // S17-H / Tier 4: was inline `NowPlayingService.shared.updateNowPlaying(...)`.
+        // Now goes through NowPlayingController (explicit-arg variant
+        // for content-type switches where currentItem isn't yet
+        // set / is in transition).
+        nowPlayingController.updateNowPlaying(
             track: radioTrack,
             duration: 0,  // live = no duration
             currentTime: 0,
@@ -1937,7 +1943,10 @@ class PlayerState: ObservableObject {
         // S11 fix (Bug 2): refresh Lock Screen / Control Center with
         // the podcast metadata. Without this, the Lock Screen kept
         // showing whatever track was playing before.
-        NowPlayingService.shared.updateNowPlaying(
+        //
+        // S17-H / Tier 4: was inline `NowPlayingService.shared.updateNowPlaying(...)`.
+        // Now goes through NowPlayingController.
+        nowPlayingController.updateNowPlaying(
             track: podcastTrack,
             duration: Double(episode.durationSeconds),
             currentTime: 0,
@@ -2010,7 +2019,10 @@ class PlayerState: ObservableObject {
         avPlayerController.setupObservers()
         // S11 fix (Bug 2): refresh Lock Screen / Control Center with
         // audiobook chapter metadata.
-        NowPlayingService.shared.updateNowPlaying(
+        //
+        // S17-H / Tier 4: was inline `NowPlayingService.shared.updateNowPlaying(...)`.
+        // Now goes through NowPlayingController.
+        nowPlayingController.updateNowPlaying(
             track: audiobookTrack,
             duration: Double(chapter.durationSeconds),
             currentTime: 0,
@@ -2642,12 +2654,11 @@ class PlayerState: ObservableObject {
         _ = playbackClock.tick(currentSeconds: current, totalSeconds: total, effectiveDuration: effectiveTotal)
 
         // Update Now Playing info periodically (every ~1 second)
+        //
+        // S17-H / Tier 4: was inline `NowPlayingService.shared.updatePlaybackTime(...)`.
+        // Now goes through NowPlayingController.
         if Int(current) % 2 == 0 {
-            NowPlayingService.shared.updatePlaybackTime(
-                currentTime: current,
-                isPlaying: playbackState.isPlaying,
-                playbackRate: playbackRate
-            )
+            nowPlayingController.updatePlaybackTime()
         }
 
         if effectiveTotal > 0 {
@@ -2988,7 +2999,17 @@ extension PlayerState {
         let displayDuration = effectiveDuration
         print("🎵 updateRemoteControls - effectiveDuration: \(displayDuration), currentTime: \(currentTime)")
 
-        NowPlayingService.shared.updateNowPlaying(
+        // S17-H / Tier 4: was inline `NowPlayingService.shared.updateNowPlaying(...)`.
+        // Now goes through NowPlayingController. Note: this is the
+        // "with explicit currentTime" variant — unlike the
+        // no-arg `updateNowPlaying()` (used after a play/pause
+        // state change where the Lock Screen just needs the new
+        // track + isPlaying/rate, not the current time), this
+        // caller (the duration publisher in AVPlayerController)
+        // has the actual current time and wants to push it so
+        // the Lock Screen scrubber position updates after a
+        // seek or a pause-then-resume.
+        nowPlayingController.updateNowPlaying(
             track: item.track,
             duration: displayDuration,
             currentTime: currentTime,

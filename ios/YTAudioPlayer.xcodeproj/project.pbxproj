@@ -120,6 +120,7 @@
 		C30345AC8F5C358CAF039129 /* ListeningTimeTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31ABD09BD67F9C08D06699FF /* ListeningTimeTracker.swift */; };
 		CA03B0B1E5C5C5C5C5C5C5C5 /* GaplessController.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA03B0B1E5C5C5C5C5C5C5C5 /* GaplessController.swift */; };
 		CB03B0B1E5C5C5C5C5C5C5C6 /* AVPlayerController.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB03B0B1E5C5C5C5C5C5C5C6 /* AVPlayerController.swift */; };
+		CC03B0B1E5C5C5C5C5C5C5C7 /* NowPlayingController.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC03B0B1E5C5C5C5C5C5C5C7 /* NowPlayingController.swift */; };
 		C3A812D628A613B24F1EEC30 /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD72DD7B62A4AC911BF749F6 /* HomeView.swift */; };
 		C41811001AF961E13FBD81D9 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51554D239E59D64D0D95EDD0 /* Theme.swift */; };
 		C41CD7BE9EB5F68AA5C6C50A /* ShareCardGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 580361D396ED3D52EB48EFFF /* ShareCardGenerator.swift */; };
@@ -217,6 +218,7 @@
 		31ABD09BD67F9C08D06699FF /* ListeningTimeTracker.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ListeningTimeTracker.swift; sourceTree = "<group>"; };
 		FA03B0B1E5C5C5C5C5C5C5C5 /* GaplessController.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GaplessController.swift; sourceTree = "<group>"; };
 		FB03B0B1E5C5C5C5C5C5C5C6 /* AVPlayerController.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AVPlayerController.swift; sourceTree = "<group>"; };
+		FC03B0B1E5C5C5C5C5C5C5C7 /* NowPlayingController.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = NowPlayingController.swift; sourceTree = "<group>"; };
 		33BD8A61567F3418C4A08D81 /* TimeCapsuleManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimeCapsuleManager.swift; sourceTree = "<group>"; };
 		38ADEC1060AD8D53A3241FFA /* PlaylistDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaylistDetailView.swift; sourceTree = "<group>"; };
 		39607B6AF4B8C14661E4BD57 /* SharedNowPlayingState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedNowPlayingState.swift; sourceTree = "<group>"; };
@@ -603,6 +605,7 @@
 				12DF773336B5A83BFF1FC347 /* PlayerState.swift */,
 				FA03B0B1E5C5C5C5C5C5C5C5 /* GaplessController.swift */,
 				FB03B0B1E5C5C5C5C5C5C5C6 /* AVPlayerController.swift */,
+				FC03B0B1E5C5C5C5C5C5C5C7 /* NowPlayingController.swift */,
 				0FF44C86E74347119D2FFBEB /* QueueStore.swift */,
 				96929B2ADE634BE0AAF3E05C /* AudioSessionController.swift */,
 				93B4300DF1688D223A2697AE /* Playlist.swift */,
@@ -880,6 +883,7 @@
 				C30345AC8F5C358CAF039129 /* ListeningTimeTracker.swift in Sources */,
 				CA03B0B1E5C5C5C5C5C5C5C5 /* GaplessController.swift in Sources */,
 				CB03B0B1E5C5C5C5C5C5C5C6 /* AVPlayerController.swift in Sources */,
+				CC03B0B1E5C5C5C5C5C5C5C7 /* NowPlayingController.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
