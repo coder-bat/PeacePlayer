@@ -830,10 +830,27 @@ async def stream_audio(video_id: str, request: Request, user: dict = Depends(req
         if auth_header.lower().startswith('bearer '):
             token = auth_header.split(' ', 1)[1].strip()
         from urllib.parse import quote
-        audio_url = f'/audio/{video_id}.m4a?token={quote(token)}'
+        # S17-H / HLS (Fix 4 Phase 3, 2026-07-30): pick the
+        # delivery format based on whether the audio is cached.
+        # Cache hit → /audio (instant). Cache miss → /play (HLS
+        # streaming, ~3s TTFB instead of 12-150s). The iOS app
+        # doesn't need to know the difference — AVPlayer
+        # auto-detects m3u8 vs m4a from the URL.
+        audio_cache_dir = Path('/Users/coderbat/iYMusic/YTAudioSystem/backend/data/audio_cache')
+        audio_cache_path = audio_cache_dir / f"{video_id}.m4a"
+        if audio_cache_path.exists() and audio_cache_path.stat().st_size > 1000:
+            # Warm path: direct MP4
+            stream_url = f'/audio/{video_id}.m4a?token={quote(token)}'
+            mime_type = 'audio/mp4'
+        else:
+            # Cold path: HLS playlist. /play handles the transcode,
+            # the m3u8 endpoint injects the token into each
+            # segment URL.
+            stream_url = f'/play/{video_id}/playlist.m3u8?token={quote(token)}'
+            mime_type = 'application/x-mpegurl'
         return JSONResponse(content={
-            'streamUrl': audio_url,
-            'mimeType': 'audio/mp4',
+            'streamUrl': stream_url,
+            'mimeType': mime_type,
             'bitrate': 128000,
         })
 
@@ -2628,6 +2645,19 @@ async def startup_event():
         t.start()
         logger.info(f"Pre-warm thread started (interval={PREWARM_INTERVAL}s, top_n={PREWARM_TOP_N})")
 
+    # S17-H / HLS (Fix 4 Phase 4, 2026-07-30): kick off the
+    # HLS directory cleanup task. HLS dirs can grow — each
+    # cold play creates a new dir with ~140 segments. We
+    # remove dirs where the corresponding audio cache m4a
+    # already exists (meaning the user has moved on to warm
+    # plays, no need for the HLS segments anymore) AND
+    # the dir is older than HLS_CLEANUP_AGE_S.
+    if HLS_CLEANUP_ENABLED:
+        import threading
+        t = threading.Thread(target=_hls_cleanup_thread_main, daemon=True, name="hls-cleanup")
+        t.start()
+        logger.info(f"HLS cleanup thread started (interval={HLS_CLEANUP_INTERVAL_S}s, age_threshold={HLS_CLEANUP_AGE_S}s)")
+
 
 # S17-H / S17-PLAY (Fix 5): pre-warm configuration. Defaults
 # chosen to be safe for a single-user Tailscale backend — 1
@@ -3188,6 +3218,105 @@ async def _hls_concat_to_m4a(video_id: str):
                     f.write(content.rstrip().rstrip('#EXT-X-ENDLIST').rstrip() + '\n')
         except OSError:
             pass
+
+
+# S17-H / HLS (Fix 4 Phase 4): HLS cleanup configuration.
+HLS_CLEANUP_ENABLED = os.environ.get("HLS_CLEANUP_ENABLED", "true").lower() in ("1", "true", "yes")
+HLS_CLEANUP_INTERVAL_S = int(os.environ.get("HLS_CLEANUP_INTERVAL_S", "3600"))  # 1 hour
+HLS_CLEANUP_AGE_S = int(os.environ.get("HLS_CLEANUP_AGE_S", "86400"))  # 24 hours
+HLS_CLEANUP_BATCH_SIZE = int(os.environ.get("HLS_CLEANUP_BATCH_SIZE", "10"))
+
+
+def _hls_cleanup_thread_main():
+    """
+    S17-H / HLS (Fix 4 Phase 4): entry point for the HLS
+    cleanup daemon thread. Sets up a private event loop and
+    runs the async loop on it.
+    """
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        loop.run_until_complete(_hls_cleanup_loop())
+    finally:
+        loop.close()
+
+
+async def _hls_cleanup_loop():
+    """
+    S17-H / HLS (Fix 4 Phase 4): periodic cleanup of HLS
+    directories. Runs every HLS_CLEANUP_INTERVAL_S seconds.
+    For each HLS dir under data/hls/, check if the
+    corresponding audio cache m4a exists (i.e., the transcode
+    completed and the m4a was created). If so, and the HLS
+    dir is older than HLS_CLEANUP_AGE_S, remove it.
+
+    We don't remove HLS dirs that DON'T have a corresponding
+    m4a — those are still useful for the current playback
+    session (the user might still be streaming from them).
+    """
+    while True:
+        try:
+            await _hls_cleanup_cycle()
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.error(f"HLS cleanup cycle failed: {e}", exc_info=True)
+        await asyncio.sleep(HLS_CLEANUP_INTERVAL_S)
+
+
+async def _hls_cleanup_cycle():
+    """
+    One HLS cleanup cycle. Removes HLS directories that are
+    safe to delete (have a corresponding cached m4a and are
+    older than the age threshold).
+    """
+    if not HLS_DIR.exists():
+        return
+
+    audio_cache_dir = Path('/Users/coderbat/iYMusic/YTAudioSystem/backend/data/audio_cache')
+    now = time.time()
+    removed = 0
+    failed = 0
+
+    for hls_dir in HLS_DIR.iterdir():
+        if not hls_dir.is_dir():
+            continue
+        video_id = hls_dir.name
+        # Only remove if the corresponding m4a exists (so
+        # future /audio requests are still served from the
+        # cache) AND the dir is old enough.
+        m4a_path = audio_cache_dir / f"{video_id}.m4a"
+        if not (m4a_path.exists() and m4a_path.stat().st_size > 1000):
+            continue
+        # Check the dir's age (mtime of any file in it)
+        try:
+            mtime = max(f.stat().st_mtime for f in hls_dir.iterdir() if f.is_file())
+        except (OSError, ValueError):
+            mtime = hls_dir.stat().st_mtime
+        age = now - mtime
+        if age < HLS_CLEANUP_AGE_S:
+            continue
+
+        # Safe to remove.
+        try:
+            for f in hls_dir.iterdir():
+                f.unlink()
+            hls_dir.rmdir()
+            removed += 1
+            logger.info(
+                f"[hls-cleanup] removed {video_id} (age={int(age)}s, "
+                f"m4a={m4a_path.stat().st_size} bytes)"
+            )
+        except OSError as e:
+            failed += 1
+            logger.warning(f"[hls-cleanup] failed to remove {video_id}: {e}")
+        if removed + failed >= HLS_CLEANUP_BATCH_SIZE:
+            break  # throttle: don't clean too many at once
+
+    if removed or failed:
+        logger.info(
+            f"[hls-cleanup] cycle done: removed={removed}, failed={failed}"
+        )
 
 
 async def _hls_concat_and_cleanup(video_id: str) -> None:
