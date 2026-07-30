@@ -5,7 +5,7 @@ Works with or without authentication.
 """
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, Response, Query, Path as APIPath, Depends
-from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
+from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
@@ -165,7 +165,14 @@ ytmusic_lock = asyncio.Lock()
 # sweet spot — it overlaps the I/O wait for one transcode with the
 # CPU work for another, without saturating the Mac's cores. Higher
 # values (3-4) showed OOM pressure on the 8GB model.
-_transcode_semaphore = asyncio.Semaphore(2)
+#
+# S17-H / HLS (Fix 4 Phase 3, 2026-07-30): bumped from 2 to 3.
+# HLS transcode is slightly heavier than /audio (writes more
+# metadata per segment), so allowing 3 concurrent gives the
+# user better behavior when they tap 2-3 tracks in rapid
+# succession. Still bounded; 4+ would risk OOM on the 8GB
+# model.
+_transcode_semaphore = asyncio.Semaphore(3)
 
 # S17-H / S17-PLAY (Fix 3B): per-videoId lock so the same videoId
 # can't be transcoded twice in parallel. Without this, the burst
@@ -2717,7 +2724,14 @@ def _prewarm_thread_main():
 
 HLS_DIR = Path('/Users/coderbat/iYMusic/YTAudioSystem/backend/data/hls')
 HLS_SEGMENT_TIME = 2  # seconds per segment — 2s gives ~3s TTFB
-HLS_MAX_WAIT_FOR_FIRST_SEGMENT_S = 10.0  # max wait for the first segment before 504
+# S17-H / HLS (Fix 4 Phase 3, 2026-07-30): bumped from 10s
+# after first device test. 10s wasn't enough when (a) the
+# global transcode semaphore is busy (cap=2), or (b) the
+# YouTube stream URL fetch takes a while. The iOS user gets
+# a "preparing audio" message during this wait (Fix 6's
+# .transcoding state), so longer is OK as long as it
+# eventually succeeds.
+HLS_MAX_WAIT_FOR_FIRST_SEGMENT_S = 30.0  # max wait for the first segment before 504
 
 
 async def _get_or_fetch_stream_url(video_id: str) -> Optional[str]:
@@ -2837,9 +2851,14 @@ async def _hls_transcode_worker(video_id: str, yt_url: str, done_event: asyncio.
             _, stderr = await proc.communicate()
         pipe_seconds = time.monotonic() - t0
         if proc.returncode != 0:
+            # S17-H / HLS: log the full stderr (not just 300 chars)
+            # + the actual command we ran, so the failure is
+            # debuggable from the log alone.
+            full_stderr = stderr.decode(errors='replace')
             logger.error(
-                f"[hls] ffmpeg failed for {video_id} (rc={proc.returncode}): "
-                f"{stderr.decode(errors='replace')[:300]}"
+                f"[hls] ffmpeg failed for {video_id} (rc={proc.returncode})\n"
+                f"  command: {pipe_cmd}\n"
+                f"  stderr: {full_stderr[:1000]}"
             )
             return
 
@@ -2867,12 +2886,32 @@ async def _hls_wait_for_first_segment(video_id: str, timeout_s: float) -> bool:
     Poll for the first segment to appear. Returns True on success,
     False on timeout. Used by the /play/playlist.m3u8 endpoint
     to know when it's safe to return the m3u8.
+
+    S17-H / HLS (Fix 4 Phase 3, 2026-07-30): also check for
+    #EXT-X-ENDLIST in the playlist. If the transcode completed
+    super-fast (very short audio), the playlist will have
+    ENDLIST but no segments. In that case, return False —
+    there's nothing to play. (Edge case, very rare.)
     """
     first = _hls_first_segment_path(video_id)
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
         if first.exists() and first.stat().st_size > 0:
             return True
+        # Check if the transcode completed but produced no
+        # segments (very short input). In that case, give up
+        # early instead of waiting the full timeout.
+        m3u8 = _hls_playlist_path(video_id)
+        if m3u8.exists():
+            try:
+                with open(m3u8, 'r') as f:
+                    if '#EXT-X-ENDLIST' in f.read():
+                        # Transcode is done. If we don't have
+                        # the first segment, the input was too
+                        # short to produce one. Fail.
+                        return False
+            except OSError:
+                pass
         await asyncio.sleep(0.1)
     return False
 
@@ -2940,11 +2979,15 @@ async def play_hls_playlist(video_id: str, request: Request):
     # becomes the token in the redirect URL — same pattern.
     cache_path = Path('/Users/coderbat/iYMusic/YTAudioSystem/backend/data/audio_cache') / f"{video_id}.m4a"
     if cache_path.exists() and cache_path.stat().st_size > 1000:
-        token_param = f"&token={unquote(request.query_params.get('token', ''))}" if request.query_params.get('token') else ''
-        return RedirectResponse(
-            url=f"/audio/{video_id}.m4a?token={unquote(request.query_params.get('token', ''))}",
-            status_code=302,
-        )
+        token_param = unquote(request.query_params.get('token', ''))
+        if token_param:
+            redirect_url = f"/audio/{video_id}.m4a?token={token_param}"
+        else:
+            # No token in query — check Authorization header was
+            # already validated above. The /audio endpoint will
+            # look at the same header (it accepts both).
+            redirect_url = f"/audio/{video_id}.m4a"
+        return RedirectResponse(url=redirect_url, status_code=302)
 
     # Cache miss: HLS path. Check if a transcode is already
     # running for this videoId; if so, share its segments.
