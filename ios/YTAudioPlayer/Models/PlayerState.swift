@@ -516,7 +516,13 @@ class PlayerState: ObservableObject {
     /// S16: extracted audio-session lifecycle (master plan §8.1 focused
     /// split). Owns AVAudioSession config + the 3 session notification
     /// observers; routes 2 callback points back to PlayerState.
-    private let audioSessionController = AudioSessionController()
+    /// S17-H / S17-LOCK: was `private`; promoted to internal for
+    /// `YTAudioPlayerApp.scenePhase` handler which re-activates
+    /// the session on every lock/unlock cycle. iOS can downgrade
+    /// the session during a screen lock; re-asserting the
+    /// `.playback` category from the app entry point is the
+    /// bulletproof fix for the "track pauses when I lock" bug.
+    let audioSessionController = AudioSessionController()
 
     // Adaptive quality switching
     private var qualityUpgradeTimer: Timer?
@@ -1861,6 +1867,45 @@ class PlayerState: ObservableObject {
             return
         }
         player.play()
+        playbackState = .playing
+        updateRemoteControls()
+    }
+
+    // S17-H / S17-LOCK: re-assert playback on scene phase
+    // .active. The previous `scenePhase` hook in the App entry
+    // re-activates the audio session (fixing one half of the
+    // "track pauses on background" bug) but the AVPlayer
+    // itself can also be paused by iOS when the app goes
+    // background (e.g., on screen lock, on app minimize, on
+    // route change). Re-asserting the session alone is not
+    // enough — the player's `rate` may be 0 when the app
+    // comes back to .active, and the user expects the track
+    // to keep playing.
+    //
+    // The check is gated on:
+    //  1. `currentItem != nil` (no track to resume)
+    //  2. `playbackState != .playing` (track was already playing
+    //     — no need to re-assert, the player is fine)
+    //  3. `playbackState != .error` (don't try to resume from
+    //     an error state, the user already saw the error UI)
+    //  4. `player != nil && player.rate == 0` (the actual
+    //     symptom: the player is paused by iOS during
+    //     background)
+    //
+    // `playImmediately(atRate:)` is used instead of
+    // `player.play()` because the latter can hit a 1-frame
+    // rate-0 race (see the S17-H note at line ~1284 in
+    // `play(item:)` for the full story).
+    func handleScenePhaseActive() {
+        guard let item = currentItem else { return }
+        guard playbackState == .paused || playbackState == .loading else { return }
+        guard let player = player else { return }
+        guard player.rate == 0 else { return }
+        print("▶️ [S17-LOCK] scenePhase .active: re-asserting playback (rate was 0)")
+        #if DEBUG
+        PlayCrashDiagnostics.log(.playback, "S17-LOCK: scenePhase .active resume videoId=\(item.track.videoId)")
+        #endif
+        player.playImmediately(atRate: playbackRate)
         playbackState = .playing
         updateRemoteControls()
     }

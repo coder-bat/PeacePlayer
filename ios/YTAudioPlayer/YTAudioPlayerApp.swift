@@ -56,6 +56,26 @@ struct YTAudioPlayerApp: App {
             }
 
             adaptiveWalkDJ.handleScenePhaseChange(isActive: phase == .active)
+
+            // S17-H / S17-LOCK: re-activate the audio session on
+            // every scene-phase change. iOS can downgrade or
+            // deactivate the session during the screen-lock
+            // transition; calling `activate()` re-asserts the
+            // `.playback` category and `setActive(true)` so the
+            // AVPlayer keeps playing through the lock. Safe to
+            // call repeatedly — the controller is idempotent.
+            PlayerState.shared.audioSessionController.activate()
+
+            // S17-H / S17-LOCK: when the app comes back to
+            // .active (foreground), re-assert playback if the
+            // AVPlayer was paused by iOS during background.
+            // The audio session re-activation above only
+            // handles the session side; the player itself
+            // can be at rate 0 if iOS paused it on lock or
+            // minimize.
+            if phase == .active {
+                PlayerState.shared.handleScenePhaseActive()
+            }
         }
     }
 

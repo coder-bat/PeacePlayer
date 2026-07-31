@@ -82,7 +82,27 @@ final class AudioSessionController {
     /// PlayerState.play() (S15 fix: deferred from init).
     func activate() {
         do {
-            try AVAudioSession.sharedInstance().setActive(true)
+            let session = AVAudioSession.sharedInstance()
+            // S17-H / S17-LOCK: re-apply the category before
+            // activating. iOS can reset the session to the
+            // default category after a screen lock + unlock
+            // cycle (the route change + session reset that
+            // happens when the lock screen appears can
+            // silently downgrade the session). The previous
+            // code only set the category once at app launch
+            // via `configureCategory()`. If the user locked
+            // the phone while a track was playing, the player
+            // would pause on lock and stay paused on unlock
+            // because the category had drifted away from
+            // `.playback`. Re-applying here is cheap and
+            // makes the activation bulletproof.
+            try session.setCategory(
+                .playback,
+                mode: .default,
+                policy: .longFormAudio,
+                options: [.allowAirPlay, .allowBluetooth, .allowBluetoothA2DP]
+            )
+            try session.setActive(true)
         } catch {
             print("❌ AudioSessionController activation failed: \(error)")
         }
