@@ -440,6 +440,60 @@ class PlayerState: ObservableObject {
     // lazy-init pattern as the other controllers.
     private lazy var queueController = QueueController(playerState: self)
 
+    // S17-H / Tier 4 dual-load fix: dedup `play(item:)` calls
+    // for the same videoId within a small window. Real-time
+    // repro (2026-07-31 13:01:11, "And I Love Her" tap) showed
+    // 3 distinct source ports each opening /audio/{vid}.m4a in
+    // 307ms — i.e. 3 separate AVPlayer instances racing for the
+    // same track. They fought over the audio session and all
+    // ended up paused (the user-reported "3-4s load" symptom,
+    // often worse — the track didn't play at all).
+    //
+    // Without this lock, any combination of:
+    //   - user tap (HomeView/SearchView/Playlists/...)
+    //   - view appear (mini-player rebuilds on tab change)
+    //   - media-services reset (handleMediaServicesResetRestart)
+    //   - retry path (refreshAndPlayCurrentItem on .failed)
+    // can fire `play(track:)` / `play(item:)` 2-3x in <500ms,
+    // and the current code creates a fresh AVPlayer for each.
+    //
+    // Same videoId → drop the duplicate. Different videoId
+    // → let the new play preempt (the old one's defer becomes
+    // a no-op since the lock no longer matches its videoId,
+    // and `play(item:)` calls `stop()` at line 1160 to tear
+    // down the previous player before building the new one).
+    private var playInFlightVideoId: String?
+    private let playInFlightLock = NSLock()
+
+    /// Returns true if the caller owns the in-flight slot for
+    /// `videoId` and should proceed to build the AVPlayer.
+    /// Returns false if a play for the same videoId is already
+    /// in progress (caller should drop the duplicate).
+    private func tryBeginPlay(videoId: String) -> Bool {
+        playInFlightLock.lock()
+        defer { playInFlightLock.unlock() }
+        if playInFlightVideoId == videoId {
+            print("⚠️ [S17-H dual-load] play dropped duplicate for videoId=\(videoId) (one already in flight)")
+            return false
+        }
+        if let existing = playInFlightVideoId {
+            print("🔄 [S17-H dual-load] play preempted: in-flight=\(existing) → new=\(videoId)")
+        }
+        playInFlightVideoId = videoId
+        return true
+    }
+
+    /// Release the in-flight slot for `videoId`. Only clears
+    /// the slot if the caller still owns it (a preempted call
+    /// from a previous videoId becomes a no-op).
+    private func endPlay(videoId: String) {
+        playInFlightLock.lock()
+        defer { playInFlightLock.unlock() }
+        if playInFlightVideoId == videoId {
+            playInFlightVideoId = nil
+        }
+    }
+
     // C-2 fix: token-based observer tracking. The previous code used
     // `NotificationCenter.default.removeObserver(self)` in the
     // playRadioStation / playPodcastEpisode / playAudiobookChapter entry
@@ -1057,13 +1111,29 @@ class PlayerState: ObservableObject {
             #if DEBUG
             PlayCrashDiagnostics.log(.playback, "play(track:) PRE-getStreamUrl videoId=\(track.videoId)")
             #endif
-            // C-2026-06-28: bypass StreamURLCache. The cache added
-            // locking + NSCache + share() + Just wrapping that hung
-            // indefinitely on a fresh install. APIService.getStreamUrl
-            // is itself a synchronous Just and we hit the backend
-            // directly here. The cache can be re-added later with
-            // better instrumentation once we know what's blocking.
-            APIService.shared.getStreamUrl(videoId: track.videoId, preferM4A: true, quality: "low")
+            // S17-H / Tier 4 dual-load fix (Layer 2): route through
+            // `StreamURLCache` so concurrent `play(track:)` calls for
+            // the same videoId share one backend roundtrip (the cache
+            // returns a `.share()`-ed publisher + retains the upstream
+            // so late subscribers get the same value).
+            //
+            // Previously bypassed (C-2026-06-28) because the cache
+            // hung indefinitely on a fresh install. The root cause
+            // was an `NSLock` deadlock when `.sink(receiveCompletion:)`
+            // on a `Just` publisher fired immediately and the
+            // completion handler re-acquired the same non-recursive
+            // lock — fixed in `StreamURLCache` by switching to
+            // `NSRecursiveLock` (see `activeFetchLock` at line 57).
+            // The dead-lock is gone, so the dedup is safe to re-enable.
+            //
+            // Note: this layer reduces the number of /stream/ calls
+            // (no longer 1 per play(track:) caller). The real
+            // multi-AVPlayer fix is the playInFlight dedup at the
+            // top of `play(item:)`; this is the lighter-weight
+            // network dedup that prevents the same /stream/ storm
+            // the real-time repro at 13:01:11 (5 simultaneous
+            // /stream/ for 5 different videoIds) made obvious.
+            StreamURLCache.shared.getStreamUrl(videoId: track.videoId, preferM4A: true, quality: "low")
                 .sink(
                     receiveCompletion: { [weak self] result in
                         if case .failure(let error) = result {
@@ -1121,6 +1191,20 @@ class PlayerState: ObservableObject {
         #if DEBUG
         PlayCrashDiagnostics.log(.playback, "play(item:) ENTRY videoId=\(item.track.videoId) title=\(item.track.title) source=\(item.source) currentItem.videoId=\(currentItem?.track.videoId ?? "nil") playbackState=\(playbackState)")
         #endif
+
+        // S17-H / Tier 4 dual-load fix: dedup at the AVPlayer
+        // creation site. If another play for the same videoId
+        // is already in flight, drop this one. See the
+        // `tryBeginPlay` doc for the full race story.
+        let __playInFlightVideoId = item.track.videoId
+        guard tryBeginPlay(videoId: __playInFlightVideoId) else {
+            return
+        }
+        // Release the in-flight slot when this function exits —
+        // success, failure, or early return. A preempted call
+        // (different videoId acquired the slot in the meantime)
+        // becomes a no-op.
+        defer { endPlay(videoId: __playInFlightVideoId) }
 
         // S15: check the stream URL for expiry here too. The check
         // used to live only in `playQueue(at:)`, so a queue that
