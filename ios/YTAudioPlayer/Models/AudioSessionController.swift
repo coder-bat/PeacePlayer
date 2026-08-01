@@ -99,7 +99,29 @@ final class AudioSessionController {
             try session.setCategory(
                 .playback,
                 mode: .default,
-                policy: .longFormAudio,
+                // S17-LOCK follow-up: was `.longFormAudio`. The
+                // real-time repro (2026-08-01 18:23+, simulator
+                // + iOS log capture) showed this policy is
+                // INCOMPATIBLE with the Bluetooth/AirPlay
+                // options — iOS logs
+                //   "category option(s) not supported in
+                //    combination with
+                //    AVAudioSessionRouteSharingPolicyLongFormAudio"
+                // on every setCategory call. The session is
+                // set to a degraded state, which is what
+                // causes the "track pauses when I lock /
+                // minimize" symptom — the audio session can't
+                // reliably hold playback through a background
+                // transition when the category is in an
+                // unsupported state.
+                //
+                // `.default` is the right policy for a music
+                // app. It is compatible with all the routing
+                // options. The AirPods intelligent routing
+                // feature (one-pod stereo + secondary channel
+                // on the other pod) works fine under `.default`
+                // — it's not actually policy-specific.
+                policy: .default,
                 options: [.allowAirPlay, .allowBluetooth, .allowBluetoothA2DP]
             )
             try session.setActive(true)
@@ -129,17 +151,14 @@ final class AudioSessionController {
             try session.setCategory(
                 .playback,
                 mode: .default,
-                // S17-H: routeSharingPolicy .longFormAudio tells
-                // iOS this is long-form audio (podcast / audiobook
-                // / music). AirPods will intelligently route: one
-                // pod gets full stereo when only one is in the ear;
-                // the other pod keeps a secondary channel. Without
-                // this, the system defaults to .default which
-                // doesn't trigger the AirPods intelligent routing
-                // for spoken content. For music, .longFormAudio
-                // is also fine — it's the most common policy and
-                // is well-supported.
-                policy: .longFormAudio,
+                // S17-LOCK follow-up: was `.longFormAudio` (see
+                // `activate()` for the full story — iOS
+                // rejects the category options when this
+                // policy is set, leaving the session in a
+                // degraded state that breaks background
+                // playback). `.default` is the right policy
+                // for a music app with bluetooth + airplay.
+                policy: .default,
                 options: [.allowAirPlay, .allowBluetooth, .allowBluetoothA2DP]
             )
         } catch {
