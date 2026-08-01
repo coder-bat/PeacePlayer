@@ -205,6 +205,19 @@ final class AVPlayerController {
         print("🔊 AVPlayerController.setupObservers: clearing \(priorCancellableCount) prior cancellables")
         cancellables.removeAll()
 
+        // S17-H / S17-LOCK: KVO observer on
+        // `player.timeControlStatus`. The scene-phase hook
+        // in the App entry is the gross-grained catch (every
+        // .inactive/.active). The KVO is the fine-grained
+        // catch (any pause event that doesn't go through
+        // scene phase — route changes, media-services
+        // reset recovery, transient iOS audio session
+        // deactivations). Both must run for the
+        // "track pauses on lock / minimize" bug to stay
+        // fixed. See `handleExternalPlayerPause` in
+        // PlayerState for the gating logic.
+        setupTimeControlStatusObserver()
+
         // Observe player item status and errors
         player.currentItem?.publisher(for: \.status)
             .receive(on: DispatchQueue.main)
@@ -346,9 +359,57 @@ final class AVPlayerController {
     /// thorough.
     func clearCancellables() {
         cancellables.removeAll()
+        teardownTimeControlStatusObserver()
     }
 
-    // MARK: - Private helpers (extracted from setupObservers sink bodies)
+    // S17-H / S17-LOCK: KVO observer on `player.timeControlStatus`.
+    // The scene-phase hook in `YTAudioPlayerApp` is the
+    // "first line of defense" — it re-asserts playback on
+    // every .inactive/.active transition. But iOS can pause
+    // the player in OTHER situations where the scene phase
+    // doesn't change (e.g., a brief route change while
+    // foregrounded, a media-services-reset that's quietly
+    // recovered, a phone-call-style interruption that the
+    // session controller doesn't catch). When ANY of those
+    // fire, the player silently goes to `paused` and the
+    // user sees a track that "stops on its own".
+    //
+    // The KVO observer catches every `timeControlStatus`
+    // change and notifies PlayerState via
+    // `handleExternalPlayerPause()`. PlayerState then
+    // decides whether to re-assert playback (based on the
+    // user's intent recorded in `playbackState`). This is
+    // the "second line of defense" — the scene phase hook
+    // is the gross-grained, KVO is the fine-grained.
+    //
+    // Trade-off: KVO fires synchronously on the player
+    // thread, so we dispatch to main before touching
+    // PlayerState. The lock is held by the player during
+    // the KVO callback, so we don't re-enter.
+    private var timeControlStatusObserver: NSKeyValueObservation?
+
+    /// Start the KVO observer. Called from `setupObservers`
+    /// (right after the existing Combine sinks are wired).
+    func setupTimeControlStatusObserver() {
+        guard let player = player else { return }
+        timeControlStatusObserver = player.observe(
+            \.timeControlStatus,
+             options: [.new, .initial]
+        ) { [weak self] _, _ in
+            // Dispatch off the player thread to avoid re-entry.
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                self.playerState?.handleExternalPlayerPause()
+            }
+        }
+    }
+
+    /// Stop the KVO observer. Called from `clearCancellables`
+    /// when the player is torn down.
+    func teardownTimeControlStatusObserver() {
+        timeControlStatusObserver?.invalidate()
+        timeControlStatusObserver = nil
+    }
 
     /// Handle the AVPlayerItem status change. Was inline in
     /// the Combine sink on the original PlayerState.

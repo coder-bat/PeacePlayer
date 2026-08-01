@@ -1334,6 +1334,7 @@ class PlayerState: ObservableObject {
         }
         applyVolume()
         // Ensure background playback continues on iOS 16+
+        // Ensure background playback continues on iOS 16+
         player?.audiovisualBackgroundPlaybackPolicy = .continuesIfPossible
         // Don't wait to minimize stalling - start immediately and let it buffer as it plays
         player?.automaticallyWaitsToMinimizeStalling = false
@@ -1898,16 +1899,66 @@ class PlayerState: ObservableObject {
     // `play(item:)` for the full story).
     func handleScenePhaseActive() {
         guard let item = currentItem else { return }
-        guard playbackState == .paused || playbackState == .loading else { return }
+        // S17-LOCK follow-up: the previous guard was
+        // `playbackState == .paused || == .loading`, but
+        // the actual scenario is the OPPOSITE — when the
+        // user was actively playing (state = .playing),
+        // iOS paused the player externally (rate = 0)
+        // and left the state stale. Trust `playbackState`
+        // as the user's INTENT (`.playing` means "I want
+        // this to play") and check `player.rate == 0`
+        // as the ACTUAL reality (iOS paused the player).
+        // A user who explicitly tapped pause (state =
+        // .paused) STAYS paused on .active.
+        guard playbackState == .playing else { return }
+        // Don't try to resume from an .error state — the
+        // user already saw the error UI. `.error` carries
+        // a String, so compare via `if case`.
+        if case .error = playbackState { return }
         guard let player = player else { return }
         guard player.rate == 0 else { return }
-        print("▶️ [S17-LOCK] scenePhase .active: re-asserting playback (rate was 0)")
+        print("▶️ [S17-LOCK] scenePhase .active: re-asserting playback (user was playing, iOS paused the player)")
         #if DEBUG
         PlayCrashDiagnostics.log(.playback, "S17-LOCK: scenePhase .active resume videoId=\(item.track.videoId)")
         #endif
         player.playImmediately(atRate: playbackRate)
-        playbackState = .playing
         updateRemoteControls()
+    }
+
+    // S17-H / S17-LOCK: called by the AVPlayerController KVO
+    // observer on `player.timeControlStatus` whenever the
+    // player is paused externally (e.g., by iOS on a route
+    // change, on a media-services-reset recovery, on an
+    // audio-session interruption that the AudioSessionController
+    // didn't catch). Same gating as `handleScenePhaseActive`:
+    // only resume if the user's intent was to play
+    // (`playbackState == .playing`) and we're not in an
+    // error state.
+    //
+    // Debounced at 500ms so a quick iOS pause-then-resume
+    // cycle (which can happen on a route change that's
+    // immediately recovered) doesn't trigger a user-visible
+    // "play" call.
+    private var handleExternalPlayerPauseWorkItem: DispatchWorkItem?
+
+    func handleExternalPlayerPause() {
+        handleExternalPlayerPauseWorkItem?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self = self else { return }
+            guard let item = self.currentItem else { return }
+            guard self.playbackState == .playing else { return }
+            if case .error = self.playbackState { return }
+            guard let player = self.player else { return }
+            guard player.rate == 0 else { return }
+            print("▶️ [S17-LOCK] external pause detected: re-asserting playback (KVO on timeControlStatus)")
+            #if DEBUG
+            PlayCrashDiagnostics.log(.playback, "S17-LOCK: external-pause KVO resume videoId=\(item.track.videoId)")
+            #endif
+            player.playImmediately(atRate: self.playbackRate)
+            self.updateRemoteControls()
+        }
+        handleExternalPlayerPauseWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
     }
 
     /// Set playback rate (0.5 to 3.0)

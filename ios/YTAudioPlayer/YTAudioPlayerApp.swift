@@ -72,9 +72,19 @@ struct YTAudioPlayerApp: App {
             // The audio session re-activation above only
             // handles the session side; the player itself
             // can be at rate 0 if iOS paused it on lock or
-            // minimize.
-            if phase == .active {
-                PlayerState.shared.handleScenePhaseActive()
+            // minimize. S17-LOCK follow-up: call on BOTH
+            // .inactive (coming back from .background) and
+            // .active (fully foreground). The .inactive fire
+            // catches the player a few hundred ms earlier,
+            // which matters when the iOS system immediately
+            // re-pauses on .active because it thinks the
+            // session is still in the background. A 200ms
+            // dispatch delay gives the audio system time to
+            // settle before we call playImmediately.
+            if phase == .inactive || phase == .active {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                    PlayerState.shared.handleScenePhaseActive()
+                }
             }
         }
     }
