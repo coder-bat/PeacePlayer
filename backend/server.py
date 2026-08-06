@@ -82,6 +82,55 @@ YTDLP_BIN = os.environ.get("YTDLP_BIN", "/Library/Frameworks/Python.framework/Ve
 FFMPEG_BIN = os.environ.get("FFMPEG_BIN", "/opt/homebrew/bin/ffmpeg")
 DENO_BIN = os.environ.get("DENO_BIN", "/opt/homebrew/bin/deno")
 
+# S17-H / FORMAT-18-FAST (2026-08-07): in-memory cache of
+# YouTube's format 18 streaming URLs, keyed by video_id.
+# YouTube's signed URLs expire ~6h after extraction. We
+# re-extract every 5h to be safe (slight safety margin).
+# Without this cache, every cold play pays the ~3-5s
+# yt-dlp signature extraction cost; with it, only the first
+# cold play per 5h does. Hit rate should be high in normal
+# listening (users don't repeat songs more than 5h apart,
+# but the same user with multiple devices or multiple
+# concurrent users hit the same URL).
+#
+# Bounded by LRU eviction so the dict can't grow forever.
+# 500 entries ≈ a few KB of memory.
+_FORMAT18_TTL_SEC = 5 * 60 * 60  # 5h
+_format18_cache: dict[str, tuple[float, str]] = {}
+_format18_cache_order: list[str] = []  # MRU at end
+_FORMAT18_MAX = 500
+
+
+def _format18_get(video_id: str) -> str | None:
+    """Return cached URL if fresh, else None. Updates LRU order on hit."""
+    entry = _format18_cache.get(video_id)
+    if entry is None:
+        return None
+    ts, url = entry
+    if time.time() - ts > _FORMAT18_TTL_SEC:
+        # Expired — drop and treat as miss
+        _format18_cache.pop(video_id, None)
+        if video_id in _format18_cache_order:
+            _format18_cache_order.remove(video_id)
+        return None
+    # Touch LRU order
+    if video_id in _format18_cache_order:
+        _format18_cache_order.remove(video_id)
+    _format18_cache_order.append(video_id)
+    return url
+
+
+def _format18_put(video_id: str, url: str) -> None:
+    """Cache a fresh URL with current timestamp. LRU-evicts if at cap."""
+    _format18_cache[video_id] = (time.time(), url)
+    if video_id in _format18_cache_order:
+        _format18_cache_order.remove(video_id)
+    _format18_cache_order.append(video_id)
+    # Evict oldest if over cap
+    while len(_format18_cache_order) > _FORMAT18_MAX:
+        oldest = _format18_cache_order.pop(0)
+        _format18_cache.pop(oldest, None)
+
 # --- Structured JSON logging ---
 class JSONFormatter(logging.Formatter):
     def format(self, record):
@@ -847,37 +896,32 @@ async def stream_audio(video_id: str, request: Request, user: dict = Depends(req
         if auth_header.lower().startswith('bearer '):
             token = auth_header.split(' ', 1)[1].strip()
         from urllib.parse import quote
-        # S17-H / HLS (Fix 4 Phase 3, 2026-07-30): pick the
-        # delivery format based on whether the audio is cached.
-        # Cache hit → /audio (instant). Cache miss → /play (HLS
-        # streaming, ~3s TTFB instead of 12-150s). The iOS app
-        # doesn't need to know the difference — AVPlayer
-        # auto-detects m3u8 vs m4a from the URL.
-        audio_cache_dir = Path('/Users/coderbat/iYMusic/YTAudioSystem/backend/data/audio_cache')
-        audio_cache_path = audio_cache_dir / f"{video_id}.m4a"
-        # S17-H / HLS-LATENCY (2026-08-06): was `> 1000` (1KB). The
-        # ftyp+empty_moov that ffmpeg writes first is ~28 bytes —
-        # smaller than 1KB. But if the transcode is in progress, the
-        # file can briefly grow past 1KB (first moof+mdat pair is
-        # ~1-2KB), which fooled /stream into routing to /audio before
-        # the file was actually playable. That sent AVPlayer a
-        # half-written MP4, which it failed to decode → "Couldn't
-        # play this track". 50KB ≈ 4 seconds of AAC at 128kbps
-        # plus the ftyp/moov. If the file is smaller than that,
-        # either the transcode hasn't produced anything meaningful
-        # yet, or it's a corrupt partial — route to HLS in both
-        # cases so the user gets progress visibility instead of a
-        # silent half-file.
-        if audio_cache_path.exists() and audio_cache_path.stat().st_size > 50_000:
-            # Warm path: direct MP4
-            stream_url = f'/audio/{video_id}.m4a?token={quote(token)}'
-            mime_type = 'audio/mp4'
-        else:
-            # Cold path: HLS playlist. /play handles the transcode,
-            # the m3u8 endpoint injects the token into each
-            # segment URL.
-            stream_url = f'/play/{video_id}/playlist.m3u8?token={quote(token)}'
-            mime_type = 'application/x-mpegurl'
+        # S17-H / FORMAT-18-FAST (2026-08-07): always route to /fast.
+        # The /fast endpoint decides whether to serve the cached
+        # .m4a (warm, instant) or 302 to YouTube's progressive
+        # format 18 (cold, ~500ms). This is the Musi-style
+        # architecture: hand iOS a complete progressive MP4 from
+        # YouTube's CDN, no ffmpeg transcode, no HLS pipeline.
+        #
+        # Why this works on iOS 26 (where our old HLS path was
+        # broken): format 18 is a regular progressive MP4 (H.264
+        # video + AAC audio), not an HLS event playlist with fMP4
+        # segments. iOS 26's PlayerRemoteXPC subsystem (the one
+        # that rejected clearVideoLayer with kFigPlayerError_ParamErr)
+        # handles progressive files through a different code path.
+        # Plus: the iOS app now uses AVPlayerLayer to display the
+        # video, which gives the new video receiver a CALayer to
+        # target — that fixes the "Not supported when
+        # FigUseVideoReceiverForCALayer" error at the source.
+        #
+        # Bandwidth cost: format 18 includes a 360x360 H.264 video
+        # track (50kbps) alongside the 128kbps AAC audio. ~30% more
+        # bytes per track than the ffmpeg transcode, invisible to
+        # the user on WiFi. The video is shown in the iOS UI
+        # anyway, so it's not "wasted" — it just looks like the
+        # YouTube music video for that track.
+        stream_url = f'/fast/{video_id}.mp4?token={quote(token)}'
+        mime_type = 'video/mp4'
         return JSONResponse(content={
             'streamUrl': stream_url,
             'mimeType': mime_type,
@@ -1025,6 +1069,141 @@ async def audio_stream(video_id: str, request: Request):
     except Exception as e:
         logger.exception("Audio transcode failed")
         raise HTTPException(status_code=500, detail=f"Audio transcode failed: {str(e)}")
+
+
+# Fast cold-play endpoint — Musi-style architecture
+# ==================================================
+# S17-H / FORMAT-18-FAST (2026-08-07): the iOS app's primary
+# playback path. Decides between warm (cached) and cold (live
+# YouTube) without making the iOS app care which one it is.
+#
+# Behavior:
+#   - If audio_cache/{id}.m4a exists and is > 50KB (warm):
+#       302 to /audio/{id}.m4a?token=...  (the existing instant path)
+#   - Else (cold):
+#       1. Call yt-dlp to get YouTube's format 18 URL (progressive
+#          mp4 with AAC audio + H.264 video, ~171kbps total)
+#       2. 302 to that URL
+#       iOS's AVPlayer follows the redirect and plays the file
+#       directly from YouTube's CDN. No ffmpeg transcode, no
+#       HLS pipeline, no server-side work after the URL fetch.
+#
+# Why this works on iOS 26 (where HLS was broken): format 18 is
+# a progressive MP4. iOS 26's PlayerRemoteXPC subsystem uses a
+# different code path for progressive files than for HLS event
+# playlists with fMP4 segments. Plus, the iOS app now uses
+# AVPlayerLayer to display the video, which gives the new video
+# receiver a CALayer to target — the "Not supported when
+# FigUseVideoReceiverForCALayer" error doesn't fire.
+#
+# Why format 18 is fast:
+#   - No ffmpeg pipe + transcode (was 5-30s for first audio byte)
+#   - No HLS segment production (was 1-3s for first segment)
+#   - Just a YouTube CDN roundtrip (~300-800ms) + iOS parses
+#     the moov atom and starts decoding immediately
+#
+# Why we don't keep the URL in the response body (which would let
+# iOS hit YouTube directly without our 302):
+#   - The iOS app would need to know about YouTube URLs (privacy
+#     policy / App Store review)
+#   - We can't add the JWT token to a YouTube URL
+#   - The 302 lets us keep the auth in our query string and the
+#     actual streaming URL opaque to the client
+@app.api_route("/fast/{video_id}.mp4", methods=["GET", "HEAD"])
+@limiter.limit("60/minute")
+async def fast_stream(video_id: str, request: Request):
+    # Auth: same as /audio — accept Authorization header OR ?token= query
+    from urllib.parse import unquote, quote
+    auth_header = request.headers.get('Authorization') or ''
+    if not auth_header:
+        query_token = request.query_params.get('token')
+        if query_token:
+            auth_header = f'Bearer {unquote(query_token)}'
+    user = current_user_from_request(auth_header)
+    if not user:
+        raise HTTPException(status_code=401, detail="unauthorized")
+
+    # Extract the token for the 302 query string (iOS needs it on
+    # /audio to play the cached .m4a, and the existing /audio
+    # handler enforces the same auth pattern).
+    token_param = unquote(request.query_params.get('token', ''))
+
+    # Warm path: 302 to /audio (the existing instant path). This is
+    # the fast case — the user has played this track before, the
+    # .m4a is on disk, iOS just plays it.
+    audio_cache_dir = Path('/Users/coderbat/iYMusic/YTAudioSystem/backend/data/audio_cache')
+    audio_cache_path = audio_cache_dir / f"{video_id}.m4a"
+    if audio_cache_path.exists() and audio_cache_path.stat().st_size > 50_000:
+        if token_param:
+            return RedirectResponse(
+                url=f"/audio/{video_id}.m4a?token={quote(token_param)}",
+                status_code=302,
+            )
+        return RedirectResponse(
+            url=f"/audio/{video_id}.m4a",
+            status_code=302,
+        )
+
+    # Cold path: 302 to YouTube's format 18 URL. The URL is
+    # signed and expires ~6h after extraction; we cache it
+    # in-process for 5h so the first cold play per 5h pays the
+    # ~3-5s yt-dlp cost and subsequent cold plays pay <50ms.
+    cached_url = _format18_get(video_id)
+    if cached_url:
+        logger.info(f"[fast] {video_id} → YouTube format 18 (cache hit)")
+        return RedirectResponse(url=cached_url, status_code=302)
+
+    try:
+        # Run yt-dlp in a thread to avoid blocking the event loop.
+        # The signature extraction takes ~3-5s — most of that is
+        # Python startup + the YouTube watch page fetch + n-challenge.
+        # The cache makes the typical cold play path much faster.
+        loop = asyncio.get_event_loop()
+        # Use the existing stream URL cache to avoid redundant
+        # yt-dlp calls — the cache already stores the per-format
+        # URL list. We need format 18 specifically, so we have
+        # to call yt-dlp fresh (the cache stores "best audio" not
+        # format 18). For now, just call yt-dlp directly.
+        proc = await asyncio.create_subprocess_exec(
+            YTDLP_BIN,
+            "--js-runtimes", f"deno:{DENO_BIN}",
+            "-f", "18",  # progressive mp4 (video+audio, AAC)
+            "-g",  # --get-url, just print the URL
+            "--no-warnings", "--no-progress",
+            "--remote-components", "ejs:github",
+            f"https://www.youtube.com/watch?v={video_id}",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=15.0)
+        if proc.returncode != 0:
+            raise HTTPException(
+                status_code=502,
+                detail=f"yt-dlp failed for format 18: {stderr.decode(errors='replace')[:200]}"
+            )
+        yt_url = stdout.decode().strip()
+        if not yt_url:
+            raise HTTPException(
+                status_code=502,
+                detail="yt-dlp returned empty URL for format 18"
+            )
+        logger.info(
+            f"[fast] {video_id} → YouTube format 18 (cold, "
+            f"{len(yt_url)}-byte URL)"
+        )
+        # Cache for the next 5h. Subsequent cold plays of the
+        # same track within that window skip the yt-dlp cost.
+        _format18_put(video_id, yt_url)
+        # 302 to YouTube. iOS's AVPlayer follows the redirect
+        # and starts fetching the progressive MP4 from YouTube's
+        # CDN. The URL is already signed (exp=...&sig=...); it's
+        # valid for ~6h.
+        return RedirectResponse(url=yt_url, status_code=302)
+    except asyncio.TimeoutError:
+        raise HTTPException(
+            status_code=504,
+            detail="yt-dlp timed out extracting format 18 URL"
+        )
 
 
 # Prefetch endpoint - fire-and-forget cache warming

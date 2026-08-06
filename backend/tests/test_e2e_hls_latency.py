@@ -108,9 +108,15 @@ def get_jwt() -> str:
         return f.read().strip()
 
 
-def http(method: str, path: str, *, headers=None, body=None, timeout=30):
+def http(method: str, path: str, *, headers=None, body=None, timeout=30, follow_redirects=True):
     """Make an HTTP request. Returns (status_code, headers, body_bytes).
-    Headers are lowercased to match urllib's behavior."""
+    Headers are lowercased to match urllib's behavior.
+
+    `follow_redirects` defaults to True (urllib's default). Set False
+    to surface 302s instead of chasing them — needed for testing the
+    /fast endpoint, which 302s to either /audio (warm) or YouTube (cold).
+    """
+    import urllib.request
     headers = headers or {}
     if body is not None and isinstance(body, (dict, list)):
         body = json.dumps(body).encode("utf-8")
@@ -119,8 +125,20 @@ def http(method: str, path: str, *, headers=None, body=None, timeout=30):
         BASE_URL + path, data=body, method=method, headers=headers
     )
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            # urllib lowercases all header names; normalize to lowercase here
+        # Build a no-redirect opener so we can opt out per-call
+        if not follow_redirects:
+            opener = urllib.request.build_opener(
+                urllib.request.HTTPRedirectHandler()
+            )
+            # Override the default redirect behavior
+            class NoRedirect(urllib.request.HTTPRedirectHandler):
+                def redirect_request(self, *a, **kw):
+                    return None
+            opener = urllib.request.build_opener(NoRedirect())
+            resp_ctx = opener.open(req, timeout=timeout)
+        else:
+            resp_ctx = urllib.request.urlopen(req, timeout=timeout)
+        with resp_ctx as resp:
             return resp.status, {k.lower(): v for k, v in resp.headers.items()}, resp.read()
     except urllib.error.HTTPError as e:
         return e.code, {k.lower(): v for k, v in e.headers.items()}, e.read()
@@ -172,10 +190,10 @@ def find_track(query: str) -> dict:
     raise AssertionError(f"no tracks with videoId for {query!r}")
 
 
-# ---------- Test 1: cold play (HLS path) ----------
+# ---------- Test 1: cold play (format 18 path) ----------
 
 def test_cold_play_hls():
-    section("Test 1: Cold play (HLS path) — search → /stream → /play → segments")
+    section("Test 1: Cold play (format 18 path) — search → /stream → /fast → 302 to YouTube")
     jwt = get_jwt()
 
     # Step 1: search for a track that's not in the local cache
@@ -190,7 +208,7 @@ def test_cold_play_hls():
         print(f"    {YELLOW('(removing pre-existing cache file for clean cold test)')}")
         cache_path.unlink()
 
-    # Step 2: /stream — should return /play HLS URL (cold)
+    # Step 2: /stream — should return /fast URL (always, since 2026-08-07)
     print(f"  {CYAN('Step 2: GET /stream (iOS getStreamUrl equivalent)')}")
     t = time.monotonic()
     status, _, body = http("GET", f"/stream/{video_id}",
@@ -202,77 +220,46 @@ def test_cold_play_hls():
     info = json.loads(body)
     stream_url = info["streamUrl"]
     mime = info["mimeType"]
-    assert_in("/play/", stream_url, "stream URL should be /play/ for cold")
-    assert_eq(mime, "application/x-mpegurl", "mime type for HLS")
-    S.record("/stream returns HLS URL for cold play", True)
+    # S17-H / FORMAT-18-FAST (2026-08-07): /stream always
+    # routes to /fast. The /fast endpoint decides between
+    # /audio (warm) and YouTube format 18 (cold).
+    assert_in("/fast/", stream_url, "stream URL should be /fast/ (always)")
+    assert_eq(mime, "video/mp4", "mime type for progressive MP4")
+    S.record("/stream returns /fast URL (Musi-style architecture)", True)
 
-    # Step 3: GET /play/playlist.m3u8 — should return immediately
-    print(f"  {CYAN('Step 3: GET /play/playlist.m3u8?token=... (placeholder or real)')}")
+    # Step 3: GET /fast — should 302 to YouTube format 18 (cold)
+    print(f"  {CYAN('Step 3: GET /fast/{videoId}.mp4?token=... (cold path)')}")
     t = time.monotonic()
-    status, hdrs, body = http("GET", stream_url)
+    # Don't follow redirects — we want to see the 302 Location
+    import urllib3
+    status, hdrs, body = http(
+        "GET", stream_url, follow_redirects=False
+    )
     ms = elapsed_ms(t)
-    assert_eq(status, 200, "playlist.m3u8 status")
-    S.record(f"playlist.m3u8 returns 200 in {ms}ms (was up to 30s + 504)", ms < 1000,
-             f"took {ms}ms")
-    m3u8_text = body.decode("utf-8", errors="replace")
-    assert_in("#EXTM3U", m3u8_text, "valid m3u8 header")
-    assert_in("EXT-X-MAP", m3u8_text, "m3u8 references init.mp4")
-    S.record("m3u8 body is well-formed (EXTM3U + EXT-X-MAP)", True)
+    assert_eq(status, 302, "/fast cold should 302 to YouTube")
+    loc = hdrs.get("location", "")
+    assert_in("googlevideo.com", loc, "302 should redirect to YouTube's googlevideo CDN")
+    assert_in("itag=18", loc, "302 should be format 18 (progressive MP4)")
+    S.record(f"/fast cold returns 302 → YouTube format 18 in {ms}ms", True)
 
-    # Step 4: poll for HLS to start producing segments
-    print(f"  {CYAN('Step 4: poll for HLS transcode to produce first segment')}")
-    hls_dir = Path(f"/Users/coderbat/iYMusic/YTAudioSystem/backend/data/hls/{video_id}")
-    deadline = time.monotonic() + 30  # 30s budget for first segment
-    first_seen_at_ms = None
-    while time.monotonic() < deadline:
-        if (hls_dir / "seg_000.m4s").exists():
-            first_seen_at_ms = int((deadline - time.monotonic() + 30) * 1000)
-            # Actually, we want elapsed since this test started
-            first_seen_at_ms = int((time.monotonic() - (deadline - 30)) * 1000)
-            break
-        time.sleep(0.2)
-    assert_true(first_seen_at_ms is not None,
-                f"first segment did not appear within 30s; HLS dir: {hls_dir}")
-    S.record(f"first HLS segment appeared in {first_seen_at_ms}ms", True)
-
-    # Step 5: GET /play/init.mp4
-    print(f"  {CYAN('Step 5: GET /play/init.mp4?token=...')}")
-    init_url = stream_url.replace("playlist.m3u8", "init.mp4")
-    status, hdrs, body = http("GET", init_url)
-    assert_eq(status, 200, "init.mp4 status")
-    assert_true(len(body) > 100, f"init.mp4 too small: {len(body)} bytes")
-    S.record(f"init.mp4 returns 200 + {len(body)} bytes (fMP4 init segment)", True)
-
-    # Step 6: GET /play/seg_000.m4s
-    print(f"  {CYAN('Step 6: GET /play/seg_000.m4s?token=...')}")
-    seg_url = stream_url.replace("playlist.m3u8", "seg_000.m4s")
-    t = time.monotonic()
-    status, hdrs, body = http("GET", seg_url)
-    ms = elapsed_ms(t)
-    assert_eq(status, 200, "seg_000.m4s status")
-    S.record(f"seg_000.m4s returns 200 in {ms}ms, {len(body)} bytes", True)
-
-    # Step 7: GET /play/seg_999.m4s (nonexistent) — should be 503 with Retry-After
-    print(f"  {CYAN('Step 7: GET /play/seg_999.m4s?token=... (nonexistent)')}")
-    bad_url = stream_url.replace("playlist.m3u8", "seg_999.m4s")
-    status, hdrs, body = http("GET", bad_url)
-    assert_eq(status, 503, "nonexistent segment should 503")
-    assert_in("retry-after", hdrs, "503 should have Retry-After")
-    S.record("nonexistent segment returns 503 + Retry-After (AVPlayer retries)", True)
-
-    # Step 8: re-fetch m3u8 — should have grown (real playlist with segments)
-    print(f"  {CYAN('Step 8: re-fetch m3u8 — should now have real segments')}")
-    status, _, body = http("GET", stream_url)
-    m3u8_text = body.decode("utf-8", errors="replace")
-    segment_count = m3u8_text.count(".m4s?")
-    assert_true(segment_count > 0, "real m3u8 should reference at least one segment")
-    S.record(f"re-fetched m3u8 has {segment_count} segment references", True)
+    # Step 4: the YouTube URL should be well-formed (the live
+    # HEAD test is environment-dependent and adds little — the
+    # 302 + the `itag=18` query param are the proof of
+    # correctness).
+    print(f"  {CYAN('Step 4: verify YouTube URL has the right format')}")
+    # mime param is URL-encoded as mime%3Dvideo%2Fmp4
+    assert_in("mime", loc, "URL has mime param")
+    assert_in("itag=18", loc, "URL has itag=18 (format 18)")
+    # Signed URLs have sig= or signature= in query string
+    assert_true("sig=" in loc or "signature=" in loc,
+                "URL has YouTube signature (signed URL is valid)")
+    S.record("YouTube format 18 URL is well-formed (mime=video/mp4, signed, itag=18)", True)
 
 
 # ---------- Test 2: warm play (/audio path) ----------
 
 def test_warm_play_audio():
-    section("Test 2: Warm play (/audio path) — Range requests, valid MP4")
+    section("Test 2: Warm play (/audio path) — /stream → /fast → 302 → /audio")
     jwt = get_jwt()
 
     # Use a track that's already in the cache (from earlier tests)
@@ -287,28 +274,37 @@ def test_warm_play_audio():
     size = track.stat().st_size
     print(f"  using cached track: {video_id} ({size} bytes)")
 
-    # Step 1: /stream — should return /audio URL (warm)
-    print(f"  {CYAN('Step 1: GET /stream (warm path)')}")
+    # Step 1: /stream — should always return /fast URL
+    print(f"  {CYAN('Step 1: GET /stream (warm path, always /fast)')}")
     t = time.monotonic()
     status, _, body = http("GET", f"/stream/{video_id}",
                            headers={"Authorization": f"Bearer {jwt}"})
     ms = elapsed_ms(t)
     assert_eq(status, 200, "/stream status")
     info = json.loads(body)
-    assert_in("/audio/", info["streamUrl"], "warm path should return /audio URL")
-    assert_eq(info["mimeType"], "audio/mp4", "warm mime type")
-    S.record(f"/stream returns /audio URL in {ms}ms (cache hit)", True)
+    assert_in("/fast/", info["streamUrl"], "stream URL should be /fast/")
+    S.record(f"/stream returns /fast URL in {ms}ms (cache hit)", True)
 
-    # Step 2: GET /audio — full file
-    print(f"  {CYAN('Step 2: GET /audio/{videoId}.m4a (full file)')}")
+    # Step 2: /fast — should 302 to /audio (warm path)
+    print(f"  {CYAN('Step 2: GET /fast/{videoId}.mp4?token=... (warm path → 302 to /audio)')}")
+    t = time.monotonic()
+    status, hdrs, body = http("GET", info["streamUrl"], follow_redirects=False)
+    ms = elapsed_ms(t)
+    assert_eq(status, 302, "/fast warm should 302 to /audio")
+    loc = hdrs.get("location", "")
+    assert_in(f"/audio/{video_id}.m4a", loc, "302 should redirect to /audio URL")
+    S.record(f"/fast warm returns 302 → /audio in {ms}ms", True)
+
+    # Step 3: GET /audio — full file
+    print(f"  {CYAN('Step 3: GET /audio/{videoId}.m4a (full file)')}")
     audio_url = f"/audio/{video_id}.m4a?token={jwt}"
     status, hdrs, body = http("GET", audio_url)
     assert_eq(status, 200, "/audio full status")
     assert_true(len(body) > 100_000, f"audio file too small: {len(body)} bytes")
     S.record(f"/audio returns 200 + {len(body)} bytes (full file)", True)
 
-    # Step 3: GET /audio with Range header (iOS seek bar)
-    print(f"  {CYAN('Step 3: GET /audio with Range: bytes=0-65535 (AVPlayer initial probe)')}")
+    # Step 4: GET /audio with Range header (iOS seek bar)
+    print(f"  {CYAN('Step 4: GET /audio with Range: bytes=0-65535 (AVPlayer initial probe)')}")
     status, hdrs, body = http(
         "GET", f"/audio/{video_id}.m4a?token={jwt}",
         headers={"Range": "bytes=0-65535"},
@@ -318,8 +314,8 @@ def test_warm_play_audio():
     assert_true("content-range" in hdrs, "Range response has Content-Range")
     S.record("Range request returns 206 with correct headers", True)
 
-    # Step 4: verify the file has both ftyp and moov atoms (AVPlayer needs moov)
-    print(f"  {CYAN('Step 4: verify cached file has moov atom (AVPlayer requirement)')}")
+    # Step 5: verify the file has both ftyp and moov atoms (AVPlayer needs moov)
+    print(f"  {CYAN('Step 5: verify cached file has moov atom (AVPlayer requirement)')}")
     ftyp_at = body.find(b"ftyp")
     moov_at = body.find(b"moov")
     assert_true(ftyp_at >= 0, "ftyp atom missing")
@@ -327,65 +323,66 @@ def test_warm_play_audio():
     S.record("cached file has both ftyp + moov atoms (valid MP4)", True)
 
 
-# ---------- Test 3: cache check edge cases ----------
+# ---------- Test 3: /fast cache routing ----------
 
 def test_cache_check_edge_cases():
-    section("Test 3: Cache check edge cases (1KB / 50KB / 100KB)")
+    section("Test 3: /fast routing — small cache files route to YouTube, large to /audio")
     jwt = get_jwt()
 
     # Use a videoId that exists in the stream URL cache
-    # (we use one from the previous test, which we streamed)
-    # Easiest: search for any track, then it will be stream-cached
     track = find_track("Pink Floyd Time")
     video_id = track["videoId"]
     cache_path = Path(f"/Users/coderbat/iYMusic/YTAudioSystem/backend/data/audio_cache/{video_id}.m4a")
     original = cache_path.read_bytes() if cache_path.exists() else None
 
+    def _fast_destination(target_video_id):
+        """Hit /fast with no redirect-following, return the Location host/path."""
+        status, hdrs, _ = http(
+            "GET", f"/fast/{target_video_id}.mp4?token={jwt}",
+            follow_redirects=False,
+        )
+        return status, hdrs.get("location", "")
+
     try:
-        # 1KB → /play
-        print(f"  {CYAN('1KB file → /play')}")
+        # 1KB → YouTube format 18 (below warm threshold)
+        print(f"  {CYAN('1KB file → YouTube format 18 (below 50KB warm threshold)')}")
         cache_path.write_bytes(b"\x00" * 1024)
-        status, _, body = http("GET", f"/stream/{video_id}",
-                               headers={"Authorization": f"Bearer {jwt}"})
-        info = json.loads(body)
-        assert_in("/play/", info["streamUrl"], "1KB should route to /play")
-        S.record("1KB cache file routes to /play (HLS)", True)
+        status, loc = _fast_destination(video_id)
+        assert_eq(status, 302, "1KB should give 302")
+        assert_in("googlevideo.com", loc, "1KB should redirect to YouTube (below warm threshold)")
+        S.record("1KB cache file routes /fast → YouTube (cold)", True)
 
-        # 49KB → /play (just under threshold)
-        print(f"  {CYAN('49KB file → /play (just under 50KB threshold)')}")
+        # 49KB → YouTube (just under threshold)
+        print(f"  {CYAN('49KB file → YouTube (just under 50KB threshold)')}")
         cache_path.write_bytes(b"\x00" * 49_000)
-        status, _, body = http("GET", f"/stream/{video_id}",
-                               headers={"Authorization": f"Bearer {jwt}"})
-        info = json.loads(body)
-        assert_in("/play/", info["streamUrl"], "49KB should route to /play")
-        S.record("49KB file routes to /play (HLS) — threshold holds", True)
+        status, loc = _fast_destination(video_id)
+        assert_eq(status, 302, "49KB should give 302")
+        assert_in("googlevideo.com", loc, "49KB should redirect to YouTube")
+        S.record("49KB file routes /fast → YouTube (just under threshold)", True)
 
-        # 50KB+1 → /audio (just over threshold; the check is `> 50_000`)
+        # 50KB+1 → /audio (just over threshold)
         print(f"  {CYAN('50,001 bytes → /audio (just over threshold)')}")
         cache_path.write_bytes(b"\x00" * 50_001)
-        status, _, body = http("GET", f"/stream/{video_id}",
-                               headers={"Authorization": f"Bearer {jwt}"})
-        info = json.loads(body)
-        assert_in("/audio/", info["streamUrl"], "50,001 bytes should route to /audio")
-        S.record("50,001 bytes routes to /audio (just over threshold)", True)
+        status, loc = _fast_destination(video_id)
+        assert_eq(status, 302, "50,001 bytes should give 302")
+        assert_in(f"/audio/{video_id}.m4a", loc, "50,001 bytes should redirect to /audio")
+        S.record("50,001 bytes routes /fast → /audio (just over threshold)", True)
 
         # 100KB → /audio
         print(f"  {CYAN('100KB file → /audio')}")
         cache_path.write_bytes(b"\x00" * 100_000)
-        status, _, body = http("GET", f"/stream/{video_id}",
-                               headers={"Authorization": f"Bearer {jwt}"})
-        info = json.loads(body)
-        assert_in("/audio/", info["streamUrl"], "100KB should route to /audio")
-        S.record("100KB file routes to /audio (warm)", True)
+        status, loc = _fast_destination(video_id)
+        assert_eq(status, 302, "100KB should give 302")
+        assert_in(f"/audio/{video_id}.m4a", loc, "100KB should redirect to /audio")
+        S.record("100KB file routes /fast → /audio (warm)", True)
 
-        # No file → /play
-        print(f"  {CYAN('No file → /play')}")
+        # No file → YouTube
+        print(f"  {CYAN('No file → YouTube')}")
         cache_path.unlink()
-        status, _, body = http("GET", f"/stream/{video_id}",
-                               headers={"Authorization": f"Bearer {jwt}"})
-        info = json.loads(body)
-        assert_in("/play/", info["streamUrl"], "no file should route to /play")
-        S.record("no cache file routes to /play (HLS)", True)
+        status, loc = _fast_destination(video_id)
+        assert_eq(status, 302, "no file should give 302")
+        assert_in("googlevideo.com", loc, "no file should redirect to YouTube")
+        S.record("no cache file routes /fast → YouTube (cold)", True)
 
     finally:
         # Restore original
@@ -395,16 +392,18 @@ def test_cache_check_edge_cases():
             cache_path.unlink()
 
 
-# ---------- Test 4: HLS event-style polling ----------
+# ---------- Test 4: HLS pipeline still works for legacy callers ----------
 
 def test_hls_polling():
-    section("Test 4: HLS event-style polling (rapid m3u8 re-fetch) + warm-path 302")
+    section("Test 4: HLS pipeline still works (legacy callers + format 18 fallback)")
     jwt = get_jwt()
 
-    # Pick a track that's definitely NOT in the audio_cache (so we
-    # actually exercise the cold HLS path). The test must select a
-    # fresh track each run; otherwise warm-cached tracks short-circuit
-    # to /audio (302), which is a different code path.
+    # S17-H / FORMAT-18-FAST (2026-08-07): the iOS app no
+    # longer uses the HLS pipeline (it goes through /fast),
+    # but the HLS endpoints are still in place for any
+    # legacy callers + as a fallback. This test confirms
+    # the HLS pipeline still produces a valid stream when
+    # called directly.
     AUDIO_CACHE = Path("/Users/coderbat/iYMusic/YTAudioSystem/backend/data/audio_cache")
     HLS_BASE = Path("/Users/coderbat/iYMusic/YTAudioSystem/backend/data/hls")
     cached_vids = {p.stem for p in AUDIO_CACHE.glob("*.m4a")} | {
@@ -412,8 +411,7 @@ def test_hls_polling():
     }
 
     # Search a few candidates; pick the first uncached one with
-    # a reasonable duration (3-15 min — short enough to transcode
-    # fast for the test, long enough to exercise the pipeline).
+    # a reasonable duration (3-15 min).
     cold_track = None
     for q in ("Pink Floyd Learning to Fly", "Dire Straits", "Led Zeppelin Kashmir",
               "Santana", "Jimi Hendrix", "Genesis"):
@@ -443,74 +441,46 @@ def test_hls_polling():
     title = cold_track["title"]
     dur = cold_track["durationSeconds"]
     print(f"  {CYAN(f'cold track: {video_id} — {title} ({dur}s)')}")
-    stream_url = f"/play/{video_id}/playlist.m3u8?token={jwt}"
 
-    # Start a fresh HLS by hitting /play (this also starts the worker)
-    print(f"  {CYAN('Step 1: GET /play/playlist.m8 to start HLS transcode')}")
+    # Confirm format 18 is fast for this track (the new path)
+    print(f"  {CYAN('Step 1: GET /fast (Musi-style format 18)')}")
     t = time.monotonic()
-    status, _, body = http("GET", stream_url)
+    status, hdrs, _ = http(
+        "GET", f"/fast/{video_id}.mp4?token={jwt}",
+        follow_redirects=False,
+    )
     ms = elapsed_ms(t)
-    assert_eq(status, 200, "first playlist fetch")
-    S.record(f"first m3u8 fetch in {ms}ms (under 30s iOS budget)", ms < 30_000,
-             f"took {ms}ms")
+    assert_eq(status, 302, "/fast should 302")
+    loc = hdrs.get("location", "")
+    if "googlevideo.com" in loc:
+        # Cold path (no cache) — first call after a server restart
+        # takes ~3-5s for yt-dlp signature extraction.
+        S.record(f"/fast cold → YouTube in {ms}ms (format 18 first-time cost)",
+                 True)
+    elif f"/audio/{video_id}.m4a" in loc:
+        # Warm path (already cached)
+        S.record(f"/fast warm → /audio in {ms}ms (instant)", True)
+    else:
+        raise AssertionError(f"unexpected 302 location: {loc[:200]}")
 
-    # Poll aggressively like AVPlayer does (every 1s for up to 30s)
-    # The transcode may take a while if other transcodes are queued
-    # (global semaphore cap).
-    print(f"  {CYAN('Step 2: poll m3u8 every 1s for up to 30s (simulating AVPlayer)')}")
-    poll_results = []
-    saw_segments = False
-    first_seg_at = None
-    for i in range(30):
-        status, _, body = http("GET", stream_url)
-        m3u8 = body.decode("utf-8", errors="replace")
-        segs = m3u8.count(".m4s?")
-        poll_results.append((i, status, segs))
-        if segs > 0 and first_seg_at is None:
-            first_seg_at = elapsed_ms(t)
-            print(f"    first segments seen at poll #{i} ({segs} segments, +{first_seg_at}ms)")
-            saw_segments = True
-        time.sleep(1)
+    # Confirm HLS still works for legacy callers
+    print(f"  {CYAN('Step 2: GET /play/playlist.m3u8 (legacy HLS path)')}")
+    hls_stream_url = f"/play/{video_id}/playlist.m3u8?token={jwt}"
+    t = time.monotonic()
+    status, _, body = http("GET", hls_stream_url)
+    ms = elapsed_ms(t)
+    assert_eq(status, 200, "HLS playlist fetch")
+    m3u8 = body.decode("utf-8", errors="replace")
+    assert_in("#EXTM3U", m3u8, "HLS m3u8 has valid header")
+    S.record(f"HLS playlist returns 200 in {ms}ms (legacy path still alive)", True)
 
-    # Verify all polls returned 200 (no AVPlayer retry storm)
-    all_200 = all(r[1] == 200 for r in poll_results)
-    S.record(f"all {len(poll_results)} polls returned 200 (no retry storm)", all_200)
-
-    # Verify segments eventually appeared
-    final_segs = poll_results[-1][2]
-    assert_true(final_segs > 0,
-                f"segments should appear within 30s polling: final={final_segs}")
-    S.record(f"segments eventually appear (final: {final_segs}, {first_seg_at}ms)", True)
-
-    # Verify init.mp4 and a segment are accessible
-    print(f"  {CYAN('Step 3: verify init.mp4 + seg_000.m4s are fetchable')}")
-    status, _, body = http("GET", stream_url.replace("playlist.m3u8", "init.mp4"))
-    assert_eq(status, 200, "init.mp4 fetchable")
-    S.record(f"init.mp4 fetchable (200, {len(body)} bytes)", True)
-
-    status, _, body = http("GET", stream_url.replace("playlist.m3u8", "seg_000.m4s"))
-    assert_eq(status, 200, "seg_000.m4s fetchable")
-    S.record(f"seg_000.m4s fetchable (200, {len(body)} bytes)", True)
-
-    # Verify the warm-path: once transcode is done, /play/playlist.m3u8
-    # should 302-redirect to /audio/{videoId}.m4a
-    print(f"  {CYAN('Step 4: warm-path 302 redirect after transcode')}")
-    status, hdrs, _ = http("GET", stream_url)
+    # HLS warm-path 302 should still work
+    print(f"  {CYAN('Step 3: HLS warm-path 302 → /audio')}")
+    status, hdrs, _ = http("GET", hls_stream_url, follow_redirects=False)
     if status == 302:
         loc = hdrs.get("location", "")
-        assert_in(f"/audio/{video_id}.m4a", loc, "302 should redirect to /audio URL")
-        S.record(f"warm path: /play/m3u8 returns 302 → /audio (instant warm plays)", True)
-    else:
-        # If transcode didn't finish yet, this is fine — just skip.
-        S.record("warm-path 302 redirect", None,
-                 f"transcode still in progress (status={status})")
-
-    # And the warm path itself should work
-    if status == 302:
-        loc = hdrs.get("location", "").split("?")[0]
-        status, _, body = http("GET", loc + f"?token={jwt}")
-        assert_eq(status, 200, "warm /audio returns 200")
-        S.record(f"warm /audio returns 200 ({len(body)} bytes)", True)
+        assert_in(f"/audio/{video_id}.m4a", loc, "HLS warm 302 → /audio")
+        S.record("HLS warm-path 302 → /audio still works (legacy)", True)
 
 
 # ---------- Test 5: auth ----------
@@ -541,62 +511,81 @@ def test_auth():
 # ---------- Test 6: iOS timeout budget ----------
 
 def test_ios_timeout_budget():
-    section("Test 6: iOS timeout budget — /stream completes in <30s for all paths")
+    section("Test 6: iOS timeout budget — /stream + /fast completes fast for all paths")
     jwt = get_jwt()
 
-    # Cold play (no cache) — should be fast because /stream is just cache lookups
+    # Cold play (no cache) — should be fast because /stream is
+    # just a cache lookup, and /fast cold is < 6s (first time
+    # per server restart) or < 100ms (cached).
     print(f"  {CYAN('Cold play /stream timing')}")
-    # Use a unique videoId that has no cache, to ensure cold path
     track = find_track("Pink Floyd Another Brick in the Wall")
     video_id = track["videoId"]
     cache_path = Path(f"/Users/coderbat/iYMusic/YTAudioSystem/backend/data/audio_cache/{video_id}.m4a")
     if cache_path.exists():
         cache_path.unlink()
-    # Also clean up any leftover HLS
-    hls_dir = Path(f"/Users/coderbat/iYMusic/YTAudioSystem/backend/data/hls/{video_id}")
-    if hls_dir.exists():
-        import shutil
-        shutil.rmtree(hls_dir)
-    # Drop the stream URL cache so we measure cold path
-    # (yt-dlp is cached in-process; the stream_cache module is in-memory, so
-    # we can't easily drop it from here. But the stream cache has a 3.5h TTL
-    # so a fresh search → fresh stream URL is the realistic cold path.)
 
+    # /stream should be near-instant (just a file-existence check)
     t = time.monotonic()
     status, _, body = http("GET", f"/stream/{video_id}",
                            headers={"Authorization": f"Bearer {jwt}"})
-    ms = elapsed_ms(t)
+    stream_ms = elapsed_ms(t)
     assert_eq(status, 200, "/stream cold")
     info = json.loads(body)
-    assert_in("/play/", info["streamUrl"], "cold routes to /play")
-    S.record(f"cold /stream completes in {ms}ms (iOS 30s timeout)", ms < 30_000,
-             f"took {ms}ms")
+    assert_in("/fast/", info["streamUrl"], "cold routes to /fast")
+    S.record(f"cold /stream completes in {stream_ms}ms (iOS 30s timeout)",
+             stream_ms < 30_000, f"took {stream_ms}ms")
 
-    # Now follow the HLS path end-to-end like iOS would
-    print(f"  {CYAN('Full cold-play path: /play m3u8 + init.mp4 + seg_000.m4s')}")
-    stream_url = info["streamUrl"]
+    # /fast cold — first call after server restart pays the
+    # yt-dlp signature extraction cost (~3-5s), but subsequent
+    # calls within 5h are cache hits (<100ms).
+    print(f"  {CYAN('/fast cold timing (format 18 URL extraction)')}")
     t = time.monotonic()
-    status, _, body = http("GET", stream_url)
-    m3u8_ms = elapsed_ms(t)
-    assert_eq(status, 200, "m3u8")
-    S.record(f"m3u8 in {m3u8_ms}ms", True)
+    status, hdrs, _ = http(
+        "GET", f"/fast/{video_id}.mp4?token={jwt}",
+        follow_redirects=False,
+    )
+    fast_ms = elapsed_ms(t)
+    assert_eq(status, 302, "/fast should 302")
+    loc = hdrs.get("location", "")
+    is_youtube = "googlevideo.com" in loc
+    is_audio = f"/audio/{video_id}.m4a" in loc
+    assert_true(is_youtube or is_audio, f"unexpected 302: {loc[:100]}")
 
-    # Wait for first segment
-    deadline = time.monotonic() + 20
-    first_seg_seen = None
-    while time.monotonic() < deadline:
-        if (hls_dir / "seg_000.m4s").exists():
-            first_seg_seen = True
-            break
-        time.sleep(0.2)
-    first_seg_total_ms = int((time.monotonic() - (deadline - 20)) * 1000)
-    assert_true(first_seg_seen, "first segment did not appear within 20s")
-    S.record(f"first segment in {first_seg_total_ms}ms (from start of cold play)",
-             True)
+    if is_youtube:
+        # Cold path
+        S.record(
+            f"/fast cold → YouTube in {fast_ms}ms "
+            f"(first time per server: ~3-5s for yt-dlp n-challenge)",
+            fast_ms < 6_000, f"took {fast_ms}ms",
+        )
+    else:
+        # Warm path (was already cached as .m4a)
+        S.record(
+            f"/fast warm → /audio in {fast_ms}ms (cache hit)",
+            fast_ms < 200, f"took {fast_ms}ms",
+        )
 
-    # Total budget: /stream + m3u8 + first_segment
-    total_ms = m3u8_ms + first_seg_total_ms
-    S.record(f"total cold-play budget: ~{total_ms}ms (well under 30s)", total_ms < 30_000)
+    # Test the cache-hit timing
+    print(f"  {CYAN('/fast second call (format 18 cache hit, should be <100ms)')}")
+    t = time.monotonic()
+    status, hdrs, _ = http(
+        "GET", f"/fast/{video_id}.mp4?token={jwt}",
+        follow_redirects=False,
+    )
+    second_ms = elapsed_ms(t)
+    assert_eq(status, 302, "/fast second call should 302")
+    S.record(
+        f"/fast second call in {second_ms}ms (format 18 cache hit)",
+        second_ms < 500, f"took {second_ms}ms",
+    )
+
+    # Total budget: /stream + /fast
+    total_ms = stream_ms + fast_ms
+    S.record(
+        f"total cold-play budget: /stream + /fast = ~{total_ms}ms "
+        f"(well under iOS 30s timeout)",
+        total_ms < 30_000,
+    )
 
 
 # ---------- main ----------

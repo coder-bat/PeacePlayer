@@ -18,6 +18,7 @@
 		12399D84AAF59515B5FE7923 /* ShareHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DEC17BC10A2C1547FC59BE9 /* ShareHelper.swift */; };
 		14461908F534167F8F408F53 /* NowPlayingFullWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCA4035534F1C659AA5290B2 /* NowPlayingFullWidget.swift */; };
 		15C000EA5C3F4602E36A019B /* MiniPlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD9433711FA4B32991B869ED /* MiniPlayer.swift */; };
+		B17E0000000000000000A001 /* PlayerVideoView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B17E0000000000000000A002 /* PlayerVideoView.swift */; };
 		17E37B566853BA3E3477D5E9 /* Podcast.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E3A88A80AAC57024D2E8EDC /* Podcast.swift */; };
 		1AC5D2294272E30DF4857304 /* PeacePlayerWidgetIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56AF7CCCA582C56C371F11A0 /* PeacePlayerWidgetIntents.swift */; };
 		1D7074E03ED46E71BA83F90C /* CDDownloadedTrack.swift in Sources */ = {isa = PBXBuildFile; fileRef = 785DCEDCD8EB51E04FA7944C /* CDDownloadedTrack.swift */; };
@@ -315,6 +316,7 @@
 		CCA4035534F1C659AA5290B2 /* NowPlayingFullWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NowPlayingFullWidget.swift; sourceTree = "<group>"; };
 		CD44B40105E0AC2CC5C0781B /* ErrorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErrorView.swift; sourceTree = "<group>"; };
 		CD9433711FA4B32991B869ED /* MiniPlayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MiniPlayer.swift; sourceTree = "<group>"; };
+		B17E0000000000000000A002 /* PlayerVideoView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerVideoView.swift; sourceTree = "<group>"; };
 		D193754946594C2A3E225D0B /* PlaybackClock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackClock.swift; sourceTree = "<group>"; };
 		D2D4513B824538A95162D77F /* CDTimeCapsule.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CDTimeCapsule.swift; sourceTree = "<group>"; };
 		D33505D848F52ECC770A4E76 /* TimeCapsuleRevealView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimeCapsuleRevealView.swift; sourceTree = "<group>"; };
@@ -405,6 +407,7 @@
 				D353D6C05094B36F8EA15622 /* FullPlayer.swift */,
 				18E15FD0563E96D55099054E /* LyricsView.swift */,
 				CD9433711FA4B32991B869ED /* MiniPlayer.swift */,
+				B17E0000000000000000A002 /* PlayerVideoView.swift */,
 				AAAA00000000000000000002 /* OrbitalMenu.swift */,
 				94360F35720B73822E1A2CD7 /* NeuralFreqVisualizer.swift */,
 				3007A251835509D5F31DE2BF /* QueueView.swift */,
@@ -812,6 +815,7 @@
 				3BB2A579043A9DD6436D840D /* LyricsView.swift in Sources */,
 				0BD64E5C60DB9B0C94498DF4 /* MainContainerView.swift in Sources */,
 				15C000EA5C3F4602E36A019B /* MiniPlayer.swift in Sources */,
+				B17E0000000000000000A001 /* PlayerVideoView.swift in Sources */,
 				AAAA00000000000000000001 /* OrbitalMenu.swift in Sources */,
 				CBB445A3905865B73F2372EA /* NetworkMonitor.swift in Sources */,
 				94CA042AFCB259A4B402C5D2 /* NeuralFreqVisualizer.swift in Sources */,

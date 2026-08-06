@@ -63,6 +63,26 @@ struct MiniPlayer: View {
         // intrinsic content size + the .blur + .opacity modifiers
         // pushed the ZStack ~2pt taller than the tab pill.
         ZStack {
+            // S17-H / FORMAT-18-FAST (2026-08-07): when the
+            // current AVPlayer has a video track (format 18
+            // from YouTube — H.264 360x360), show it as the
+            // pill background. The blurred artwork below
+            // remains as a fallback for audio-only streams
+            // (downloaded .m4a files don't have a video
+            // track, so the layer is empty and you see
+            // through to the artwork).
+            //
+            // The video also satisfies iOS 26's
+            // FigUseVideoReceiverForCALayer requirement:
+            // PlayerRemoteXPC refuses to play audio if no
+            // CALayer in the tree is an AVPlayerLayer. With
+            // the MiniPlayer AND the FullPlayer hosting
+            // AVPlayerLayers, the player subsystem has
+            // somewhere to route the video receiver.
+            PlayerVideoView(player: playerState.player)
+                .opacity(0.45)
+                .allowsHitTesting(false)
+
             // Background: blurred, dimmed artwork tinted cyan.
             // Resizable so the ZStack's frame controls the size.
             if let url = playerState.currentItem?.track.artworkURL {

@@ -94,3 +94,8 @@ server.log
 ios/YTAudioPlayer.xcodeproj/project.pbxproj
 ios/YTAudioPlayer.xcodeproj/project.pbxproj
 ios/Sources/APIService.swift
+
+# ========================
+# Backend data (cache, hls, sync) — generated at runtime
+# ========================
+backend/data/

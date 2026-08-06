@@ -12,6 +12,40 @@ import CoreImage
 import CoreImage.CIFilterBuiltins
 import CoreHaptics
 
+// S17-H / FORMAT-18-FAST (2026-08-07): the three "tabs"
+// the user can swipe between on the artwork area in the
+// full-screen player. Replaces the old Bool
+// `showingVisualizer`.
+//
+// Why an enum (not three Bools): the modes are mutually
+// exclusive — exactly one is active at a time. The Bool
+// approach needed two Bools (showingVisualizer,
+// showingVideo) and an invariant ("never both true")
+// that the compiler couldn't enforce. The enum makes the
+// state space explicit and lets `.next` / `.previous`
+// cycle safely.
+enum ArtworkMode: CaseIterable {
+    case poster    // static album art (default)
+    case video     // YouTube music video (format 18 H.264)
+    case visualizer // NeuralFreqVisualizer
+
+    var next: ArtworkMode {
+        switch self {
+        case .poster: return .video
+        case .video: return .visualizer
+        case .visualizer: return .poster
+        }
+    }
+
+    var previous: ArtworkMode {
+        switch self {
+        case .poster: return .visualizer
+        case .video: return .poster
+        case .visualizer: return .video
+        }
+    }
+}
+
 struct FullPlayer: View {
     @StateObject private var playerState = PlayerState.shared
     // Sprint 2 / C-4 fix: the focused PlaybackClock. progressSection
@@ -49,7 +83,14 @@ struct FullPlayer: View {
     @State private var isTrackInfoExpanded = false
     @State private var likePulse = false
     @State private var waveformPeaks: [Float]? = nil
-    @State private var showingVisualizer = false
+    // S17-H / FORMAT-18-FAST (2026-08-07): was a Bool
+    // `showingVisualizer`. Now a 3-way enum so the user
+    // can swipe between the artwork poster, the live
+    // YouTube music video (format 18's H.264 track), and
+    // the audio visualizer. Swipe right cycles forward
+    // (poster → video → visualizer → poster); swipe left
+    // cycles backward.
+    @State private var artworkMode: ArtworkMode = .poster
     @State private var showTimeCapsule = false
     @State private var showTimeCapsuleVault = false
     @State private var showAntiAlgorithm = false
@@ -445,7 +486,7 @@ struct FullPlayer: View {
             let slash: CGFloat = 40   // diagonal drop: right side is 40pt higher than left
 
             return ZStack {
-                // Artwork layer
+                // Artwork layer (poster — the static album art)
                 ZStack {
                     Color.cyberDim.opacity(0.15)
                         .overlay(
@@ -468,13 +509,18 @@ struct FullPlayer: View {
                             // the audio for the first time. Warm
                             // plays stay on "Loading..." (the
                             // ~1s fetching-stream-URL window).
+                            // S17-H / FORMAT-18-FAST (2026-08-07):
+                            // cold plays are now ~500ms (a single
+                            // YouTube CDN roundtrip), so the
+                            // "30 seconds" message is no longer
+                            // accurate. The cold-play indicator
+                            // stays on (we still distinguish
+                            // the case in the logs), but the
+                            // user-facing text is now generic.
                             if playerState.playbackState.isColdPlay {
-                                Text("Preparing your audio...")
+                                Text("Loading track...")
                                     .font(.subheadline)
                                     .foregroundColor(.white)
-                                Text("First time may take ~30 seconds")
-                                    .font(.caption2)
-                                    .foregroundColor(.white.opacity(0.7))
                             } else {
                                 Text("Loading...")
                                     .font(.subheadline)
@@ -483,43 +529,72 @@ struct FullPlayer: View {
                         }
                     }
                 }
+                .opacity(artworkMode == .poster ? 1 : 0)
 
-                // Visualizer layer
+                // S17-H / FORMAT-18-FAST (2026-08-07): video
+                // layer — the YouTube music video (format 18
+                // H.264 360x360). The PlayerVideoView hosts an
+                // AVPlayerLayer pointing at the same AVPlayer
+                // that powers audio playback. This serves two
+                // purposes:
+                //
+                // 1. **iOS 26 fix.** PlayerRemoteXPC throws
+                //    `kFigPlayerError_ParamErr` on
+                //    `clearVideoLayer` if no CALayer in the
+                //    tree is an AVPlayerLayer. The MiniPlayer
+                //    hosts one too, so even when the user is
+                //    on .poster the player subsystem has a
+                //    layer target.
+                //
+                // 2. **Visible video.** The user explicitly
+                //    asked for the YouTube music video to
+                //    be visible so they can confirm format 18
+                //    is the active path. They swipe right on
+                //    the artwork → video tab.
+                //
+                // Note: on .poster mode this layer is at
+                // opacity 0, but it still owns the
+                // AVPlayerLayer reference and is what keeps
+                // iOS 26 happy when the artwork is showing.
+                PlayerVideoView(player: playerState.player)
+                    .frame(width: w, height: h)
+                    .opacity(artworkMode == .video ? 1 : 0)
+
+                // Visualizer layer (audio reactive)
                 ZStack {
                     Color.black
                     NeuralFreqVisualizer(engine: AudioVisualizerEngine.shared, style: .neural)
                         .frame(width: w, height: h)
                 }
-                .opacity(showingVisualizer ? 1 : 0)
+                .opacity(artworkMode == .visualizer ? 1 : 0)
             }
             .frame(width: w, height: h)
             // Diagonal clip
             .clipShape(CyberpunkHeroShape(slashDrop: slash))
-            // Clean border
+            // Clean border — color reflects the active tab
             .overlay(
                 CyberpunkHeroShape(slashDrop: slash)
                     .stroke(
-                        showingVisualizer
-                            ? Color.cyberCyan.opacity(0.4)
-                            : (currentTrackIsLiked ? Theme.cyberMagenta.opacity(0.4) : Color.white.opacity(0.06)),
+                        borderColor,
                         lineWidth: 1
                     )
             )
-            // Single clean shadow
+            // Single clean shadow — color reflects the active tab
             .shadow(
-                color: showingVisualizer
-                    ? Color.cyberCyan.opacity(0.25)
-                    : (currentTrackIsLiked ? Theme.cyberMagenta.opacity(0.2) : Color.black.opacity(0.3)),
+                color: shadowColor,
                 radius: 12,
                 x: 0, y: 4
             )
             .scaleEffect(likePulse ? 1.025 : 1.0)
-            .animation(reduceMotion ? .none : .spring(response: 0.4, dampingFraction: 0.75), value: showingVisualizer)
+            .animation(reduceMotion ? .none : .spring(response: 0.4, dampingFraction: 0.75), value: artworkMode)
             .animation(reduceMotion ? .none : .spring(response: 0.25, dampingFraction: 0.7), value: likePulse)
             // Extend past the parent VStack's 24pt horizontal padding to go edge-to-edge
             .padding(.horizontal, -24)
             .onTapGesture(count: 2) {
-                if !showingVisualizer { toggleCurrentTrackLike() }
+                // S17-H / FORMAT-18-FAST: was
+                // `if !showingVisualizer` — only the poster
+                // gets the double-tap-to-like gesture now.
+                if artworkMode == .poster { toggleCurrentTrackLike() }
             }
             .gesture(
                 DragGesture(minimumDistance: 30, coordinateSpace: .local)
@@ -527,8 +602,18 @@ struct FullPlayer: View {
                         let horizontal = abs(value.translation.width)
                         let vertical = abs(value.translation.height)
                         guard horizontal > vertical else { return }
+                        // S17-H / FORMAT-18-FAST: cycle
+                        // through the three modes instead of
+                        // toggling a Bool. Swipe right →
+                        // next mode (poster → video →
+                        // visualizer → poster). Swipe left →
+                        // previous mode.
                         withAnimation(reduceMotion ? .none : .spring(response: 0.5, dampingFraction: 0.75)) {
-                            showingVisualizer.toggle()
+                            if value.translation.width < 0 {
+                                artworkMode = artworkMode.next
+                            } else {
+                                artworkMode = artworkMode.previous
+                            }
                         }
                     }
             )
@@ -536,6 +621,31 @@ struct FullPlayer: View {
                 HapticManager.medium()
                 showOrbitalMenu = true
             }
+        }
+    }
+
+    // S17-H / FORMAT-18-FAST (2026-08-07): the artwork
+    // section border / shadow colors, factored out so the
+    // body of artworkSection doesn't pile up ternaries.
+    private var borderColor: Color {
+        switch artworkMode {
+        case .visualizer: return Color.cyberCyan.opacity(0.4)
+        case .video: return Color.cyberMagenta.opacity(0.4)
+        case .poster:
+            return currentTrackIsLiked
+                ? Theme.cyberMagenta.opacity(0.4)
+                : Color.white.opacity(0.06)
+        }
+    }
+
+    private var shadowColor: Color {
+        switch artworkMode {
+        case .visualizer: return Color.cyberCyan.opacity(0.25)
+        case .video: return Color.black.opacity(0.5)
+        case .poster:
+            return currentTrackIsLiked
+                ? Theme.cyberMagenta.opacity(currentTrackIsLiked ? 0.2 : 0)
+                : Color.black.opacity(0.3)
         }
     }
 
