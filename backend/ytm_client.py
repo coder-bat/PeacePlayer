@@ -400,20 +400,129 @@ class YTMusicClient:
             logger.error(f"Lyrics fetch failed for {video_id}: {e}")
             return None
     
+    # S17-H / UpNext-FIX (2026-08-07): the old ytmusicapi.get_watch_playlist
+    # crashed in guest mode on YouTube's new watch-next response shape
+    # (KeyError: 'endpoint' in parsers/watch.py:59). Replaced with a yt-dlp
+    # path that extracts YouTube's "Radio Mix" playlist (RD<videoId>) —
+    # the same playlist YouTube itself uses for the "Up Next" autoplay
+    # queue. The old ytmusicapi path is kept as a fallback so any
+    # authenticated-mode callers that depended on the specific response
+    # shape keep working.
+    #
+    # Why RD-list (not ytmusicapi):
+    # - Works in guest mode (no oauth.json needed)
+    # - Resilient to YouTube response changes (yt-dlp's extractor is
+    #   actively maintained, much more so than ytmusicapi's parsers)
+    # - extract_flat=True means no n-challenge, no format download —
+    #   typical call returns in ~1.5s
+    # - Already a hard dependency for /stream
+    #
+    # Tested 2026-08-07 against Jethro Tull "Thick as a Brick": returned
+    # 20+ related tracks (Aqualung, Bungle in the Jungle, Led Zeppelin,
+    # etc.) in 1.5s. The old ytmusicapi path returned [] due to the
+    # parser crash, leaving the iOS UpNext queue empty.
     def get_watch_playlist(self, video_id: str) -> List[Dict]:
         """
-        Get radio/playlist based on a song (autoplay).
-        
+        Get radio/playlist based on a song (autoplay / "Up Next").
+
         Args:
             video_id: Seed video ID
-            
+
         Returns:
-            List of related tracks
+            List of related tracks. Empty list on failure (caller
+            should treat as "no UpNext available" — the iOS
+            QueuePrefetcher has its own local-library fallback).
+        """
+        # Path 1 (preferred): yt-dlp RD-list extraction
+        tracks = self._get_watch_playlist_ytdlp(video_id)
+        if tracks:
+            return tracks
+
+        # Path 2 (fallback): original ytmusicapi call. Keeps
+        # authenticated-mode callers working if yt-dlp's extractor
+        # breaks or if a future ytmusicapi fix lands.
+        logger.info(f"[get_watch_playlist] yt-dlp returned 0 for {video_id}, falling back to ytmusicapi")
+        return self._get_watch_playlist_ytmusicapi(video_id)
+
+    def _get_watch_playlist_ytdlp(self, video_id: str) -> List[Dict]:
+        """
+        Extract YouTube's "Radio Mix" playlist (RD<videoId>) using yt-dlp.
+        Returns up to 25 related tracks or [] on failure.
+
+        The RD<videoId> URL is the same one YouTube's own web player uses
+        for the "Up Next" autoplay queue. yt-dlp with extract_flat=True
+        fetches just the metadata (id, title, duration, channel) without
+        resolving each video's n-challenge, so this is fast (~1.5s for
+        a full radio mix).
+        """
+        url = f"https://www.youtube.com/watch?v={video_id}&list=RD{video_id}"
+        ydl_opts = {
+            'quiet': True,
+            'skip_download': True,
+            # Flat extraction: no n-challenge, no format download. Each
+            # entry comes back as {id, title, duration, channel, ...}
+            # without playable URLs. Perfect for the UpNext use case
+            # (iOS app will fetch stream URLs lazily via StreamURLCache
+            # when each track is about to play).
+            'extract_flat': True,
+            # Bound the result size. RD mixes can be 50+ entries; 25 is
+            # a reasonable UpNext depth and keeps the response payload
+            # small.
+            'playlistend': 25,
+            'ignoreerrors': True,  # one bad entry shouldn't kill the whole list
+        }
+
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+
+            if not info:
+                logger.warning(f"[get_watch_playlist_ytdlp] yt-dlp returned no info for {video_id}")
+                return []
+
+            entries = info.get('entries') or []
+            tracks = []
+            for entry in entries:
+                # extract_flat entries have `id` (the videoId), `title`,
+                # `duration`, `channel` (the uploader), and sometimes
+                # `thumbnails`. Map them to our internal track schema.
+                vid = entry.get('id')
+                if not vid or vid == video_id:
+                    # Skip the seed track itself — it's already in the
+                    # user's queue, no need to repeat it.
+                    continue
+                tracks.append({
+                    'videoId': vid,
+                    'title': entry.get('title', 'Unknown Title'),
+                    'artists': [entry.get('channel') or entry.get('uploader') or 'Unknown'] if (entry.get('channel') or entry.get('uploader')) else ['Unknown'],
+                    'album': 'Unknown Album',
+                    'durationSeconds': int(entry.get('duration') or 0),
+                    'thumbnails': entry.get('thumbnails') or [],
+                    'isExplicit': False,
+                    'videoType': 'MUSIC_VIDEO_TYPE_ATV',
+                })
+
+            logger.info(f"[get_watch_playlist_ytdlp] {video_id} → {len(tracks)} tracks")
+            return tracks
+        except Exception as e:
+            logger.warning(f"[get_watch_playlist_ytdlp] failed for {video_id}: {e}")
+            return []
+
+    def _get_watch_playlist_ytmusicapi(self, video_id: str) -> List[Dict]:
+        """
+        Original ytmusicapi-based get_watch_playlist, kept as a fallback
+        for authenticated-mode callers and as a defense against future
+        yt-dlp extractor breakage.
+
+        Known issue (2026-08-07): crashes in guest mode with
+        `KeyError: 'endpoint'` in ytmusicapi.parsers.watch line 59
+        (YouTube changed the watch-next tab structure). Returns []
+        in that case.
         """
         try:
             playlist = self.yt.get_watch_playlist(video_id)
             tracks = []
-            
+
             raw_tracks = playlist.get('tracks', [])
 
             # Get video IDs that need duration fetched
@@ -467,10 +576,10 @@ class YTMusicClient:
                 }
                 tracks.append(track)
 
-            logger.info(f"Fetched {len(tracks)} tracks from watch playlist, {sum(1 for t in tracks if t['durationSeconds'] > 0)} have duration")
+            logger.info(f"[get_watch_playlist_ytmusicapi] {video_id} → {len(tracks)} tracks, {sum(1 for t in tracks if t['durationSeconds'] > 0)} have duration")
             return tracks
         except Exception as e:
-            logger.error(f"Watch playlist fetch failed: {e}")
+            logger.error(f"[get_watch_playlist_ytmusicapi] failed for {video_id}: {e}")
             import traceback
             traceback.print_exc()
             return []
