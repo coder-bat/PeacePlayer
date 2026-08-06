@@ -2586,12 +2586,20 @@ async def _hls_transcode_worker(video_id: str, yt_url: str, done_event: asyncio.
     hls_dir = _hls_dir_for(video_id)
     hls_dir.mkdir(parents=True, exist_ok=True)
 
-    # Clean up any stale segments from a previous attempt.
-    for f in hls_dir.glob('seg_*.m4s'):
-        try:
-            f.unlink()
-        except OSError:
-            pass
+    # Clean up any stale state from a previous attempt. S17-H /
+    # HLS-LATENCY (2026-08-06): previously we only cleaned
+    # seg_*.m4s, leaving a stale playlist.m3u8 + init.mp4 on
+    # disk if the previous worker died mid-run. AVPlayer would
+    # then parse the stale m3u8 (with EXT-X-ENDLIST and dead
+    # segment references) and enter an infinite 503 retry loop.
+    # Wipe the whole HLS dir contents so the new transcode
+    # starts from a clean slate.
+    for f in hls_dir.glob('*'):
+        if f.is_file():
+            try:
+                f.unlink()
+            except OSError:
+                pass
 
     seg_pattern = hls_dir / "seg_%03d.m4s"
     pipe_cmd = (
@@ -2645,15 +2653,32 @@ async def _hls_transcode_worker(video_id: str, yt_url: str, done_event: asyncio.
     except Exception as e:
         logger.error(f"[hls] _hls_transcode_worker failed for {video_id}: {e}", exc_info=True)
     finally:
-        # The job stays registered for a short while after the
-        # transcode completes, so late segment requests from
-        # AVPlayer still resolve. We unregister after a small
-        # grace period via the concat task's completion.
+        # Always set done_event + unregister the job, regardless
+        # of success/failure. Without unregistering on failure,
+        # the dead job entry stays in _hls_active_jobs and
+        # /play/playlist.m3u8 keeps returning the stale m3u8 to
+        # every subsequent request — AVPlayer then enters an
+        # infinite 503 retry loop on the missing segments
+        # (observed: "Coming Back to Life" 2sHZ4ny_SxU hung
+        # the iOS app for >10s on 21:29 AEST).
         done_event.set()
+        _hls_unregister_job(video_id)
         if transcode_ok:
             # Schedule the concat-to-cache as a follow-up.
-            # It also unregisters the job when done.
             asyncio.create_task(_hls_concat_and_cleanup(video_id))
+        else:
+            # Clean up partial HLS dir so the next /play attempt
+            # starts a fresh transcode from scratch (the new
+            # worker's stale-segment cleanup at line 2589 only
+            # deletes seg_*.m4s, not the partial m3u8/init.mp4).
+            try:
+                for f in hls_dir.glob('*'):
+                    if f.is_file():
+                        f.unlink()
+                # Leave the dir itself; the new worker will
+                # recreate the files as it writes.
+            except OSError as e:
+                logger.warning(f"[hls] failed to clean partial dir for {video_id}: {e}")
 
 
 async def _hls_wait_for_first_segment(video_id: str, timeout_s: float) -> bool:
@@ -2832,6 +2857,33 @@ async def play_hls_playlist(video_id: str, request: Request):
             await asyncio.sleep(0.05)
     if not m3u8_path.exists():
         return _serve_placeholder_hls_playlist(video_id, request)
+
+    # S17-H / HLS-LATENCY (2026-08-06): defensive check for
+    # dead HLS state. If the m3u8 has been written but the
+    # first segment is missing on disk, the m3u8 is stale
+    # (e.g. the HLS worker died mid-run, or the segments were
+    # removed by a cleanup race). Returning the stale m3u8
+    # would put AVPlayer into an infinite 503 retry loop on
+    # the missing segments (observed 21:29 AEST for
+    # 2sHZ4ny_SxU — user stuck >10s on the same playlist).
+    #
+    # If the first segment is missing, return 503 so AVPlayer
+    # backs off (Retry-After: 1 → it will retry every 1s).
+    # The next /play/playlist.m3u8 will either see ffmpeg
+    # writing a fresh m3u8 (because we just cleaned up the
+    # partial dir in the worker's finally clause) or — if
+    # no worker is running — re-enter the placeholder path
+    # and start a fresh transcode.
+    if not _hls_first_segment_path(video_id).exists():
+        return Response(
+            status_code=503,
+            headers={
+                "Retry-After": "1",
+                "Access-Control-Allow-Origin": "*",
+                "Content-Type": "application/x-mpegurl",
+            },
+            content=b"",
+        )
 
     # Read the m3u8 from disk and rewrite segment URLs to
     # include the auth token. The m3u8 is being written
