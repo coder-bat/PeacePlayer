@@ -766,6 +766,26 @@ class PlayerState: ObservableObject {
         // to call on every init.
         PlayerStateAccessor.register(self)
         #endif
+
+        // S17-H / UpNext-FIX-FOLLOWUP (2026-08-07): kick the
+        // QueuePrefetcher. `QueuePrefetcher.shared` is a `static
+        // let` — it only runs its `init()` (which sets up the
+        // `queueStore.$currentIndex` subscription and the
+        // `checkAndPrefetch` Combine chain) the first time it's
+        // accessed. Before this line, the only consumer of
+        // `QueuePrefetcher.shared` was `AdaptiveWalkDJManager`,
+        // which is a niche feature. Plain `play(item:)` taps (the
+        // 99% case) never accessed `.shared`, so the prefetcher's
+        // `init()` never ran, the Combine subscription was never
+        // set up, and the UpNext queue stayed empty.
+        //
+        // We touch `.shared` here so the prefetcher's
+        // `setupPrefetching()` runs as part of PlayerState's
+        // singleton init — which happens at app launch when
+        // anything first reads `PlayerState.shared`. No-op for
+        // already-running prefetchers (init is guarded by the
+        // `static let` semantics).
+        _ = QueuePrefetcher.shared
     }
     
     @objc private func handleMemoryWarning() {

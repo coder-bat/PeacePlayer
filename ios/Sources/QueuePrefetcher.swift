@@ -28,6 +28,17 @@ class QueuePrefetcher: ObservableObject {
     private let maxFailedSeeds = 3
 
     private init() {
+        // S17-H / UpNext-FIX-FOLLOWUP (2026-08-07): log init
+        // so we can confirm in Console.app that the prefetcher
+        // is alive. Before the PlayerState.init() `_ =
+        // QueuePrefetcher.shared` kickoff, this init only ran
+        // when AdaptiveWalkDJManager touched `.shared` — which
+        // is a niche feature. Plain track plays (the 99% case)
+        // never instantiated the prefetcher, so its
+        // `setupPrefetching()` subscription never ran and the
+        // UpNext queue stayed empty. If you see this log
+        // message after app launch, the prefetcher is alive.
+        print("🎵 QueuePrefetcher init: setting up queueStore.$currentIndex subscription")
         setupPrefetching()
     }
 
