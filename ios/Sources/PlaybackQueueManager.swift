@@ -17,9 +17,6 @@ class PlaybackQueueManager: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     private var hasStartedObserving = false
 
-    // Track the last saved queue state to avoid redundant saves
-    private var lastSavedQueueHash: Int?
-
     private init() {}
 
     // MARK: - Setup
@@ -57,10 +54,16 @@ class PlaybackQueueManager: ObservableObject {
             return
         }
 
-        // Check if queue has actually changed using a simple hash
-        let queueHash = queue.map { $0.track.videoId }.joined().hashValue
-        guard queueHash != lastSavedQueueHash else { return }
-        lastSavedQueueHash = queueHash
+        // S17-H / UpNext-FIX (2026-08-07): removed the
+        // `lastSavedQueueHash` micro-optimization. The 500ms
+        // debounce on the queueStore.$items subscription above
+        // already coalesces bursts, and the CoreData batch-delete +
+        // batch-insert is fast for typical queue sizes (<100). The
+        // hash was guarding against a saveQueue call with the
+        // exact same contents as last time, but that case only
+        // happens on a no-op queue mutation and the wasted
+        // CoreData write is negligible compared to the extra
+        // property + check.
 
         let context = persistence.newBackgroundContext()
 
@@ -316,8 +319,6 @@ class PlaybackQueueManager: ObservableObject {
     // MARK: - Clear Queue
 
     func clearSavedQueue() {
-        lastSavedQueueHash = nil
-
         let context = persistence.newBackgroundContext()
 
         context.perform {

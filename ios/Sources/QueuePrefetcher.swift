@@ -30,24 +30,6 @@ class QueuePrefetcher: ObservableObject {
     private init() {
         setupPrefetching()
     }
-    
-    /// Call when starting playback of a track to auto-populate queue
-    func autoPopulateQueue(startingFrom track: Track) {
-        print("🎵 Auto-populating queue from track: \(track.title)")
-        print("🎵 Current queue count: \(playerState.queue.count)")
-
-        // Reset last fetched track ID when starting fresh playback
-        // This ensures we can fetch related tracks for the same track again in a new context
-        lastFetchedTrackId = nil
-
-        // Clear existing queue if needed (except current item)
-        if playerState.queue.isEmpty || playerState.queue.count <= 1 {
-            print("🎵 Queue is empty or has 1 item, fetching related tracks...")
-            fetchRelatedTracks(for: track.videoId, appendToQueue: true)
-        } else {
-            print("🎵 Queue already has \(playerState.queue.count) items, skipping auto-populate")
-        }
-    }
 
     /// Reset prefetch state - call when user manually clears queue or switches playlists
     func resetPrefetchState() {
