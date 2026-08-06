@@ -2809,14 +2809,27 @@ async def play_hls_playlist(video_id: str, request: Request):
     # before the HLS pipeline ever had a chance to stream.
     #
     # New behavior: serve the m3u8 immediately. If ffmpeg has
-    # already written one, serve that. If not, synthesize a
-    # minimal event-style placeholder so AVPlayer can start
-    # polling. Standard HLS live pattern — AVPlayer re-fetches
-    # the m3u8 every ~1s, sees new segments appear as ffmpeg
-    # writes them, and plays them. The segment endpoint
-    # (play_hls_segment) already returns 503 + Retry-After: 1
-    # for not-yet-written segments, so the polling path is robust.
+    # already written one, serve that. If not, briefly poll
+    # for the first appearance (up to 1.5s) — ffmpeg typically
+    # writes the m3u8 header within ~100ms of starting. Only
+    # fall back to the synthesized placeholder if the real
+    # m3u8 hasn't materialized yet.
+    #
+    # The placeholder MUST include a seg_000 reference. Without
+    # it, AVPlayer parses the EVENT playlist, sees zero
+    # segments, polls a few times, and bails with
+    # AVErrorContentNotUpdated (-11866) + CoreMediaErrorDomain
+    # -12888 ("no response for media file in N s"). The 503 +
+    # Retry-After on the segment endpoint is what keeps AVPlayer
+    # retrying until the real segment lands.
     m3u8_path = _hls_playlist_path(video_id)
+    if not m3u8_path.exists():
+        # Brief poll for ffmpeg's m3u8 to appear (typical: 100-500ms)
+        deadline = time.monotonic() + 1.5
+        while time.monotonic() < deadline:
+            if m3u8_path.exists():
+                break
+            await asyncio.sleep(0.05)
     if not m3u8_path.exists():
         return _serve_placeholder_hls_playlist(video_id, request)
 
@@ -2916,20 +2929,24 @@ def _serve_hls_playlist_with_token(video_id: str, request: Request):
 def _serve_placeholder_hls_playlist(video_id: str, request: Request):
     """
     S17-H / HLS (2026-08-06): synthesize a minimal HLS event-style
-    playlist with zero segments when the transcode hasn't written
-    the m3u8 yet. AVPlayer can start polling immediately; the real
-    playlist (with growing segments) takes over once ffmpeg writes
-    its first m3u8. Standard HLS live pattern.
+    playlist when ffmpeg hasn't written the real m3u8 yet. AVPlayer
+    can start polling immediately; the real playlist (with growing
+    segments) takes over once ffmpeg writes its first m3u8. Standard
+    HLS live pattern.
 
-    The token is appended to the init.mp4 URI so AVPlayer can
-    fetch it once ffmpeg writes it. AVPlayer will hit the existing
-    /play/{videoId}/init.mp4 endpoint, which returns 503 +
-    Retry-After: 1 if not yet written (see play_hls_init below).
+    CRITICAL: this placeholder MUST include a seg_000.m4s reference.
+    Without it, AVPlayer parses the EVENT playlist, sees zero
+    segments, polls a few times, and bails with
+    AVErrorContentNotUpdated (-11866) + CoreMediaErrorDomain
+    -12888 ("no response for media file in N s"). The 503 +
+    Retry-After: 1 on /play/.../seg_000.m4s is what keeps AVPlayer
+    retrying until the real segment lands.
 
     HLS_SEGMENT_TIME (server.py:2726) is 2s, so we set
-    EXT-X-TARGETDURATION:2 to match. EVENT playlist type means
-    the playlist only grows — no segments can be removed from
-    the beginning. VERSION 6 supports fMP4 segments.
+    EXT-X-TARGETDURATION:2 and the segment EXTINF:2.0 to match.
+    EVENT playlist type means the playlist only grows — no
+    segments can be removed from the beginning. VERSION 6 supports
+    fMP4 segments.
     """
     from urllib.parse import quote
     raw_token = request.query_params.get('token', '')
@@ -2939,13 +2956,19 @@ def _serve_placeholder_hls_playlist(video_id: str, request: Request):
     if token:
         init_uri += f"?token={token}"
 
+    seg_uri = "seg_000.m4s"
+    if token:
+        seg_uri += f"?token={token}"
+
     body = (
         "#EXTM3U\n"
-        "#EXT-X-VERSION:6\n"
+        "#EXT-X-VERSION:7\n"
         "#EXT-X-TARGETDURATION:2\n"
         "#EXT-X-MEDIA-SEQUENCE:0\n"
         "#EXT-X-PLAYLIST-TYPE:EVENT\n"
         f'#EXT-X-MAP:URI="{init_uri}"\n'
+        "#EXTINF:2.000000,\n"
+        f"{seg_uri}\n"
     )
 
     return Response(
