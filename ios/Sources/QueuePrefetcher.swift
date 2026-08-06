@@ -188,7 +188,7 @@ class QueuePrefetcher: ObservableObject {
     private func populateQueueFromLocalLibrary(reason: String) {
         print("🎵 UpNext fallback: pulling from local library (reason: \(reason))")
 
-        let existingIds = Set(playerState.queue.map { $0.track.videoId })
+        var existingIds = Set(playerState.queue.map { $0.track.videoId })
         var addedCount = 0
 
         // Source 1: recently played. These are tracks the user has

@@ -1430,7 +1430,16 @@ class PlayerState: ObservableObject {
         }
 
         print("🔊 Auto-populating queue...")
-        QueuePrefetcher.shared.autoPopulateQueue(startingFrom: item.track)
+        // S17-H / UpNext-FIX (2026-08-07): removed the explicit
+        // QueuePrefetcher.shared.autoPopulateQueue(...) call. The
+        // prefetcher observes queueStore.$currentIndex (see
+        // QueuePrefetcher.setupPrefetching) and fires
+        // checkAndPrefetch() automatically when play(item:) advances
+        // the index. The explicit call was redundant — and the
+        // `autoPopulateQueue` method itself was removed in the
+        // Phase 4 cleanup commit (5cbc93c) because no other call
+        // sites existed. This is the last call site. Removing it
+        // here keeps the cleanup commit honest.
         #if DEBUG
         PlayCrashDiagnostics.log(.playback, "play(item:) POST-QueuePrefetcher")
         #endif
