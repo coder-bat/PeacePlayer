@@ -317,7 +317,17 @@ class APIService {
             return Fail(error: APIError.invalidURL).eraseToAnyPublisher()
         }
         var request = URLRequest(url: url)
-        request.timeoutInterval = 8
+        // S17-H follow-up: bumped from 8s to 30s. Cold yt-dlp
+        // extractions (the HLS transcode pipeline at
+        // server.py:2942) can take 10-30s for tracks that need
+        // the n-challenge + remote_components solver. The old
+        // 8s timeout was racing with the backend and surfacing
+        // "Couldn't play this track" for fresh Echoes-class
+        // tracks before the HLS pipeline ever had a chance to
+        // start streaming. 30s gives the cold path headroom;
+        // a genuine backend hang will still surface as a
+        // timeout, just a few seconds later.
+        request.timeoutInterval = 30
         addAuthHeader(to: &request)
 
         return dataTaskWithRetry(for: request)

@@ -249,9 +249,16 @@ app.add_middleware(
 #                                  because a user queueing a
 #                                  small album makes several
 #                                  POSTs back-to-back.
-#   /proxy-stream                 : 20/min — each request is one
+#   /audio/{videoId}.m4a         : 20/min — each request is one
 #                                  song; a user skipping a few
-#                                  times lands at 5-10/min.
+#                                  times lands at 5-10/min. (Was
+#                                  /proxy-stream before 2026-08-06
+#                                  S17-H HLS latency fix; the
+#                                  buffering-the-whole-body proxy
+#                                  was removed and the iOS app's
+#                                  cold-play path now goes through
+#                                  /play/{videoId}/playlist.m3u8
+#                                  instead.)
 #   /radio-stations/*, /podcasts/*,
 #   /audiobooks/*                 : 20-30/min — these proxy
 #                                  third-party APIs (RadioBrowser,
@@ -823,7 +830,8 @@ async def stream_audio(video_id: str, request: Request, user: dict = Depends(req
         # full audio URL (including ?token=...). The iOS app
         # extracts the URL and hands it to AVPlayer; AVPlayer
         # fetches with the token in the query string, which
-        # /audio accepts (same pattern as /proxy-stream).
+        # /audio accepts (token-in-query is the standard HLS
+        # auth pattern, same as Apple Music and YouTube Music).
         # Result: one HTTP call to get the URL, no redirect,
         # no 401.
         logger.info(f"/stream/{video_id} → JSON with /audio URL (transcoded AAC)")
@@ -1002,252 +1010,6 @@ async def audio_stream(video_id: str, request: Request):
     except Exception as e:
         logger.exception("Audio transcode failed")
         raise HTTPException(status_code=500, detail=f"Audio transcode failed: {str(e)}")
-
-
-# Proxy stream endpoint - streams through backend to avoid IP issues
-@app.api_route("/proxy-stream/{video_id:path}", methods=["GET", "HEAD"])
-@limiter.limit("20/minute")
-async def proxy_stream_audio(video_id: str, request: Request, quality: str = "high"):
-    """
-    Proxy stream audio through backend.
-    This avoids IP-mismatch issues between backend and iOS client.
-    Uses caching to avoid repeated yt-dlp extractions.
-
-    Query params:
-        quality: "low" for fast start (70kbps), "high" for best quality (160kbps)
-        token:   session JWT — only used as a fallback when the
-                 Authorization header is missing. AVPlayer (a
-                 system component, not URLSession) opens the stream
-                 URL directly and cannot add the iOS app's auth
-                 header, so the iOS code passes the token via
-                 ?token=... instead. See
-                 ios/Sources/APIService.swift#getStreamUrl for the
-                 counterpart.
-    """
-    # S17-H follow-up: AVPlayer can't add the iOS app's Bearer
-    # token to its GET request, so every play was 401-ing and
-    # bubbling up as "Couldn't play this track after multiple
-    # attempts. Skipping to the next one." — the audio never
-    # started. Accept the token from the Authorization header
-    # first (the secure path), and fall back to the ?token=
-    # query param for AVPlayer-initiated requests. The query
-    # path is intentionally scoped to this endpoint so the
-    # token doesn't leak into /search / /library / etc. URLs.
-    auth_header = request.headers.get("Authorization")
-    if not auth_header:
-        query_token = request.query_params.get("token")
-        if query_token:
-            auth_header = f"Bearer {query_token}"
-    user = current_user_from_request(auth_header)
-    if not user:
-        raise HTTPException(status_code=401, detail="unauthorized")
-
-    # Determine preferred format from extension
-    prefer_m4a = video_id.endswith('.m4a')
-    prefer_webm = video_id.endswith('.webm')
-
-    # Strip extension if present
-    if prefer_m4a:
-        video_id = video_id[:-4]
-    elif prefer_webm:
-        video_id = video_id[:-5]
-
-    try:
-        # Check cache first
-        cache = get_cache()
-        stream_data = cache.get(video_id)
-
-        if not stream_data:
-            logger.info(f"Cache miss for {video_id}, fetching from YouTube...")
-            client = get_client()
-            async with ytmusic_lock:
-                stream_data = client.get_stream_url(video_id)
-
-            if not stream_data or not stream_data.get('audio_formats'):
-                raise HTTPException(status_code=404, detail="No audio stream found")
-
-            # Cache the stream data
-            cache.set(video_id, stream_data)
-        else:
-            logger.info(f"Using cached stream data for {video_id}")
-
-        # Sort formats based on quality preference
-        audio_formats = stream_data['audio_formats']
-
-        if quality == "low":
-            # For fast start: prefer lower bitrate, smaller filesize
-            audio_formats.sort(key=lambda x: (
-                x.get('bitrate', 999999),  # Lower bitrate first
-                x.get('filesize', 999999999)  # Smaller file first
-            ))
-            logger.info(f"Using low quality (fast start) for {video_id}")
-        else:
-            # High quality: prefer requested type, then highest bitrate
-            if prefer_m4a:
-                audio_formats.sort(key=lambda x: (
-                    0 if x.get('mime_type') == 'm4a' else 1,
-                    -x.get('bitrate', 0)  # Higher bitrate first
-                ))
-            elif prefer_webm:
-                audio_formats.sort(key=lambda x: (
-                    0 if x.get('mime_type') == 'webm' else 1,
-                    -x.get('bitrate', 0)
-                ))
-            else:
-                audio_formats.sort(key=lambda x: -x.get('bitrate', 0))
-            logger.info(f"Using high quality for {video_id}")
-
-        best = audio_formats[0]
-        stream_url = best['url']
-        mime_type = best.get('mime_type', 'audio/mp4')
-
-        # Fix MIME type for iOS AVPlayer
-        if mime_type in ['m4a', 'audio/m4a', 'audio/x-m4a']:
-            mime_type = 'audio/mp4'
-        elif mime_type == 'webm':
-            mime_type = 'audio/webm'
-
-        logger.info(f"Proxy streaming: {stream_url[:60]}... (mime: {mime_type}, method: {request.method})")
-
-        # Handle HEAD request - AVPlayer probes with HEAD first
-        # Use cached data to avoid round-trip to YouTube
-        if request.method == "HEAD":
-            logger.info("Handling HEAD request (using cached metadata)")
-            response_headers = {
-                'Content-Type': mime_type,
-                'Accept-Ranges': 'bytes',
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Headers': 'Range'
-            }
-
-            content_length = best.get('content_length')
-            if content_length and content_length > 0:
-                response_headers['Content-Length'] = str(content_length)
-
-            logger.info(f"HEAD response headers: {response_headers}")
-            return Response(headers=response_headers, status_code=200)
-
-        # Handle GET request
-        # Headers for YouTube request
-        # S17-H (2026-07-26): YouTube was closing the upstream
-        # connection after a few seconds of streaming, which surfaced
-        # to the iOS app as "Couldn't play this track after multiple
-        # attempts. Skipping to the next one." for every track. The
-        # proxy was sending httpx's default User-Agent
-        # ("python-httpx/0.x.y") which YouTube's bot detection
-        # matches and mid-stream-throttles.
-        #
-        # The stream URL embeds `c=ANDROID_VR` in its query string
-        # — yt-dlp extracted the URL using its Android VR client
-        # config, and the signature is bound to that client's
-        # expected headers. Sending a desktop Chrome UA alongside
-        # an Android-VR-signed URL trips YouTube's bot check (the
-        # client/UA mismatch is exactly what YouTube looks for to
-        # detect re-streaming). Use the matching Android VR UA
-        # (same one yt-dlp's Android VR player config uses).
-        yt_headers = {
-            'User-Agent': 'com.google.android.apps.youtube.vr.oculus/1.55.18 (Linux; U; Android 12; en_US; Quest 2; Build/SQ3A.220605.009.A1; Cronet/114.0.5735.130)',
-            'Referer': 'https://music.youtube.com/',
-            'Accept': '*/*',
-            'Accept-Encoding': 'identity',
-            'Connection': 'keep-alive'
-        }
-
-        # Forward range header from client if present (for seeking)
-        if 'range' in request.headers:
-            yt_headers['Range'] = request.headers['range']
-            logger.info(f"Forwarding Range: {request.headers['range']}")
-
-        # S15: this used to be a synchronous `requests.get(...,
-        # stream=True)` call inside an `async def` route, which
-        # blocks the FastAPI event loop for the entire duration
-        # of the upstream read. With multiple concurrent
-        # /proxy-stream requests, every other request stalls while
-        # the slowest upstream read finishes. Switch to
-        # `httpx.AsyncClient` so the event loop stays responsive.
-        #
-        # S17-H (2026-07-26): the previous version tried
-        # `client.send(..., stream=True)` and yielded chunks via
-        # `StreamingResponse`. That pattern is broken in this
-        # FastAPI handler because the `async with httpx.AsyncClient`
-        # block closes the connection pool on function return —
-        # which kills the upstream YouTube connection while the
-        # body iterator is still trying to read. Every track
-        # surfaced as 0 bytes / StreamClosed / "Skipping to the
-        # next one" on the iPhone.
-        #
-        # The clean fix would be to manage the AsyncClient and
-        # response lifecycle outside the request handler (a
-        # background task or an event-stream that owns the
-        # resources). For now, read the body fully inside the
-        # `async with`, then return it as a regular Response.
-        # The trade-off: no progressive streaming from
-        # YouTube → backend, and a ~3-5 MB per-track memory
-        # spike. For 30-track gapless queueing that's still
-        # fine; the FastAPI worker can afford it.
-        async with httpx.AsyncClient(
-            timeout=httpx.Timeout(
-                connect=STREAM_CONNECT_TIMEOUT,
-                read=STREAM_READ_TIMEOUT,
-                write=STREAM_READ_TIMEOUT,
-                pool=STREAM_CONNECT_TIMEOUT,
-            ),
-            follow_redirects=True,
-        ) as client:
-            upstream_req = client.build_request(
-                "GET", stream_url, headers=yt_headers
-            )
-            r = await client.send(upstream_req)
-            try:
-                r.raise_for_status()
-            except Exception:
-                await r.aclose()
-                raise
-
-            logger.info(
-                f"YouTube response: status={r.status_code}, "
-                f"content-type={r.headers.get('Content-Type')}, "
-                f"length={r.headers.get('Content-Length', 'unknown')}"
-            )
-
-            # Build response headers
-            response_headers = {
-                'Content-Type': mime_type,
-                'Accept-Ranges': 'bytes',
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Headers': 'Range',
-                'Access-Control-Expose-Headers': 'Content-Length, Content-Range'
-            }
-
-            # Forward content length if available
-            if 'Content-Length' in r.headers:
-                response_headers['Content-Length'] = r.headers['Content-Length']
-
-            # Forward content range if available (for partial content)
-            if 'Content-Range' in r.headers:
-                response_headers['Content-Range'] = r.headers['Content-Range']
-
-            logger.info(f"Proxy response headers: {response_headers}")
-
-            # Read the body fully while still inside the AsyncClient
-            # context, then return it. The body lives on as a
-            # bytes blob in the Response; the AsyncClient closes
-            # cleanly on `async with` exit.
-            body = r.content
-            logger.info(f"Read {len(body)} bytes from upstream")
-
-            return Response(
-                content=body,
-                status_code=r.status_code,
-                headers=response_headers,
-                media_type=mime_type
-            )
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception("Proxy stream failed")
-        raise HTTPException(status_code=500, detail=f"Stream failed: {str(e)}")
 
 
 # Prefetch endpoint - fire-and-forget cache warming
@@ -3025,12 +2787,25 @@ async def play_hls_playlist(video_id: str, request: Request):
                 asyncio.create_task(_hls_transcode_worker(video_id, yt_url, done_event))
                 existing = _hls_status(video_id)
 
-    # Wait for the first segment (or timeout).
-    if not await _hls_wait_for_first_segment(video_id, HLS_MAX_WAIT_FOR_FIRST_SEGMENT_S):
-        raise HTTPException(
-            status_code=504,
-            detail=f"Transcode didn't produce a segment within {HLS_MAX_WAIT_FOR_FIRST_SEGMENT_S}s",
-        )
+    # S17-H / HLS (2026-08-06): the old code waited up to
+    # HLS_MAX_WAIT_FOR_FIRST_SEGMENT_S (30s) for the first
+    # segment to appear, then 504'd if yt-dlp + ffmpeg didn't
+    # produce one in time. For long tracks like Pink Floyd's
+    # Echoes (23 min), cold yt-dlp + ffmpeg first-segment can
+    # exceed 30s — the user saw "Couldn't play this track"
+    # before the HLS pipeline ever had a chance to stream.
+    #
+    # New behavior: serve the m3u8 immediately. If ffmpeg has
+    # already written one, serve that. If not, synthesize a
+    # minimal event-style placeholder so AVPlayer can start
+    # polling. Standard HLS live pattern — AVPlayer re-fetches
+    # the m3u8 every ~1s, sees new segments appear as ffmpeg
+    # writes them, and plays them. The segment endpoint
+    # (play_hls_segment) already returns 503 + Retry-After: 1
+    # for not-yet-written segments, so the polling path is robust.
+    m3u8_path = _hls_playlist_path(video_id)
+    if not m3u8_path.exists():
+        return _serve_placeholder_hls_playlist(video_id, request)
 
     # Read the m3u8 from disk and rewrite segment URLs to
     # include the auth token. The m3u8 is being written
@@ -3125,6 +2900,51 @@ def _serve_hls_playlist_with_token(video_id: str, request: Request):
     )
 
 
+def _serve_placeholder_hls_playlist(video_id: str, request: Request):
+    """
+    S17-H / HLS (2026-08-06): synthesize a minimal HLS event-style
+    playlist with zero segments when the transcode hasn't written
+    the m3u8 yet. AVPlayer can start polling immediately; the real
+    playlist (with growing segments) takes over once ffmpeg writes
+    its first m3u8. Standard HLS live pattern.
+
+    The token is appended to the init.mp4 URI so AVPlayer can
+    fetch it once ffmpeg writes it. AVPlayer will hit the existing
+    /play/{videoId}/init.mp4 endpoint, which returns 503 +
+    Retry-After: 1 if not yet written (see play_hls_init below).
+
+    HLS_SEGMENT_TIME (server.py:2726) is 2s, so we set
+    EXT-X-TARGETDURATION:2 to match. EVENT playlist type means
+    the playlist only grows — no segments can be removed from
+    the beginning. VERSION 6 supports fMP4 segments.
+    """
+    from urllib.parse import quote
+    raw_token = request.query_params.get('token', '')
+    token = quote(raw_token, safe='') if raw_token else ''
+
+    init_uri = "init.mp4"
+    if token:
+        init_uri += f"?token={token}"
+
+    body = (
+        "#EXTM3U\n"
+        "#EXT-X-VERSION:6\n"
+        "#EXT-X-TARGETDURATION:2\n"
+        "#EXT-X-MEDIA-SEQUENCE:0\n"
+        "#EXT-X-PLAYLIST-TYPE:EVENT\n"
+        f'#EXT-X-MAP:URI="{init_uri}"\n'
+    )
+
+    return Response(
+        content=body,
+        media_type="application/x-mpegurl",
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Access-Control-Allow-Origin": "*",
+        },
+    )
+
+
 @app.api_route("/play/{video_id}/seg_{n}.m4s", methods=["GET", "HEAD"])
 @limiter.limit("120/minute")  # higher limit: AVPlayer may poll aggressively
 async def play_hls_segment(video_id: str, n: int, request: Request):
@@ -3191,7 +3011,17 @@ async def play_hls_init(video_id: str, request: Request):
 
     init_path = HLS_DIR / video_id / "init.mp4"
     if not init_path.exists():
-        raise HTTPException(status_code=404, detail="init.mp4 not yet written")
+        # S17-H / HLS (2026-08-06): the previous behavior was 404,
+        # which AVPlayer may treat as fatal. ffmpeg writes init.mp4
+        # as part of the HLS output but it lags the m3u8 placeholder
+        # by a few hundred ms (the m3u8 header is written first).
+        # 503 + Retry-After tells AVPlayer "not ready yet, retry
+        # shortly" — same pattern as the segment endpoint at
+        # line 3151. Standard HLS live behavior.
+        return Response(
+            status_code=503,
+            headers={"Retry-After": "1", "Access-Control-Allow-Origin": "*"},
+        )
 
     return FileResponse(
         init_path,
