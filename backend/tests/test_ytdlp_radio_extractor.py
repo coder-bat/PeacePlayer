@@ -232,6 +232,129 @@ class TestRadioEndpointE2E(unittest.TestCase):
         ids = [t.get('videoId') for t in data]
         self.assertNotIn(seed, ids)
 
+    def test_radio_cache_hit_is_fast(self):
+        """Phase 2: the /radio endpoint should cache responses.
+        A second call for the same seed must return in <500ms
+        (cache hit) instead of the ~1.5s yt-dlp call. We use a
+        high threshold (500ms) to avoid flakiness on slow CI."""
+        import urllib.request
+        import json
+        import time
+
+        # Use a less-popular seed that's less likely to be in
+        # the cache from a previous test run. (TEST_SEEDS[2] is
+        # Rick Astley — popular, often cached.)
+        seed = TEST_SEEDS[1]  # Pink Floyd - Piper at the Gates
+
+        def fetch():
+            req = urllib.request.Request(
+                f"{self.BASE_URL}/radio/{seed}",
+                headers={"Authorization": f"Bearer {self.token}"},
+            )
+            t0 = time.monotonic()
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                data = json.loads(resp.read().decode())
+            return data, time.monotonic() - t0
+
+        # First call: cold (may be cache miss or hit, depending on
+        # whether a prior test populated it — that's fine, we're
+        # testing the SECOND call which must be a hit).
+        first, first_dt = fetch()
+        self.assertGreater(len(first), 0, "First call returned no tracks")
+
+        # Second call: should be cache hit. We assert <500ms —
+        # cache hits have been measured at ~50ms.
+        second, second_dt = fetch()
+        self.assertEqual(
+            first, second,
+            "Cache returned different data — cache should be transparent"
+        )
+        self.assertLess(
+            second_dt, 0.5,
+            f"Cache hit took {second_dt*1000:.0f}ms, expected <500ms. "
+            f"Cache may not be wired into the /radio endpoint."
+        )
+
+    def test_radio_cache_stats_accessible(self):
+        """The cache exposes a get_stats() method for monitoring.
+        We hit /radio and confirm the cache has at least one entry."""
+        from radio_cache import get_radio_cache
+        cache = get_radio_cache()
+        before = cache.get_stats()
+        # Hit a fresh seed to ensure something is in the cache
+        import urllib.request
+        import json
+        seed = "dQw4w9WgXcQ"  # Rick Astley — never gonna give you up
+        req = urllib.request.Request(
+            f"{self.BASE_URL}/radio/{seed}",
+            headers={"Authorization": f"Bearer {self.token}"},
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            resp.read()
+        after = cache.get_stats()
+        self.assertGreaterEqual(
+            after['total_entries'], before['total_entries'],
+            f"Cache entries went down after a /radio call: {before} → {after}"
+        )
+        # Confirm the stats dict has the expected keys
+        for key in ('total_entries', 'expired_entries', 'valid_entries',
+                    'max_entries', 'ttl_seconds'):
+            self.assertIn(key, after, f"Cache stats missing key: {key}")
+
+
+class TestRadioCacheUnit(unittest.TestCase):
+    """
+    Unit tests for the radio cache itself (no network).
+    """
+
+    def setUp(self):
+        from radio_cache import RadioCache
+        # Use a tiny cache (3 entries) so we can test LRU eviction
+        # without making 500 requests.
+        self.cache = RadioCache(ttl=60, max_entries=3)
+
+    def test_set_and_get(self):
+        self.cache.set("v1", [{"videoId": "a"}, {"videoId": "b"}])
+        result = self.cache.get("v1")
+        self.assertEqual(result, [{"videoId": "a"}, {"videoId": "b"}])
+
+    def test_empty_set_is_not_cached(self):
+        """Failure responses (empty lists) should NOT be cached —
+        the next call should retry the network."""
+        self.cache.set("v1", [])
+        result = self.cache.get("v1")
+        self.assertIsNone(result, "Empty list was cached; should be treated as failure")
+
+    def test_lru_eviction(self):
+        """When the cache is full, the LEAST-recently-used entry
+        should be evicted on the next set()."""
+        self.cache.set("v1", [{"videoId": "a"}])
+        self.cache.set("v2", [{"videoId": "b"}])
+        self.cache.set("v3", [{"videoId": "c"}])
+        # v1 is now the LRU
+        self.cache.get("v1")  # touch v1 → it's now MRU; v2 is LRU
+        # Insert v4 → v2 should be evicted
+        self.cache.set("v4", [{"videoId": "d"}])
+        self.assertIsNone(self.cache.get("v2"), "LRU entry was not evicted")
+        self.assertIsNotNone(self.cache.get("v1"), "MRU entry was wrongly evicted")
+        self.assertIsNotNone(self.cache.get("v3"))
+        self.assertIsNotNone(self.cache.get("v4"))
+
+    def test_ttl_expiry(self):
+        """Expired entries should be returned as None and removed."""
+        from radio_cache import RadioCache
+        import time as time_module
+        cache = RadioCache(ttl=1, max_entries=10)  # 1 second TTL
+        cache.set("v1", [{"videoId": "a"}])
+        self.assertIsNotNone(cache.get("v1"))
+        time_module.sleep(1.1)
+        self.assertIsNone(cache.get("v1"), "Expired entry was returned")
+
+    def test_invalidate(self):
+        self.cache.set("v1", [{"videoId": "a"}])
+        self.cache.invalidate("v1")
+        self.assertIsNone(self.cache.get("v1"))
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -1516,12 +1516,41 @@ async def get_lyrics(video_id: str, request: Request, user: dict = Depends(requi
 @app.get("/radio/{video_id}")
 @limiter.limit("15/minute")
 async def get_radio(video_id: str, request: Request, user: dict = Depends(require_session_user),):
-    """Get radio playlist based on track."""
+    """
+    Get radio playlist based on track (used by iOS UpNext auto-population).
+
+    S17-H / UpNext-FIX (2026-08-07): wraps the radio cache around the
+    yt-dlp-based get_watch_playlist. The 24h TTL is much longer than
+    stream_cache's 3.5h because radio mixes change slowly — refreshing
+    once a day is plenty. The cache turns repeat /radio calls (user
+    replays the same track, or plays multiple tracks by the same artist
+    whose seeds hit the same RD list) from 1.5s to <50ms.
+
+    The cache is bounded (500 entries, LRU eviction) to keep memory
+    in check. Empty responses are NOT cached — the next call should
+    retry the network request (the cache.set() method enforces this).
+    """
+    from radio_cache import get_radio_cache
+    cache = get_radio_cache()
+
+    # 1) Cache hit: return immediately, skip the yt-dlp call entirely.
+    cached = cache.get(video_id)
+    if cached is not None:
+        return cached
+
+    # 2) Cache miss: fetch from ytmusic client (now yt-dlp backed).
     try:
         client = get_client()
         async with ytmusic_lock:
             tracks = client.get_watch_playlist(video_id)
-        return [TrackResponse(**track).model_dump() for track in tracks]
+        response = [TrackResponse(**track).model_dump() for track in tracks]
+
+        # 3) Cache the response (only if non-empty — empty means
+        # yt-dlp failed and we want the next call to retry).
+        if response:
+            cache.set(video_id, response)
+
+        return response
     except Exception as e:
         logger.error(f"get_radio failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Radio generation failed: {str(e)}")
