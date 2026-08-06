@@ -1450,16 +1450,21 @@ class PlayerState: ObservableObject {
         }
 
         print("🔊 Auto-populating queue...")
-        // S17-H / UpNext-FIX (2026-08-07): removed the explicit
-        // QueuePrefetcher.shared.autoPopulateQueue(...) call. The
-        // prefetcher observes queueStore.$currentIndex (see
-        // QueuePrefetcher.setupPrefetching) and fires
-        // checkAndPrefetch() automatically when play(item:) advances
-        // the index. The explicit call was redundant — and the
-        // `autoPopulateQueue` method itself was removed in the
-        // Phase 4 cleanup commit (5cbc93c) because no other call
-        // sites existed. This is the last call site. Removing it
-        // here keeps the cleanup commit honest.
+        // S17-H / UpNext-FIX-FOLLOWUP (2026-08-07): kick the
+        // QueuePrefetcher explicitly from play(item:). The
+        // Combine subscription to queueStore.$currentIndex is
+        // supposed to do this automatically, but we also call
+        // it directly as a belt-and-suspenders to make the
+        // UpNext guarantee independent of subscription
+        // lifecycle. Without this, the prefetcher relies on
+        // (a) QueuePrefetcher.shared being initialized
+        // somewhere at app startup (added in the previous
+        // commit), and (b) the Combine subscription firing
+        // when currentIndex changes. Both of those work in
+        // isolation but the chain has historically been
+        // brittle — this direct call removes a whole class of
+        // "I forgot to wake the singleton" bugs.
+        QueuePrefetcher.shared.kickPrefetch(for: item.track.videoId)
         #if DEBUG
         PlayCrashDiagnostics.log(.playback, "play(item:) POST-QueuePrefetcher")
         #endif

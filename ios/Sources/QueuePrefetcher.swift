@@ -52,6 +52,40 @@ class QueuePrefetcher: ObservableObject {
         setupPrefetching()
     }
 
+    /// S17-H / UpNext-FIX-FOLLOWUP (2026-08-07): explicit kicker for
+    /// the prefetcher. Called directly from `play(item:)` on
+    /// PlayerState as a belt-and-suspenders alongside the Combine
+    /// subscription to `queueStore.$currentIndex`.
+    ///
+    /// Why both? The Combine subscription has a 100ms debounce
+    /// and only fires on `$currentIndex` emissions. If the
+    /// subscription isn't set up (e.g. someone added a new code
+    /// path that bypasses `setupPrefetching`), the queue would
+    /// stay empty. By calling `kickPrefetch(for:)` directly from
+    /// the play call site, we guarantee the prefetcher runs
+    /// regardless of subscription state.
+    ///
+    /// The prefetcher has its own `isFetching` dedup, so calling
+    /// this while a fetch is in flight is a no-op. Safe to call
+    /// from any play path.
+    func kickPrefetch(for videoId: String) {
+        print("🎵 kickPrefetch: explicit kick for videoId=\(videoId)")
+        // Don't kick if we're already fetching — the in-flight
+        // fetch will pick up the latest state on completion
+        // (well, sort of — see TODO).
+        // Actually, the existing flow always uses the seed it
+        // started with. If the user plays track A, then track B
+        // before A's fetch completes, the in-flight fetch for A
+        // will run to completion and not refetch for B. The
+        // debounce-based subscription handles that case.
+        // For the direct kick: just delegate to the existing
+        // fetch path with a small delay so the queueStore update
+        // has settled.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+            self?.fetchRelatedTracks(for: videoId, appendToQueue: true)
+        }
+    }
+
     // CRITICAL FIX: Cancel fetch timeout timer
     private func cancelFetchTimeout() {
         fetchTimeoutTimer?.invalidate()
