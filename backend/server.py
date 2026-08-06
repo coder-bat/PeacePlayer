@@ -853,7 +853,20 @@ async def stream_audio(video_id: str, request: Request, user: dict = Depends(req
         # auto-detects m3u8 vs m4a from the URL.
         audio_cache_dir = Path('/Users/coderbat/iYMusic/YTAudioSystem/backend/data/audio_cache')
         audio_cache_path = audio_cache_dir / f"{video_id}.m4a"
-        if audio_cache_path.exists() and audio_cache_path.stat().st_size > 1000:
+        # S17-H / HLS-LATENCY (2026-08-06): was `> 1000` (1KB). The
+        # ftyp+empty_moov that ffmpeg writes first is ~28 bytes —
+        # smaller than 1KB. But if the transcode is in progress, the
+        # file can briefly grow past 1KB (first moof+mdat pair is
+        # ~1-2KB), which fooled /stream into routing to /audio before
+        # the file was actually playable. That sent AVPlayer a
+        # half-written MP4, which it failed to decode → "Couldn't
+        # play this track". 50KB ≈ 4 seconds of AAC at 128kbps
+        # plus the ftyp/moov. If the file is smaller than that,
+        # either the transcode hasn't produced anything meaningful
+        # yet, or it's a corrupt partial — route to HLS in both
+        # cases so the user gets progress visibility instead of a
+        # silent half-file.
+        if audio_cache_path.exists() and audio_cache_path.stat().st_size > 50_000:
             # Warm path: direct MP4
             stream_url = f'/audio/{video_id}.m4a?token={quote(token)}'
             mime_type = 'audio/mp4'
