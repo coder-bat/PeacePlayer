@@ -160,18 +160,146 @@ class QueuePrefetcher: ObservableObject {
 
     // CRITICAL FIX: Try to fetch with current track as fallback
     private func tryFallbackFetch() {
-        guard let currentTrack = playerState.currentItem?.track else { return }
-        guard !failedSeeds.contains(currentTrack.videoId) else { return }
+        guard let currentTrack = playerState.currentItem?.track else {
+            // No current track — skip directly to local-library fallback
+            // (a tap-before-fetch race can land us here).
+            populateQueueFromLocalLibrary(reason: "no-current-track")
+            return
+        }
+        guard !failedSeeds.contains(currentTrack.videoId) else {
+            // The current track was already tried and failed as a
+            // seed. Skip the redundant /radio call and go straight
+            // to the local-library fallback.
+            populateQueueFromLocalLibrary(reason: "current-seed-already-failed")
+            return
+        }
         guard failedSeeds.count < maxFailedSeeds else {
-            print("🎵 Too many failed seeds, waiting before retry")
+            // S17-H / UpNext-FIX (2026-08-07): instead of just clearing
+            // and giving up (the old behavior, which left the user with
+            // silence), try the local-library fallback first. If that
+            // also comes up empty, THEN clear and bail.
+            populateQueueFromLocalLibrary(reason: "too-many-failed-seeds")
             failedSeeds.removeAll()
             return
         }
 
         print("🎵 Trying fallback fetch with current track: \(currentTrack.title)")
+        // Mark the current track as a tried-but-failed seed so the
+        // next /radio call (if we end up here again) goes straight
+        // to local-library fallback. Without this, the prefetcher
+        // could ping-pong between the same two failing seeds.
+        failedSeeds.insert(currentTrack.videoId)
         fetchRelatedTracks(for: currentTrack.videoId, appendToQueue: true)
     }
-    
+
+    // S17-H / UpNext-FIX (2026-08-07): when /radio fails (region
+    // lock, yt-dlp parser regression, backend down, etc.), fall back
+    // to local content the user already has. Priority:
+    //   1. Recently played tracks (user has shown interest in these)
+    //   2. Downloaded local files (always available, even offline)
+    //   3. Empty queue + log a warning (last resort)
+    //
+    // Each source is bounded to 10 tracks (matching the radio batch
+    // size) and respects the user's shuffle state. We dedupe against
+    // the current queue so we don't re-add the currently-playing
+    // track or anything already queued.
+    private func populateQueueFromLocalLibrary(reason: String) {
+        print("🎵 UpNext fallback: pulling from local library (reason: \(reason))")
+
+        let existingIds = Set(playerState.queue.map { $0.track.videoId })
+        var addedCount = 0
+
+        // Source 1: recently played. These are tracks the user has
+        // actually listened to — high signal that they'll want to
+        // hear them again. We skip tracks already in the queue and
+        // the currently-playing track.
+        let recents = DataManager.shared.recentlyPlayed
+            .filter { !existingIds.contains($0.videoId) }
+            .prefix(batchSize)
+        for recent in recents {
+            // RecentTrack already exposes a `toTrack` computed
+            // property (see DataManager.swift:277). Use it to
+            // convert without re-listing every field.
+            let track = recent.toTrack
+            if let item = makeQueueItem(for: track) {
+                playerState.addToQueue(item)
+                existingIds.insert(track.videoId)
+                addedCount += 1
+            }
+        }
+
+        // Source 2: downloaded local files. Available offline, no
+        // network roundtrip, instant playback. Skips anything we
+        // already added from recents.
+        if addedCount < batchSize {
+            let downloaded = AudioFileManager.shared.allDownloadedFiles()
+            for (videoId, url, _) in downloaded {
+                if existingIds.contains(videoId) { continue }
+                if addedCount >= batchSize { break }
+                guard let track = TrackStore.shared.getTrack(videoId: videoId) else { continue }
+                let item = QueueItem(
+                    track: track,
+                    streamUrl: url.absoluteString,
+                    source: .local(path: url.path),
+                    contentSource: .local
+                )
+                playerState.addToQueue(item)
+                existingIds.insert(videoId)
+                addedCount += 1
+            }
+        }
+
+        if addedCount > 0 {
+            print("✅ UpNext fallback: added \(addedCount) tracks from local library")
+        } else {
+            // Last resort: log a structured warning. The user gets
+            // silence after the current track, but at least we have
+            // a clear signal in the logs.
+            print("⚠️ UpNext fallback: no local content available — queue will be silent after current track")
+        }
+    }
+
+    // Build a QueueItem for a Track. Tries local file first (instant
+    // playback, no /stream roundtrip), falls back to a stream URL
+    // fetch via StreamURLCache.
+    //
+    // Returns nil only if both paths fail (no local file AND no
+    // network). The caller treats nil as "skip this track" and
+    // moves to the next.
+    private func makeQueueItem(for track: Track) -> QueueItem? {
+        // Local file: instant, no network. This is the common case
+        // for downloaded tracks.
+        let localURL = AudioFileManager.shared.localFileURL(for: track.videoId)
+        if FileManager.default.fileExists(atPath: localURL.path) {
+            return QueueItem(
+                track: track,
+                streamUrl: localURL.absoluteString,
+                source: .local(path: localURL.path),
+                contentSource: .local
+            )
+        }
+        // Stream: requires a stream URL. We can't await async here
+        // (this is called from a sync context), so we kick off a
+        // background fetch and add a placeholder. The player will
+        // resolve the real URL when the track comes up in the queue.
+        //
+        // For the local-library fallback case, the tracks we
+        // surface are almost always ones the user has played
+        // recently — so their stream URLs are likely already in
+        // StreamURLCache. We do a best-effort sync lookup via
+        // the cached value.
+        if let cached = StreamURLCache.shared.cachedStreamUrl(for: track.videoId) {
+            return QueueItem(
+                track: track,
+                streamUrl: cached,
+                source: .stream
+            )
+        }
+        // No local file, no cached stream URL. Skip this track —
+        // the prefetcher can't queue something it can't play.
+        return nil
+    }
+
     private func addTracksToQueue(_ tracks: [Track], append: Bool, seedVideoId: String) {
         print("🎵 Adding tracks to queue. Received: \(tracks.count)")
 

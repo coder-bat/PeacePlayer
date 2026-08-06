@@ -79,6 +79,43 @@ class StreamURLCache {
 
     // MARK: - Public API
 
+    /// S17-H / UpNext-FIX (2026-08-07): synchronous lookup of a
+    /// cached stream URL. Returns the URL string if the memory or
+    /// disk cache has a non-expired entry for this videoId, or
+    /// nil otherwise. Used by the QueuePrefetcher's local-library
+    /// fallback to convert a recently-played track into a
+    /// playable QueueItem without firing a /stream roundtrip.
+    ///
+    /// This is the SYNC counterpart to `getStreamUrl(...)`. The
+    /// async version kicks off a network fetch on miss; this one
+    /// just returns nil. The prefetcher filters out nil items
+    /// and the player will fetch the real URL when the track
+    /// comes up in the queue anyway.
+    func cachedStreamUrl(for videoId: String) -> String? {
+        let keyRaw = cacheKey(for: videoId)
+        if let wrapper = memoryCache.object(forKey: keyRaw), !wrapper.isExpired {
+            return wrapper.streamInfo.streamUrl
+        }
+        if let wrapper = loadFromDisk(key: keyRaw), !wrapper.isExpired {
+            // Warm memory cache for next time
+            memoryCache.setObject(wrapper, forKey: keyRaw)
+            return wrapper.streamInfo.streamUrl
+        }
+        return nil
+    }
+
+    /// Build the cache key for a videoId. The key folds
+    /// (baseURL, token, videoId) together so any change to the
+    /// backend host, JWT, or video auto-invalidates the cache.
+    /// See the long comment in getStreamUrl() above for the
+    /// full reasoning — this is just the shared helper.
+    private func cacheKey(for videoId: String) -> NSString {
+        let baseURL = APIService.shared.baseURL
+        let token = KeychainHelper.shared.read(APIService.authTokenKeychainKey) ?? ""
+        let tokenHash = String(token.hashValue)
+        return "\(baseURL)|\(tokenHash)|\(videoId)" as NSString
+    }
+
     /// Drop-in replacement for `APIService.shared.getStreamUrl`.
     /// Returns cached value immediately if available; otherwise fetches,
     /// caches, and shares the result across concurrent callers.
@@ -106,10 +143,7 @@ class StreamURLCache {
         // change. The token is hashed (not stored in the key
         // string) so a logout doesn't leave a JWT in the file
         // system cache filenames.
-        let baseURL = APIService.shared.baseURL
-        let token = KeychainHelper.shared.read(APIService.authTokenKeychainKey) ?? ""
-        let tokenHash = String(token.hashValue)
-        let keyRaw = "\(baseURL)|\(tokenHash)|\(videoId)" as NSString
+        let keyRaw = self.cacheKey(for: videoId)
 
         if let wrapper = memoryCache.object(forKey: keyRaw), !wrapper.isExpired {
             return Just(wrapper.streamInfo)
