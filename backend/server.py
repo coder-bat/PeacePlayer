@@ -2887,11 +2887,16 @@ async def play_hls_playlist(video_id: str, request: Request):
     # before the HLS pipeline ever had a chance to stream.
     #
     # New behavior: serve the m3u8 immediately. If ffmpeg has
-    # already written one, serve that. If not, briefly poll
-    # for the first appearance (up to 1.5s) — ffmpeg typically
-    # writes the m3u8 header within ~100ms of starting. Only
-    # fall back to the synthesized placeholder if the real
-    # m3u8 hasn't materialized yet.
+    # already written one, serve that. If not, return the
+    # synthesized placeholder right away.
+    #
+    # Earlier this endpoint had a 1.5s "poll for ffmpeg to
+    # start" that cost up to 1.5s on every cold play. The
+    # iOS app's AVPlayer polls the m3u8 every ~1s as part of
+    # the HLS live pattern anyway, so the poll just added
+    # latency without buying anything. Removed 2026-08-06 after
+    # cold-play profiling showed the 1.5s was 30% of the time
+    # to first audio.
     #
     # The placeholder MUST include a seg_000 reference. Without
     # it, AVPlayer parses the EVENT playlist, sees zero
@@ -2901,13 +2906,6 @@ async def play_hls_playlist(video_id: str, request: Request):
     # Retry-After on the segment endpoint is what keeps AVPlayer
     # retrying until the real segment lands.
     m3u8_path = _hls_playlist_path(video_id)
-    if not m3u8_path.exists():
-        # Brief poll for ffmpeg's m3u8 to appear (typical: 100-500ms)
-        deadline = time.monotonic() + 1.5
-        while time.monotonic() < deadline:
-            if m3u8_path.exists():
-                break
-            await asyncio.sleep(0.05)
     if not m3u8_path.exists():
         return _serve_placeholder_hls_playlist(video_id, request)
 
