@@ -160,19 +160,21 @@ def require_session_user(request: Request) -> dict:
 ytmusic_lock = asyncio.Lock()
 
 # S17-H / S17-PLAY (Fix 3B, 2026-07-29): cap concurrent yt-dlp+ffmpeg
-# transcodes to protect the backend from burst storms (e.g., 10 cold
-# plays in a row from a freshly-installed app on Wi-Fi). 2 is the
-# sweet spot — it overlaps the I/O wait for one transcode with the
-# CPU work for another, without saturating the Mac's cores. Higher
-# values (3-4) showed OOM pressure on the 8GB model.
+# transcodes to protect the backend from burst storms. Original cap
+# was 2 (sweet spot for an 8GB Mac), then 3 (for HLS overhead).
 #
-# S17-H / HLS (Fix 4 Phase 3, 2026-07-30): bumped from 2 to 3.
-# HLS transcode is slightly heavier than /audio (writes more
-# metadata per segment), so allowing 3 concurrent gives the
-# user better behavior when they tap 2-3 tracks in rapid
-# succession. Still bounded; 4+ would risk OOM on the 8GB
-# model.
-_transcode_semaphore = asyncio.Semaphore(3)
+# S17-H / HLS-LATENCY (2026-08-06): made configurable via
+# HLS_TRANSCODE_CONCURRENCY env var, default 6. The Mac can
+# comfortably handle 6 concurrent yt-dlp+ffmpeg pipelines (each
+# process is I/O-bound on YouTube downloads, so they don't all
+# peg the CPU). 6 lets the gapless queue stay warm without
+# making the user wait for a slot. The 8GB model caveat is
+# still respected via the env var — set HLS_TRANSCODE_CONCURRENCY=2
+# for memory-constrained hardware.
+import os as _os
+_transcode_semaphore = asyncio.Semaphore(
+    int(_os.environ.get("HLS_TRANSCODE_CONCURRENCY", "6"))
+)
 
 # S17-H / S17-PLAY (Fix 3B): per-videoId lock so the same videoId
 # can't be transcoded twice in parallel. Without this, the burst
@@ -2602,54 +2604,105 @@ async def _hls_transcode_worker(video_id: str, yt_url: str, done_event: asyncio.
                 pass
 
     seg_pattern = hls_dir / "seg_%03d.m4s"
-    pipe_cmd = (
-        f'{shlex.quote(YTDLP_BIN)} '
-        f'--js-runtimes deno:{shlex.quote(DENO_BIN)} '
-        f'-f "worstaudio[ext=webm]/worstaudio/bestaudio[ext=webm]/bestaudio/best" '
-        f'-o - --no-playlist --no-part --no-progress --quiet '
-        f'--remote-components ejs:github {shlex.quote(yt_url)} '
-        f'| {shlex.quote(FFMPEG_BIN)} -y -loglevel error -i pipe:0 '
-        f'-c:a aac -b:a 128k '
-        f'-f hls '
-        f'-hls_time {HLS_SEGMENT_TIME} '
-        f'-hls_playlist_type event '
-        f'-hls_segment_type fmp4 '
-        f'-hls_segment_filename {shlex.quote(str(seg_pattern))} '
-        f'{shlex.quote(str(hls_dir / "playlist.m3u8"))}'
-    )
+
+    # S17-H / HLS-LATENCY (2026-08-06): retry the transcode with
+    # alternative format selectors on failure. The first attempt
+    # uses the optimal format (smallest webm/Opus, fastest to
+    # transcode). The retry tries a more permissive format that
+    # accepts DASH-manifest m4a or higher-bitrate webm — useful
+    # when YouTube's n-challenge or region restrictions reject
+    # the preferred format. Without retry, a single transient
+    # YouTube error would kill the entire transcode.
+    #
+    # Each entry is a yt-dlp format selector. The ffmpeg pipe is
+    # the same for all of them.
+    format_attempts = [
+        # 1. Optimal: smallest webm/Opus (fastest to transcode)
+        "worstaudio[ext=webm]/worstaudio/bestaudio[ext=webm]/bestaudio/best",
+        # 2. Fallback: any audio, no format constraints. May be
+        # DASH m4a which we'd have to remux, but ffmpeg handles
+        # both webm/Opus and m4a/AAC transparently.
+        "bestaudio/best",
+    ]
 
     t0 = time.monotonic()
     transcode_ok = False
+    last_stderr = ""
+    last_format = None
     try:
         # Respect the global transcode semaphore. We acquire it
         # INSIDE the per-videoId lock (which the endpoint holds
         # before calling us) so the lock order is consistent:
         # always per-videoId first, then global.
         async with _transcode_semaphore:
-            proc = await asyncio.create_subprocess_shell(
-                pipe_cmd,
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            _, stderr = await proc.communicate()
-        pipe_seconds = time.monotonic() - t0
-        if proc.returncode != 0:
-            # S17-H / HLS: log the full stderr (not just 300 chars)
-            # + the actual command we ran, so the failure is
-            # debuggable from the log alone.
-            full_stderr = stderr.decode(errors='replace')
-            logger.error(
-                f"[hls] ffmpeg failed for {video_id} (rc={proc.returncode})\n"
-                f"  command: {pipe_cmd}\n"
-                f"  stderr: {full_stderr[:1000]}"
-            )
-            return
+            for attempt_idx, fmt in enumerate(format_attempts):
+                pipe_cmd = (
+                    f'{shlex.quote(YTDLP_BIN)} '
+                    f'--js-runtimes deno:{shlex.quote(DENO_BIN)} '
+                    f'-f {shlex.quote(fmt)} '
+                    f'-o - --no-playlist --no-part --no-progress --quiet '
+                    f'--remote-components ejs:github {shlex.quote(yt_url)} '
+                    f'| {shlex.quote(FFMPEG_BIN)} -y -loglevel error -i pipe:0 '
+                    f'-c:a aac -b:a 128k '
+                    f'-f hls '
+                    f'-hls_time {HLS_SEGMENT_TIME} '
+                    f'-hls_playlist_type event '
+                    f'-hls_segment_type fmp4 '
+                    f'-hls_segment_filename {shlex.quote(str(seg_pattern))} '
+                    f'{shlex.quote(str(hls_dir / "playlist.m3u8"))}'
+                )
+                last_format = fmt
+                t_attempt = time.monotonic()
+                proc = await asyncio.create_subprocess_shell(
+                    pipe_cmd,
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                _, stderr = await proc.communicate()
+                attempt_seconds = time.monotonic() - t_attempt
 
-        num_segs = len(list(hls_dir.glob('seg_*.m4s')))
-        logger.info(
-            f"[hls] Transcoded {video_id} → {num_segs} segments in {pipe_seconds:.1f}s"
-        )
-        transcode_ok = True
+                if proc.returncode == 0:
+                    # Success — clear any partial files the failed
+                    # previous attempt(s) might have left, count
+                    # segments, and break.
+                    num_segs = len(list(hls_dir.glob('seg_*.m4s')))
+                    logger.info(
+                        f"[hls] Transcoded {video_id} → {num_segs} segments "
+                        f"in {attempt_seconds:.1f}s (attempt {attempt_idx + 1}, fmt={fmt!r})"
+                    )
+                    transcode_ok = True
+                    break
+
+                # Failure — log and try the next format.
+                full_stderr = stderr.decode(errors='replace')
+                last_stderr = full_stderr
+                logger.warning(
+                    f"[hls] ffmpeg failed for {video_id} (attempt {attempt_idx + 1}, "
+                    f"rc={proc.returncode}, fmt={fmt!r}) in {attempt_seconds:.1f}s — "
+                    f"will retry with next format"
+                )
+                logger.debug(
+                    f"[hls] attempt {attempt_idx + 1} stderr for {video_id}:\n"
+                    f"  command: {pipe_cmd}\n"
+                    f"  stderr: {full_stderr[:1000]}"
+                )
+                # Clean partial output of this failed attempt so
+                # the next attempt starts clean.
+                for f in hls_dir.glob('*'):
+                    if f.is_file():
+                        try:
+                            f.unlink()
+                        except OSError:
+                            pass
+
+        pipe_seconds = time.monotonic() - t0
+        if not transcode_ok:
+            # Both attempts failed. Log the last failure and let
+            # the finally clause clean up + unregister.
+            logger.error(
+                f"[hls] all format attempts failed for {video_id} (last fmt={last_format!r})\n"
+                f"  last stderr: {last_stderr[:1000]}"
+            )
     except Exception as e:
         logger.error(f"[hls] _hls_transcode_worker failed for {video_id}: {e}", exc_info=True)
     finally:

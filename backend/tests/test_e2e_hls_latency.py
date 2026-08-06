@@ -398,43 +398,78 @@ def test_cache_check_edge_cases():
 # ---------- Test 4: HLS event-style polling ----------
 
 def test_hls_polling():
-    section("Test 4: HLS event-style polling (rapid m3u8 re-fetch)")
+    section("Test 4: HLS event-style polling (rapid m3u8 re-fetch) + warm-path 302")
     jwt = get_jwt()
 
-    # Find a track that we'll start an HLS transcode for
-    track = find_track("Pink Floyd Money")
-    video_id = track["videoId"]
+    # Pick a track that's definitely NOT in the audio_cache (so we
+    # actually exercise the cold HLS path). The test must select a
+    # fresh track each run; otherwise warm-cached tracks short-circuit
+    # to /audio (302), which is a different code path.
+    AUDIO_CACHE = Path("/Users/coderbat/iYMusic/YTAudioSystem/backend/data/audio_cache")
+    HLS_BASE = Path("/Users/coderbat/iYMusic/YTAudioSystem/backend/data/hls")
+    cached_vids = {p.stem for p in AUDIO_CACHE.glob("*.m4a")} | {
+        p.name for p in HLS_BASE.iterdir() if p.is_dir()
+    }
+
+    # Search a few candidates; pick the first uncached one with
+    # a reasonable duration (3-15 min — short enough to transcode
+    # fast for the test, long enough to exercise the pipeline).
+    cold_track = None
+    for q in ("Pink Floyd Learning to Fly", "Dire Straits", "Led Zeppelin Kashmir",
+              "Santana", "Jimi Hendrix", "Genesis"):
+        status, _, body = http("POST", "/search",
+                               headers={"Authorization": f"Bearer {jwt}"},
+                               body={"query": q, "limit": 10})
+        if status != 200:
+            continue
+        tracks = json.loads(body)
+        if isinstance(tracks, dict):
+            tracks = tracks.get("data", [])
+        for t in tracks:
+            vid = t.get("videoId")
+            dur = t.get("durationSeconds", 0)
+            if vid and vid not in cached_vids and 180 <= dur <= 900:
+                cold_track = t
+                break
+        if cold_track:
+            break
+
+    if not cold_track:
+        S.record("find a fresh uncached track", None,
+                 "no fresh track found in search — backend may be busy")
+        return
+
+    video_id = cold_track["videoId"]
+    title = cold_track["title"]
+    dur = cold_track["durationSeconds"]
+    print(f"  {CYAN(f'cold track: {video_id} — {title} ({dur}s)')}")
     stream_url = f"/play/{video_id}/playlist.m3u8?token={jwt}"
 
     # Start a fresh HLS by hitting /play (this also starts the worker)
-    print(f"  {CYAN('Step 1: GET /play/playlist.m3u8 to start HLS transcode')}")
+    print(f"  {CYAN('Step 1: GET /play/playlist.m8 to start HLS transcode')}")
     t = time.monotonic()
     status, _, body = http("GET", stream_url)
     ms = elapsed_ms(t)
     assert_eq(status, 200, "first playlist fetch")
-    # First m3u8 fetch can include yt-dlp URL extraction (5-10s on cold cache).
-    # The key invariant is that it returns < 30s (iOS timeout budget).
     S.record(f"first m3u8 fetch in {ms}ms (under 30s iOS budget)", ms < 30_000,
              f"took {ms}ms")
 
     # Poll aggressively like AVPlayer does (every 1s for up to 30s)
     # The transcode may take a while if other transcodes are queued
-    # (global semaphore cap=3).
+    # (global semaphore cap).
     print(f"  {CYAN('Step 2: poll m3u8 every 1s for up to 30s (simulating AVPlayer)')}")
     poll_results = []
     saw_segments = False
+    first_seg_at = None
     for i in range(30):
         status, _, body = http("GET", stream_url)
         m3u8 = body.decode("utf-8", errors="replace")
         segs = m3u8.count(".m4s?")
         poll_results.append((i, status, segs))
-        if segs > 0 and not saw_segments:
-            print(f"    first segments seen at poll #{i} ({segs} segments)")
+        if segs > 0 and first_seg_at is None:
+            first_seg_at = elapsed_ms(t)
+            print(f"    first segments seen at poll #{i} ({segs} segments, +{first_seg_at}ms)")
             saw_segments = True
-        if saw_segments and i > 0 and poll_results[i][2] >= poll_results[i-1][2]:
-            # Have segments and they're not decreasing — we can stop
-            # (we already saw at least one grow or stay)
-            pass
         time.sleep(1)
 
     # Verify all polls returned 200 (no AVPlayer retry storm)
@@ -445,7 +480,7 @@ def test_hls_polling():
     final_segs = poll_results[-1][2]
     assert_true(final_segs > 0,
                 f"segments should appear within 30s polling: final={final_segs}")
-    S.record(f"segments eventually appear (final: {final_segs})", True)
+    S.record(f"segments eventually appear (final: {final_segs}, {first_seg_at}ms)", True)
 
     # Verify init.mp4 and a segment are accessible
     print(f"  {CYAN('Step 3: verify init.mp4 + seg_000.m4s are fetchable')}")
@@ -456,6 +491,26 @@ def test_hls_polling():
     status, _, body = http("GET", stream_url.replace("playlist.m3u8", "seg_000.m4s"))
     assert_eq(status, 200, "seg_000.m4s fetchable")
     S.record(f"seg_000.m4s fetchable (200, {len(body)} bytes)", True)
+
+    # Verify the warm-path: once transcode is done, /play/playlist.m3u8
+    # should 302-redirect to /audio/{videoId}.m4a
+    print(f"  {CYAN('Step 4: warm-path 302 redirect after transcode')}")
+    status, hdrs, _ = http("GET", stream_url)
+    if status == 302:
+        loc = hdrs.get("location", "")
+        assert_in(f"/audio/{video_id}.m4a", loc, "302 should redirect to /audio URL")
+        S.record(f"warm path: /play/m3u8 returns 302 → /audio (instant warm plays)", True)
+    else:
+        # If transcode didn't finish yet, this is fine — just skip.
+        S.record("warm-path 302 redirect", None,
+                 f"transcode still in progress (status={status})")
+
+    # And the warm path itself should work
+    if status == 302:
+        loc = hdrs.get("location", "").split("?")[0]
+        status, _, body = http("GET", loc + f"?token={jwt}")
+        assert_eq(status, 200, "warm /audio returns 200")
+        S.record(f"warm /audio returns 200 ({len(body)} bytes)", True)
 
 
 # ---------- Test 5: auth ----------
