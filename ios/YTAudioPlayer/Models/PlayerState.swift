@@ -767,25 +767,22 @@ class PlayerState: ObservableObject {
         PlayerStateAccessor.register(self)
         #endif
 
-        // S17-H / UpNext-FIX-FOLLOWUP (2026-08-07): kick the
-        // QueuePrefetcher. `QueuePrefetcher.shared` is a `static
-        // let` — it only runs its `init()` (which sets up the
-        // `queueStore.$currentIndex` subscription and the
-        // `checkAndPrefetch` Combine chain) the first time it's
-        // accessed. Before this line, the only consumer of
-        // `QueuePrefetcher.shared` was `AdaptiveWalkDJManager`,
-        // which is a niche feature. Plain `play(item:)` taps (the
-        // 99% case) never accessed `.shared`, so the prefetcher's
-        // `init()` never ran, the Combine subscription was never
-        // set up, and the UpNext queue stayed empty.
+        // S17-H / UpNext-FIX-FOLLOWUP (2026-08-07, REVERTED):
+        // DON'T touch `QueuePrefetcher.shared` here. QueuePrefetcher's
+        // own init does `private let playerState = PlayerState.shared`,
+        // which calls `dispatch_once_wait` for the same `PlayerState.shared`
+        // token we're currently inside of. On a single-threaded init
+        // chain (WalkDJAppDelegate → LiveActivityManager → PlayerState),
+        // `_dispatch_once_wait` re-entering the same token HANGs the
+        // process — verified in the 18:43 crash report, instant SIGTRAP
+        // from dispatch_once.
         //
-        // We touch `.shared` here so the prefetcher's
-        // `setupPrefetching()` runs as part of PlayerState's
-        // singleton init — which happens at app launch when
-        // anything first reads `PlayerState.shared`. No-op for
-        // already-running prefetchers (init is guarded by the
-        // `static let` semantics).
-        _ = QueuePrefetcher.shared
+        // The kickPrefetch call in play(item:) (see below) is the
+        // canonical wake-up. It runs after PlayerState is fully
+        // initialized, so QueuePrefetcher can access PlayerState.shared
+        // without the cycle. First play() call initializes the
+        // prefetcher; subsequent calls hit the same already-initialized
+        // instance.
     }
     
     @objc private func handleMemoryWarning() {
