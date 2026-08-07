@@ -9,6 +9,7 @@ import os
 import subprocess
 import tempfile
 import shutil
+import time
 from pathlib import Path
 from typing import Optional, Dict, List
 import logging
@@ -189,7 +190,21 @@ class AudioExtractor:
     def _download_stream(self, url: str, output_path: Path) -> None:
         """
         Download stream from URL to file.
-        
+
+        S17-H / DOWNLOAD-CDN-FIX (2026-08-07): YouTube's CDN throttles
+        long-lived HTTP/1.1 connections — a full unresumed download
+        stalls mid-stream at ~1.8-2.5MB even though the server returns
+        Content-Length: 3.4MB. The truncated file gets passed to
+        ffmpeg, which produces a partial .m4a; iOS plays the first
+        few seconds then stops. Symptom in the iOS app: "downloaded
+        in KBs" + "only first segment played".
+
+        YouTube also rate-limits yt-dlp's native downloader to
+        ~31KB/s on this network (3.4MB takes 100s+). The Range-
+        chunked download we use here downloads 1MB per request in
+        ~90ms each, completing the full file in <500ms — about
+        200× faster than yt-dlp's default downloader.
+
         Args:
             url: Direct stream URL
             output_path: Where to save
@@ -197,13 +212,57 @@ class AudioExtractor:
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         }
-        
-        with requests.get(url, headers=headers, stream=True, timeout=30) as r:
-            r.raise_for_status()
-            with open(output_path, 'wb') as f:
-                for chunk in r.iter_content(chunk_size=8192):
-                    if chunk:
-                        f.write(chunk)
+
+        # Primary path: Range-based chunked download. We do an initial
+        # `Range: bytes=0-0` request to get Content-Range (which
+        # includes the total file size), then loop over 1MB ranges.
+        # YouTube's CDN rejects HEAD requests with 403, so we have
+        # to use a 1-byte Range request as our size probe. Each chunk
+        # is short-lived (~90ms for 1MB) so YouTube's connection
+        # throttle doesn't kick in.
+        with requests.get(
+            url,
+            headers={**headers, 'Range': 'bytes=0-0'},
+            timeout=10,
+        ) as probe:
+            probe.raise_for_status()
+            cr = probe.headers.get('Content-Range', '')
+            # Content-Range: bytes 0-0/3433755
+            if '/' not in cr:
+                raise RuntimeError(
+                    f"Could not determine Content-Length for {url[:80]} "
+                    f"(no Content-Range in response)"
+                )
+            total = int(cr.split('/')[-1])
+            if total == 0:
+                raise RuntimeError(
+                    f"Could not determine Content-Length for {url[:80]}"
+                )
+
+        logger.info(
+            f"Downloading {total} bytes via Range chunks"
+        )
+        chunk_size = 1 * 1024 * 1024  # 1MB
+        downloaded = 0
+        start = time.monotonic()
+        with open(output_path, 'wb') as f:
+            while downloaded < total:
+                end = min(downloaded + chunk_size - 1, total - 1)
+                with requests.get(
+                    url,
+                    headers={**headers, 'Range': f'bytes={downloaded}-{end}'},
+                    timeout=10,
+                ) as r:
+                    r.raise_for_status()
+                    for chunk in r.iter_content(chunk_size=8192):
+                        if chunk:
+                            f.write(chunk)
+                            downloaded += len(chunk)
+        elapsed = time.monotonic() - start
+        rate = total / elapsed / 1024 if elapsed > 0 else 0
+        logger.info(
+            f"Downloaded {total} bytes in {elapsed:.2f}s ({rate:.0f} KB/s)"
+        )
     
     def _convert_to_m4a(
         self,
