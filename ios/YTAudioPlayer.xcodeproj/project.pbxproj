@@ -152,6 +152,8 @@
 		E685DA1EA5DF80F815DB1AFF /* SearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F66019926050AB739EEF25E /* SearchView.swift */; };
 		E86A578CA391F693A6B3752B /* YTAudioPlayerApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0080BED852F91FC0AFA9DE17 /* YTAudioPlayerApp.swift */; };
 		EBDE2725CE5CAA3CC9DBD44F /* DataManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19520AA0983D814BCB1EF105 /* DataManager.swift */; };
+		D1E0F0B10000000000000B01 /* DeepLinkIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1E0F0B10000000000000F01 /* DeepLinkIndex.swift */; };
+		D1E0F0B10000000000000B02 /* DeepLinkIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1E0F0B10000000000000F02 /* DeepLinkIntent.swift */; };
 		ECD0697915EEBFC3863ACFD1 /* PlayerState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12DF773336B5A83BFF1FC347 /* PlayerState.swift */; };
 		F177621963F5E3574084132A /* BackgroundDownloadService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DCF0DCA618422606DA43580 /* BackgroundDownloadService.swift */; };
 		F1BDDD059138B2D12ACD1238 /* DownloadQueueView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC0F1A4A8D19C80A2DFBE1FB /* DownloadQueueView.swift */; };
@@ -208,6 +210,8 @@
 		18CB5E604384AA12AE84E2D5 /* AddToPlaylistSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddToPlaylistSheet.swift; sourceTree = "<group>"; };
 		18E15FD0563E96D55099054E /* LyricsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LyricsView.swift; sourceTree = "<group>"; };
 		19520AA0983D814BCB1EF105 /* DataManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DataManager.swift; sourceTree = "<group>"; };
+		D1E0F0B10000000000000F01 /* DeepLinkIndex.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeepLinkIndex.swift; sourceTree = "<group>"; };
+		D1E0F0B10000000000000F02 /* DeepLinkIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeepLinkIntent.swift; sourceTree = "<group>"; };
 		1A4D4641A6DFB5120002B115 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		1ABDD1EC6042FE4A7F590CA1 /* ChordsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChordsView.swift; sourceTree = "<group>"; };
 		1AD3F94F37ADACD364BBCA1A /* LibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryView.swift; sourceTree = "<group>"; };
@@ -473,6 +477,8 @@
 				4DCF0DCA618422606DA43580 /* BackgroundDownloadService.swift */,
 				0449744B02B62A5111EBC52F /* CrossfadeManager.swift */,
 				19520AA0983D814BCB1EF105 /* DataManager.swift */,
+				D1E0F0B10000000000000F01 /* DeepLinkIndex.swift */,
+				D1E0F0B10000000000000F02 /* DeepLinkIntent.swift */,
 				BBE97B2112349FC1878F32F2 /* DataMigrationService.swift */,
 				81EA1A4BB116D2F93B0F6583 /* DownloadManager.swift */,
 				76677939C02D48D7D20B2C63 /* ErrorHandler.swift */,
@@ -791,6 +797,8 @@
 				3C5431D4CD06B675A98D0183 /* CreatePlaylistSheet.swift in Sources */,
 				A0BB41434C68A9DA9C7045AD /* CrossfadeManager.swift in Sources */,
 				EBDE2725CE5CAA3CC9DBD44F /* DataManager.swift in Sources */,
+				D1E0F0B10000000000000B01 /* DeepLinkIndex.swift in Sources */,
+				D1E0F0B10000000000000B02 /* DeepLinkIntent.swift in Sources */,
 				71A8BD06A9F42E4975F48413 /* DataMigrationService.swift in Sources */,
 				571D3F2F6C4A72685CCB351C /* DownloadManager.swift in Sources */,
 				F1BDDD059138B2D12ACD1238 /* DownloadQueueView.swift in Sources */,

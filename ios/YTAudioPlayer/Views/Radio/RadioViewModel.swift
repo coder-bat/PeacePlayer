@@ -110,6 +110,11 @@ class RadioViewModel: ObservableObject {
                 }
             }, receiveValue: { [weak self] stations in
                 self?.topStations = stations
+                // S18 / v1.6 / P1-5: cache for deep-link resolution.
+                // peaceplayer://radio/{stationId} looks up by stationuuid;
+                // without this cache the route is a silent no-op unless
+                // the user is currently sitting on the Radio tab.
+                DeepLinkIndex.shared.updateStations(stations)
             })
             .store(in: &cancellables)
     }
@@ -167,6 +172,11 @@ class RadioViewModel: ObservableObject {
                 }
             }, receiveValue: { [weak self] shows in
                 self?.topPodcasts = shows
+                // S18 / v1.6 / P1-5: cache for deep-link resolution.
+                // peaceplayer://podcast/{feedUrl} looks up by feedUrl;
+                // without this cache the route is a silent no-op unless
+                // the user is currently sitting on the Radio tab.
+                DeepLinkIndex.shared.updatePodcasts(shows)
             })
             .store(in: &cancellables)
     }
@@ -221,6 +231,11 @@ class RadioViewModel: ObservableObject {
                 }
             }, receiveValue: { [weak self] books in
                 self?.topAudiobooks = books
+                // S18 / v1.6 / P1-5: cache for deep-link resolution.
+                // peaceplayer://audiobook/{bookId} looks up by id;
+                // without this cache the route is a silent no-op unless
+                // the user is currently sitting on the Radio tab.
+                DeepLinkIndex.shared.updateAudiobooks(books)
             })
             .store(in: &cancellables)
     }

@@ -200,6 +200,26 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .openTimeCapsuleVault)) { _ in
             showTimeCapsuleVault = true
         }
+        // S18 / v1.6 / P1-5: deep-link to a podcast show. The deep-link
+        // handler in handleDeepLink posts this with the show as
+        // `object`. We switch to the Home tab; HomeView's existing
+        // .openRadioView handler pushes the Radio destination, and
+        // RadioView consumes the pending intent to open the detail
+        // sheet. We do this via two posts so each layer only needs
+        // to know about its own responsibility.
+        .onReceive(NotificationCenter.default.publisher(for: .openPodcastShow)) { _ in
+            withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
+                selectedTab = 0
+            }
+            NotificationCenter.default.post(name: .openRadioView, object: nil)
+        }
+        // S18 / v1.6 / P1-5: same flow for audiobooks.
+        .onReceive(NotificationCenter.default.publisher(for: .openAudiobook)) { _ in
+            withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
+                selectedTab = 0
+            }
+            NotificationCenter.default.post(name: .openRadioView, object: nil)
+        }
         // S14: Settings / Playlists / Radio are no longer presented as
         // sheets from ContentView — HomeView's NavigationStack pushes
         // these destinations directly. Swipe-from-edge back gesture
@@ -631,6 +651,15 @@ extension Notification.Name {
     // peaceplayer://capsule/{id} URL is opened. ContentView
     // listens and presents TimeCapsuleVaultView at the app root.
     static let openTimeCapsuleVault = Notification.Name("openTimeCapsuleVault")
+    // S18 / v1.6 / P1-5: posted by handleDeepLink when a
+    // peaceplayer://podcast/{feedUrl} URL is opened and the show
+    // is in the DeepLinkIndex. ContentView switches to the Home
+    // tab, HomeView pushes its Radio destination onto the nav
+    // stack, and RadioView consumes the pending intent on appear.
+    static let openPodcastShow = Notification.Name("openPodcastShow")
+    // S18 / v1.6 / P1-5: same pattern as openPodcastShow but for
+    // peaceplayer://audiobook/{bookId}.
+    static let openAudiobook = Notification.Name("openAudiobook")
     // S13: posted by LibraryView when the user adds a track to the
     // queue from the row context menu. FullPlayer observes this to
     // pulse its Queue icon as feedback (Phase 4.1).

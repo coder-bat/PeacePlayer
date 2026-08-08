@@ -143,20 +143,68 @@ struct YTAudioPlayerApp: App {
                 PlayerState.shared.play(track: track)
             }
         case "radio", "podcast", "audiobook":
-            // S18 / P1-5: deep-link routes for radio/podcast/audiobook.
-            // Scaffolding in place but the actual playback requires
-            // resolving station/show/book metadata which lives in
-            // local caches that are populated on user navigation
-            // (not at app launch). For v1.5, the routes accept
-            // the URL but are silent no-ops if the item isn't in
-            // the local cache. v1.6 will add a startup-time index
-            // so share-card / Spotlight deep links work for content
-            // the user hasn't recently browsed.
+            // S18 / v1.6 / P1-5: deep-link routes for radio/podcast/
+            // audiobook. Resolved via DeepLinkIndex, which caches the
+            // top-N lists RadioViewModel loads whenever the user opens
+            // the Radio tab. Without that cache the routes were silent
+            // no-ops; with it, a share-card / Spotlight link to a
+            // station / show / book the user has ever browsed works.
             //
             // Format: peaceplayer://radio/{stationId}
             //         peaceplayer://podcast/{feedUrl}
             //         peaceplayer://audiobook/{bookId}
-            break
+            //
+            // The path component may be percent-encoded (esp. feedUrl
+            // since it's a full https URL); decode before lookup.
+            let raw = url.pathComponents
+                .first(where: { $0 != "/" && !$0.isEmpty }) ?? ""
+            let key = raw.removingPercentEncoding ?? raw
+            switch url.host {
+            case "radio":
+                if let station = DeepLinkIndex.shared.findStation(key) {
+                    // Radio: play directly. No detail view needed —
+                    // tapping a station anywhere in the app starts it.
+                    PlayerState.shared.playRadioStation(station)
+                } else {
+                    ErrorHandler.shared.showInfo(
+                        "Station not in your library yet — open the Radio tab to browse"
+                    )
+                }
+            case "podcast":
+                if let show = DeepLinkIndex.shared.findPodcast(key) {
+                    // Podcast: stage the show, then notify. ContentView
+                    // switches to the Home tab, HomeView pushes the
+                    // Radio destination, and RadioView consumes the
+                    // pending intent on appear to open the detail
+                    // sheet (which then loads the episode list).
+                    DeepLinkIntent.shared.setPendingPodcastShow(show)
+                    NotificationCenter.default.post(
+                        name: .openPodcastShow,
+                        object: show
+                    )
+                } else {
+                    ErrorHandler.shared.showInfo(
+                        "Show not in your library yet — open the Radio tab to browse"
+                    )
+                }
+            case "audiobook":
+                if let book = DeepLinkIndex.shared.findAudiobook(key) {
+                    // Audiobook: same pattern as podcast. The detail
+                    // view loads the chapter list and the user picks
+                    // where to start.
+                    DeepLinkIntent.shared.setPendingAudiobook(book)
+                    NotificationCenter.default.post(
+                        name: .openAudiobook,
+                        object: book
+                    )
+                } else {
+                    ErrorHandler.shared.showInfo(
+                        "Book not in your library yet — open the Radio tab to browse"
+                    )
+                }
+            default:
+                break
+            }
         default:
             break
         }

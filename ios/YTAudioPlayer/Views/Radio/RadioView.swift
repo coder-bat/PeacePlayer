@@ -69,6 +69,25 @@ struct RadioView: View {
             viewModel.loadTopStations()
             viewModel.loadTopPodcasts()
             viewModel.loadTopAudiobooks()
+
+            // S18 / v1.6 / P1-5: consume a pending deep-link intent
+            // (peaceplayer://podcast/{feedUrl} or
+            // peaceplayer://audiobook/{bookId}). ContentView already
+            // switched to the Home tab and HomeView already pushed
+            // the Radio destination onto its NavigationStack; this
+            // is the final hop — open the right detail sheet so the
+            // user can pick an episode / chapter.
+            //
+            // We do this in .task (not .onAppear) so the top-N lists
+            // are populating in parallel; the deep-link lookup
+            // doesn't depend on them (DeepLinkIndex is the source of
+            // truth, not the live @Published arrays).
+            let intent = DeepLinkIntent.shared.consume()
+            if let show = intent.podcastShow {
+                showPodcastDetail = show
+            } else if let book = intent.audiobook {
+                selectedAudiobook = book
+            }
         }
         .sheet(item: $showPodcastDetail) { show in
             PodcastDetailView(show: show, viewModel: viewModel)
