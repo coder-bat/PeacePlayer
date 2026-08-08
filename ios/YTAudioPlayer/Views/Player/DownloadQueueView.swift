@@ -413,7 +413,7 @@ struct CompletedDownloadCard: View {
                 if let time = task.completionTime {
                     Text(timeAgo(time))
                         .font(.system(size: 11, design: .monospaced))
-                        .foregroundColor(Theme.cyberDim.opacity(0.7))
+                        .foregroundColor(Theme.cyberTextSecondary)
                 }
             }
 
@@ -551,7 +551,7 @@ struct SavedDownloadCard: View {
 
                 Text(item.fileSizeFormatted)
                     .font(.system(size: 11, design: .monospaced))
-                    .foregroundColor(Theme.cyberDim.opacity(0.7))
+                    .foregroundColor(Theme.cyberTextSecondary)
             }
 
             Spacer()

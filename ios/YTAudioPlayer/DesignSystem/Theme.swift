@@ -27,6 +27,13 @@ enum Theme {
     static let cyberYellow = Color.cyberYellow
     static let cyberDim = Color.cyberDim
 
+    // S18 (P0-3): AA-passing dim color for body/caption text on black.
+    // cyberDim itself is 4.52:1, but `cyberDim.opacity(0.X)` in the
+    // codebase drops to 2.32:1-3.66:1 (AA fail for body text). This
+    // token is the safe replacement: 8.28:1 (AAA) at full opacity.
+    // Use this for any foregroundColor on body / caption / hint text.
+    static let cyberTextSecondary = Color(red: 0.62, green: 0.62, blue: 0.72)
+
     // MARK: Background Colors
     static let background = Color(.systemBackground)
     static let secondaryBackground = Color(.secondarySystemBackground)

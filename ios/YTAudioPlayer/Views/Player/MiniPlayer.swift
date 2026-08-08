@@ -238,7 +238,7 @@ struct MiniPlayer: View {
                         } else {
                             Text("Loading chapters...")
                                 .font(.system(size: 11))
-                                .foregroundColor(Theme.cyberDim.opacity(0.6))
+                                .foregroundColor(Theme.cyberTextSecondary)
                                 .lineLimit(1)
                         }
                     } else {

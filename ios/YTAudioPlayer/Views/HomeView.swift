@@ -471,7 +471,7 @@ struct HomeView: View {
                             .foregroundColor(.white)
                         Text("Tracks you play will show up here")
                             .font(.system(size: 12))
-                            .foregroundColor(.cyberDim.opacity(0.8))
+                            .foregroundColor(Theme.cyberTextSecondary)
                             .multilineTextAlignment(.center)
                     }
                     .frame(maxWidth: .infinity)

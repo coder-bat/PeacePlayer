@@ -75,7 +75,7 @@ struct TimeCapsuleVaultView: View {
                 .foregroundColor(.cyberDim)
             Text("Bury a capsule from the player to\nsend a message to your future self")
                 .font(.caption)
-                .foregroundColor(.cyberDim.opacity(0.8))
+                .foregroundColor(Theme.cyberTextSecondary)
                 .multilineTextAlignment(.center)
         }
     }

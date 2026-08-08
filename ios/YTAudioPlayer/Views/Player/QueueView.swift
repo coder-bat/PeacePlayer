@@ -81,7 +81,7 @@ struct QueueView: View {
                                     .foregroundColor(.cyberDim)
                                     .font(.system(size: 14, design: .monospaced))
                                 Text("Play a track or browse your library to get started")
-                                    .foregroundColor(.cyberDim.opacity(0.6))
+                                    .foregroundColor(Theme.cyberTextSecondary)
                                     .font(.system(size: 12, design: .monospaced))
                                     .multilineTextAlignment(.center)
                             }

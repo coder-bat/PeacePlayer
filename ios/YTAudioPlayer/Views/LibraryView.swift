@@ -558,7 +558,7 @@ struct GridTrackCell: View {
 
                 Text(track.fileSizeFormatted.uppercased())
                     .font(.system(size: 11, design: .monospaced))
-                    .foregroundColor(Theme.cyberDim.opacity(0.7))
+                    .foregroundColor(Theme.cyberTextSecondary)
             }
         }
         // S13: tap target. The inner play-button overlay (in the
@@ -709,7 +709,7 @@ struct ListTrackRow: View {
 
                 Text(track.fileSizeFormatted.uppercased())
                     .font(.system(size: 11, design: .monospaced))
-                    .foregroundColor(Theme.cyberDim.opacity(0.7))
+                    .foregroundColor(Theme.cyberTextSecondary)
 
                 if let memoryPreview {
                     SongMemoryBadge(text: memoryPreview)
