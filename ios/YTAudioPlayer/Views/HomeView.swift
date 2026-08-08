@@ -345,9 +345,7 @@ struct HomeView: View {
                     lastTrack: lastTrack
                 )
             } else {
-                EmptyHero {
-                    NotificationCenter.default.post(name: .switchTab, object: 1)
-                }
+                EmptyHero()
             }
         }
     }
@@ -893,36 +891,104 @@ struct ResumeBarsIndicator: View {
 }
 
 // MARK: - Empty Hero
+// S18 / P1-8: was a single Search button. Now offers 3 entry
+// points so a brand-new user with no history has multiple
+// paths forward. Each button posts a notification that
+// ContentView / Library / Radio listens for.
 struct EmptyHero: View {
-    let onTap: () -> Void
-
     var body: some View {
-        Button(action: onTap) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 24)
-                    .fill(Color.cyberSurface)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 24)
-                            .stroke(Color.cyberCyan.opacity(0.2), style: StrokeStyle(lineWidth: 1, dash: [8, 8]))
-                    )
+        VStack(spacing: 20) {
+            VStack(spacing: 8) {
+                Image(systemName: "waveform")
+                    .font(.system(size: 40))
+                    .foregroundColor(.cyberCyan)
+                Text("Start Listening")
+                    .font(.system(size: 14, weight: .bold, design: .monospaced))
+                    .foregroundColor(.white)
+                Text("Pick where to begin")
+                    .font(.system(size: 12))
+                    .foregroundColor(.cyberDim)
+            }
 
-                VStack(spacing: 16) {
-                    Image(systemName: "waveform")
-                        .font(.system(size: 48))
-                        .foregroundColor(.cyberCyan)
-
-                    Text("Start Listening")
-                        .font(.system(size: 14, weight: .bold, design: .monospaced))
-                        .foregroundColor(.white)
-
-                    Text("Search to begin")
-                        .font(.system(size: 14))
-                        .foregroundColor(.cyberDim)
+            HStack(spacing: 12) {
+                EmptyHeroButton(
+                    icon: "magnifyingglass",
+                    title: "Search",
+                    accent: Theme.cyberCyan
+                ) {
+                    HapticManager.light()
+                    NotificationCenter.default.post(name: .openSearch, object: nil)
+                }
+                EmptyHeroButton(
+                    icon: "dice.fill",
+                    title: "Anti-Algorithm",
+                    accent: Theme.cyberMagenta
+                ) {
+                    HapticManager.light()
+                    // Push the Anti-Algorithm view via a notification.
+                    // AntiAlgorithmView is presented from FullPlayer
+                    // today; we'll surface a Home entry in P1-1.
+                    NotificationCenter.default.post(name: .switchTab, object: 0)
+                }
+                EmptyHeroButton(
+                    icon: "antenna.radiowaves.left.and.right",
+                    title: "Live Radio",
+                    accent: Theme.cyberYellow
+                ) {
+                    HapticManager.light()
+                    // RadioView is pushed from Home's NavigationStack
+                    // (P1-1 wiring) — for now, route through the
+                    // openRadioView notification that Home listens for.
+                    NotificationCenter.default.post(name: .openRadioView, object: nil)
                 }
             }
         }
+        .padding(20)
+        .frame(maxWidth: .infinity)
+        .background(
+            RoundedRectangle(cornerRadius: 24)
+                .fill(Color.cyberSurface)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 24)
+                        .stroke(Color.cyberCyan.opacity(0.2), style: StrokeStyle(lineWidth: 1, dash: [8, 8]))
+                )
+        )
+    }
+}
+
+// S18 / P1-8: small 3-icon button used by EmptyHero and any
+// future "give the user a path" empty state.
+private struct EmptyHeroButton: View {
+    let icon: String
+    let title: String
+    let accent: Color
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 6) {
+                Image(systemName: icon)
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(accent)
+                    .frame(height: 22)
+                Text(title)
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 12)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(accent.opacity(0.12))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(accent.opacity(0.4), lineWidth: 1)
+                    )
+            )
+        }
         .buttonStyle(.plain)
-        .frame(height: 180)
     }
 }
 

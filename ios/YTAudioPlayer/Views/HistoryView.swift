@@ -93,6 +93,25 @@ struct HistoryView: View {
                 .font(.system(.subheadline, design: .monospaced))
                 .foregroundColor(.cyberDim)
                 .multilineTextAlignment(.center)
+
+            // S18 / P1-8: give the user something to do instead of
+            // staring at the empty state. Posts the .openSearch
+            // notification that ContentView listens for to switch
+            // to the Search tab.
+            Button {
+                HapticManager.light()
+                NotificationCenter.default.post(name: .openSearch, object: nil)
+            } label: {
+                Text("Find Something to Play")
+                    .font(.system(size: 14, weight: .semibold, design: .monospaced))
+                    .foregroundColor(.black)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 10)
+                    .background(
+                        Capsule().fill(Theme.cyberCyan)
+                    )
+            }
+            .buttonStyle(.plain)
         }
         .padding(40)
     }
