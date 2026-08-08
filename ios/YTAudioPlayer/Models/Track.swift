@@ -95,10 +95,15 @@ struct LocalTrack: Codable, Identifiable {
 struct DownloadResponse: Codable {
     let status: String
     let filePath: String
-    
+    // S17-H / DOWNLOAD-CDN-FIX (2026-08-08): server-side relative
+    // URL the iOS app GETs to pull the converted M4A file. See
+    // DownloadManager.performDownload for the iOS-side flow.
+    let downloadUrl: String?
+
     enum CodingKeys: String, CodingKey {
         case status
         case filePath
+        case downloadUrl
     }
 }
 

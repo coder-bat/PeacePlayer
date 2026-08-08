@@ -244,10 +244,18 @@ class DownloadManager: ObservableObject {
     // Two consecutive unchanged ticks (10s of zero progress) means the
     // download is stuck — we surface a user-visible error and mark the
     // task as failed.
+    //
+    // S17-H / DOWNLOAD-CDN-FIX (2026-08-08): the new flow goes
+    // POST /download (server-side YouTube fetch + ffmpeg, ~5-10s)
+    // followed by GET /library/{filename} (the file body, ~50ms).
+    // The POST phase shows 0% progress for the full duration, so
+    // the original 10s watchdog would fire incorrectly. We extend
+    // the threshold to 6 ticks (30s) to cover the worst-case
+    // server-side pipeline.
     private var lastObservedProgress: Double = 0
     private var lastObservedTaskId: UUID?
     private var stalledTickCount: Int = 0
-    private let stallTickThreshold = 2   // 2 ticks × 5s = 10s stalled
+    private let stallTickThreshold = 6   // 6 ticks × 5s = 30s stalled
     private let stallTickInterval: TimeInterval = 5
 
     private func performDownload(_ task: DownloadTask) {
@@ -260,29 +268,68 @@ class DownloadManager: ObservableObject {
         stalledTickCount = 0
         startStallWatchdog(taskId: task.id)
 
-        // Get stream URL first, then download to local storage
-        currentTask = StreamURLCache.shared.getStreamUrl(videoId: task.track.videoId)
+        // S17-H / DOWNLOAD-CDN-FIX (2026-08-08): go through the
+        // backend's POST /download endpoint instead of pulling the
+        // streamUrl directly. The previous flow did:
+        //   1. GET /stream → /fast → 302 to YouTube format 18
+        //   2. URLSession.downloadTask(with: streamUrl)
+        //   3. URLSession follows 302, hits YouTube CDN
+        //   4. YouTube throttles, download stalls at ~1.8MB
+        //   5. S13 watchdog fires at 10s → "Download failed"
+        //
+        // New flow:
+        //   1. POST /download (server-side YouTube fetch via
+        //      Range chunks, ~5-10s, then ffmpeg convert)
+        //   2. Response includes downloadUrl = /library/{filename}
+        //   3. URLSession.downloadTask(with: downloadUrl) → file
+        //      body (3-30MB, no YouTube in the path, no throttling)
+        //   4. Save to local AudioFileManager
+        currentTask = APIService.shared.downloadTrack(task.track)
             .sink(
                 receiveCompletion: { [weak self] completion in
                     switch completion {
                     case .failure(let error):
-                        // S13: stream URL fetch failed → stop the watchdog
-                        // before calling handleDownloadFailure (it will
-                        // also tear down via the failure path, but cancel
-                        // explicitly for clarity).
+                        // POST /download failed → stop the watchdog
+                        // and surface the error.
                         DispatchQueue.main.async { [weak self] in
                             self?.progressTimer?.invalidate()
                             self?.progressTimer = nil
                         }
-                        self?.handleDownloadFailure(task.id, error: "\(error)")
+                        self?.handleDownloadFailure(task.id, error: "POST /download: \(error)")
                         self?.isDownloading = false
                         self?.processQueue()
                     case .finished:
                         break
                     }
                 },
-                receiveValue: { [weak self] streamInfo in
+                receiveValue: { [weak self] response in
                     guard let self = self else { return }
+                    // Mark the prep phase done so the watchdog
+                    // sees forward progress. The actual download
+                    // (the GET) starts at progress = 0.10.
+                    self.updateProgress(for: task.id, progress: 0.10)
+                    self.lastObservedProgress = 0.10
+                    self.stalledTickCount = 0
+
+                    // If the backend couldn't produce a
+                    // downloadUrl (shouldn't happen with the
+                    // current /download implementation), fall
+                    // back to the streamUrl flow.
+                    guard let downloadUrl = response.downloadUrl else {
+                        self.handleDownloadFailure(
+                            task.id,
+                            error: "backend /download returned no downloadUrl"
+                        )
+                        self.isDownloading = false
+                        self.processQueue()
+                        return
+                    }
+
+                    // Build the absolute URL. /library/{filename}
+                    // is on the same backend as /stream, so we use
+                    // baseURL to resolve it.
+                    let absoluteUrl = APIService.shared.baseURL + downloadUrl
+                    let urlWithToken = self.appendToken(to: absoluteUrl)
 
                     // Create delegate to track progress
                     let delegate = DownloadProgressDelegate(manager: self)
@@ -290,9 +337,27 @@ class DownloadManager: ObservableObject {
                     BackgroundDownloadService.shared.delegate = delegate
 
                     // Start actual download to phone storage
-                    BackgroundDownloadService.shared.download(track: task.track, streamUrl: streamInfo.streamUrl)
+                    BackgroundDownloadService.shared.download(
+                        track: task.track,
+                        streamUrl: urlWithToken
+                    )
                 }
             )
+    }
+
+    /// Append the current iOS auth token to a downloadUrl that
+    /// doesn't already carry one. /library is gated by the same
+    /// JWT the rest of the backend uses; URLSession's
+    /// Authorization header survives the 302, so the token in
+    /// the query is a defense-in-depth fallback (the iOS app
+    /// already sends the Bearer header).
+    private func appendToken(to url: String) -> String {
+        guard let token = KeychainHelper.shared.read("session_token") else {
+            return url
+        }
+        if url.contains("token=") { return url }
+        let sep = url.contains("?") ? "&" : "?"
+        return "\(url)\(sep)token=\(token)"
     }
 
     // S13: Start (or restart) the stalled-watchdog timer. Cancels any

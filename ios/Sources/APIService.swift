@@ -371,17 +371,21 @@ class APIService {
         return base + streamUrl
     }
 
-    func downloadTrack(_ track: Track) -> AnyPublisher<String, APIError> {
+    func downloadTrack(_ track: Track) -> AnyPublisher<DownloadResponse, APIError> {
         guard let url = URL(string: "\(baseURL)/download") else {
             return Fail(error: APIError.invalidURL).eraseToAnyPublisher()
         }
-        
+
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         addAuthHeader(to: &request)
+        // S17-H / DOWNLOAD-CDN-FIX (2026-08-08): server-side
+        // YouTube fetch + ffmpeg convert can take 5-10s on a
+        // cold track. 120s leaves headroom for a busy CPU or a
+        // long first-call yt-dlp n-challenge.
         request.timeoutInterval = 120
-        
+
         var body: [String: Any] = [
             "videoId": track.videoId,
             "title": track.title,
@@ -393,7 +397,7 @@ class APIService {
             body["thumbnail"] = thumbnail
         }
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
-        
+
         return dataTaskWithRetry(for: request)
             .mapError { APIError.networkError($0) }
             .flatMap { data, response -> AnyPublisher<Data, APIError> in
@@ -408,7 +412,6 @@ class APIService {
                 return Just(data).setFailureType(to: APIError.self).eraseToAnyPublisher()
             }
             .decode(type: DownloadResponse.self, decoder: JSONDecoder())
-            .map { $0.filePath }
             .mapError { error -> APIError in
                 if let apiError = error as? APIError {
                     return apiError

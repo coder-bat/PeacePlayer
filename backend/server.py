@@ -468,6 +468,12 @@ class StreamResponse(BaseModel):
 class DownloadResponse(BaseModel):
     status: str
     filePath: str
+    # S17-H / DOWNLOAD-CDN-FIX (2026-08-08): relative URL the
+    # iOS app can GET to pull the converted M4A. Server-side
+    # /library/{filename} serves the file from ~/Music/YTAudio/.
+    # Without this, the iOS app's URLSession hits YouTube's
+    # CDN directly and stalls (10s watchdog → "Download failed").
+    downloadUrl: Optional[str] = None
 
 
 class LibraryTrack(BaseModel):
@@ -1465,9 +1471,16 @@ async def download_track(download_req: DownloadRequest, request: Request, user: 
         id_file = result_path.with_suffix('.id')
         id_file.write_text(download_req.video_id)
 
+        # S17-H / DOWNLOAD-CDN-FIX (2026-08-08): include a
+        # downloadUrl so the iOS app can GET the converted file
+        # from /library/{filename} instead of pulling from
+        # YouTube directly (which hits the CDN throttle).
+        from urllib.parse import quote
+        download_url = f"/library/{quote(result_path.name)}"
         return DownloadResponse(
             status="completed",
-            filePath=str(result_path)
+            filePath=str(result_path),
+            downloadUrl=download_url,
         )
 
     except HTTPException:
@@ -1505,7 +1518,44 @@ async def list_library(request: Request, user: dict = Depends(require_session_us
         raise HTTPException(status_code=500, detail=f"Library listing failed: {str(e)}")
 
 
-# Library delete endpoint
+# Library file download endpoint (GET) + delete (DELETE)
+# S17-H / DOWNLOAD-CDN-FIX (2026-08-08): the GET path serves the
+# local M4A file from ~/Music/YTAudio/. Used by the iOS app's
+# download flow, which now does POST /download (server-side
+# YouTube fetch + ffmpeg convert) followed by GET /library/{file}
+# to pull the converted file down. This avoids the iOS
+# URLSession hitting YouTube's CDN throttle (the server-side
+# /download endpoint already does Range-chunked YouTube fetches).
+@app.api_route("/library/{filename}", methods=["GET", "HEAD"])
+@limiter.limit("30/minute")
+async def get_library_file(filename: str, request: Request, user: dict = Depends(require_session_user),):
+    """
+    Download a previously-downloaded track from the server's
+    local library (~/Music/YTAudio/). Use after POST /download
+    returns the file path.
+    """
+    import urllib.parse
+    decoded_filename = urllib.parse.unquote(filename)
+    # S17-H: defense against path traversal. The extractor names
+    # files with `safe_title - safe_artist.m4a` so collisions with
+    # `..` or absolute paths are unlikely, but never trust user
+    # input when building a file path.
+    if ".." in decoded_filename or decoded_filename.startswith("/"):
+        raise HTTPException(status_code=400, detail="invalid filename")
+
+    from fastapi.responses import FileResponse
+    extractor = get_extractor()
+    file_path = extractor.output_dir / decoded_filename
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail=f"file not found: {decoded_filename}")
+    # FileResponse handles Range requests and HEAD automatically
+    return FileResponse(
+        path=str(file_path),
+        media_type="audio/mp4",
+        filename=decoded_filename,
+    )
+
+
 @app.delete("/library/{filename}")
 @limiter.limit("15/minute")
 async def delete_library_file(filename: str, request: Request, user: dict = Depends(require_session_user),):
