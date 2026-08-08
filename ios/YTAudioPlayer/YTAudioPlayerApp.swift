@@ -133,6 +133,30 @@ struct YTAudioPlayerApp: App {
                     userInfo: ["capsuleId": capsuleId]
                 )
             }
+        case "track":
+            // S18 / P1-5: peaceplayer://track/{videoId} — play
+            // a specific track by videoId. Share card QR codes
+            // and Spotlight results deep-link here.
+            let videoId = url.pathComponents
+                .first(where: { $0 != "/" && !$0.isEmpty }) ?? ""
+            if !videoId.isEmpty, let track = TrackStore.shared.getTrack(videoId: videoId) {
+                PlayerState.shared.play(track: track)
+            }
+        case "radio", "podcast", "audiobook":
+            // S18 / P1-5: deep-link routes for radio/podcast/audiobook.
+            // Scaffolding in place but the actual playback requires
+            // resolving station/show/book metadata which lives in
+            // local caches that are populated on user navigation
+            // (not at app launch). For v1.5, the routes accept
+            // the URL but are silent no-ops if the item isn't in
+            // the local cache. v1.6 will add a startup-time index
+            // so share-card / Spotlight deep links work for content
+            // the user hasn't recently browsed.
+            //
+            // Format: peaceplayer://radio/{stationId}
+            //         peaceplayer://podcast/{feedUrl}
+            //         peaceplayer://audiobook/{bookId}
+            break
         default:
             break
         }
