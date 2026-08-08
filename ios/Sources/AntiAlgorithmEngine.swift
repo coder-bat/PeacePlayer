@@ -51,7 +51,24 @@ final class AntiAlgorithmEngine: ObservableObject {
             artistVideoIds[artist, default: []].append(track.videoId)
         }
 
-        // Top artists sorted by play count
+        // S18 / P1-4: weight by SongMemory density. A user with
+        // memories on N tracks for an artist is a stronger signal
+        // of intent than raw play count — they bothered to write
+        // a personal note. Boost such artists so the seed picker
+        // reflects a more "intentional" taste profile.
+        let memoryRequest = CDSongMemory.fetchRequest()
+        let memoryTracks = (try? context.fetch(memoryRequest)) ?? []
+        for memory in memoryTracks {
+            if let artist = memory.track?.displayArtist {
+                // Each memory adds 3 to the play count, capped at +30
+                // per artist (so 10 memories on the same artist
+                // doesn't drown out real play counts).
+                let memoryBonus = min(30, (memoryTracks.filter { $0.track?.displayArtist == artist }.count) * 3)
+                artistCounts[artist, default: 0] += memoryBonus
+            }
+        }
+
+        // Top artists sorted by weighted count
         topArtists = artistCounts.sorted { $0.value > $1.value }
             .prefix(15)
             .map { ($0.key, $0.value) }
