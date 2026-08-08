@@ -200,10 +200,10 @@ struct SettingsView: View {
                                     .tint(.red)
                             } else {
                                 Image(systemName: "rectangle.portrait.and.arrow.right")
-                                    .foregroundColor(.red)
+                                    .foregroundColor(Theme.error)
                             }
                             Text(isSigningOut ? "Signing Out…" : "Sign Out")
-                                .foregroundColor(.red)
+                                .foregroundColor(Theme.error)
                         }
                     }
                     .disabled(isSigningOut)
@@ -493,10 +493,10 @@ struct SettingsView: View {
                     } label: {
                         Label {
                             Text("Clear Cache")
-                                .foregroundColor(.red)
+                                .foregroundColor(Theme.error)
                         } icon: {
                             Image(systemName: "trash")
-                                .foregroundColor(.red)
+                                .foregroundColor(Theme.error)
                         }
                     }
                     .listRowBackground(Theme.cyberSurface)

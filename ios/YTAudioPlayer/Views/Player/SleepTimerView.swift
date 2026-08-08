@@ -141,7 +141,7 @@ struct SleepTimerView: View {
             Button(action: { timer.cancel() }) {
                 Text("Cancel Timer")
                     .font(.headline)
-                    .foregroundColor(.red)
+                    .foregroundColor(Theme.error)
                     .frame(maxWidth: .infinity)
                     .padding()
                     .background(Theme.error.opacity(0.15))
