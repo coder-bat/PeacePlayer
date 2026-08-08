@@ -790,7 +790,7 @@ struct SearchResultRow: View {
                     }
 
                     if isPlaying {
-                        PlayingBarsIndicator()
+                        CyberPlayingBars()
                     } else {
                         Image(systemName: "play.fill")
                             .font(.system(size: 12, weight: .semibold))

@@ -1463,34 +1463,12 @@ class HomeViewModel: ObservableObject {
     }
 }
 
-// MARK: - Playing Bars Indicator
-
-struct PlayingBarsIndicator: View {
-    @State private var animate = false
-    @Environment(\.accessibilityReduceMotion) var reduceMotion
-
-    var body: some View {
-        HStack(spacing: 2) {
-            ForEach(0..<3) { index in
-                RoundedRectangle(cornerRadius: 1)
-                    .fill(Color.cyberCyan)
-                    .frame(width: 3, height: animate ? 16 : 6)
-                    .animation(
-                        reduceMotion ? .none : Animation.easeInOut(duration: 0.4)
-                            .repeatForever(autoreverses: true)
-                            .delay(Double(index) * 0.15),
-                        value: animate
-                    )
-            }
-        }
-        .frame(width: 30, height: 30)
-        .onAppear {
-            if !reduceMotion {
-                animate = true
-            }
-        }
-    }
-}
+// MARK: - Playing Bars Indicator moved to DesignSystem/CyberPlayingBars.swift
+// (S18 / P1-15). The two parallel components (CyberPlayingBars in
+// MiniPlayer.swift, PlayingBarsIndicator here) produced slightly
+// different bar-height ranges (4-16 vs 6-16). The 4-16 range is
+// the canonical one; all call sites now resolve to the single
+// DesignSystem component.
 
 struct HomeRecentTrackRow: View {
     let track: Track
@@ -1553,7 +1531,7 @@ struct HomeRecentTrackRow: View {
                             .scaleEffect(0.7)
                             .tint(.cyberCyan)
                     } else if isPlaying {
-                        PlayingBarsIndicator()
+                        CyberPlayingBars()
                     } else {
                         Image(systemName: "play.fill")
                             .font(.system(size: 12, weight: .semibold))

@@ -468,37 +468,10 @@ struct ArtworkView: View {
     }
 }
 
-// MARK: - Cyber Playing Bars (shared across the app)
-struct CyberPlayingBars: View {
-    @State private var animate = false
-    @Environment(\.accessibilityReduceMotion) var reduceMotion
-    // S15: respect the user's accessibility setting so the
-    // reduce-transparency user gets an opaque surface, not a
-    // half-transparent blur.
-    @Environment(\.accessibilityReduceTransparency) var reduceTransparency
-
-    var body: some View {
-        HStack(spacing: 2) {
-            ForEach(0..<3) { index in
-                RoundedRectangle(cornerRadius: 1)
-                    .fill(Color.cyberCyan)
-                    .frame(width: 3, height: animate ? 16 : 4)
-                    .animation(
-                        reduceMotion ? .none : Animation.easeInOut(duration: 0.4)
-                            .repeatForever(autoreverses: true)
-                            .delay(Double(index) * 0.15),
-                        value: animate
-                    )
-            }
-        }
-        .onAppear {
-            if !reduceMotion {
-                animate = true
-            }
-        }
-        .accessibilityHidden(true)
-    }
-}
+// MARK: - Cyber Playing Bars moved to DesignSystem/CyberPlayingBars.swift
+// (S18 / P1-15). The duplicate PlayingBarsIndicator in HomeView
+// was deleted too. All call sites that previously referenced
+// either component now resolve to the single DesignSystem version.
 
 struct MiniPlayer_Previews: PreviewProvider {
     static var previews: some View {

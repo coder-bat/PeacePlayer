@@ -126,6 +126,7 @@
 		CD03B0B1E5C5C5C5C5C5C5C8 /* QueueController.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD03B0B1E5C5C5C5C5C5C5C8 /* QueueController.swift */; };
 		C3A812D628A613B24F1EEC30 /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD72DD7B62A4AC911BF749F6 /* HomeView.swift */; };
 		C41811001AF961E13FBD81D9 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51554D239E59D64D0D95EDD0 /* Theme.swift */; };
+		F811F74C2C010E0DCD2AB96B /* CyberPlayingBars.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9CF1E37175D63B948A57B4A8 /* CyberPlayingBars.swift */; };
 		C41CD7BE9EB5F68AA5C6C50A /* ShareCardGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 580361D396ED3D52EB48EFFF /* ShareCardGenerator.swift */; };
 		C4E90D1C5EFDCB0B327E7039 /* WalkDJAppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 538A97384F4577D3971EDB4D /* WalkDJAppDelegate.swift */; };
 		C8BBF5B384454033D256EAA0 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 6EEB0E0B1BCCEC02E21A234F /* LaunchScreen.storyboard */; };
@@ -235,6 +236,7 @@
 		4DCF0DCA618422606DA43580 /* BackgroundDownloadService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundDownloadService.swift; sourceTree = "<group>"; };
 		4F66019926050AB739EEF25E /* SearchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchView.swift; sourceTree = "<group>"; };
 		51554D239E59D64D0D95EDD0 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
+		9CF1E37175D63B948A57B4A8 /* CyberPlayingBars.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CyberPlayingBars.swift; sourceTree = "<group>"; };
 		538A97384F4577D3971EDB4D /* WalkDJAppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WalkDJAppDelegate.swift; sourceTree = "<group>"; };
 		5668E156B653F13002526708 /* PeacePlayerWidget.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = PeacePlayerWidget.entitlements; sourceTree = "<group>"; };
 		56AF7CCCA582C56C371F11A0 /* PeacePlayerWidgetIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeacePlayerWidgetIntents.swift; sourceTree = "<group>"; };
@@ -356,6 +358,7 @@
 				F49B36AD7200419A930B580A /* NeonTextField.swift */,
 				F26DE8F2D8B762F09FFAD4C5 /* ShimmerModifier.swift */,
 				51554D239E59D64D0D95EDD0 /* Theme.swift */,
+				9CF1E37175D63B948A57B4A8 /* CyberPlayingBars.swift */,
 				F89C2506A14768CB685B2A7C /* ViewExtensions.swift */,
 			);
 			path = DesignSystem;
@@ -860,6 +863,7 @@
 				7212DCD348C334105B0515DF /* SongMemoryManager.swift in Sources */,
 				D37834AA30D9890282DAD69E /* SongMemorySheet.swift in Sources */,
 				C41811001AF961E13FBD81D9 /* Theme.swift in Sources */,
+				F811F74C2C010E0DCD2AB96B /* CyberPlayingBars.swift in Sources */,
 				F25B3EA4D29063ED85D52C83 /* TimeCapsuleManager.swift in Sources */,
 				F9BB4CD51A3E1CC3C6C97227 /* TimeCapsuleRevealView.swift in Sources */,
 				703966C0D0D178E48D862DCE /* TimeCapsuleSheet.swift in Sources */,
