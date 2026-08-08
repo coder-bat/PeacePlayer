@@ -208,6 +208,22 @@ class StreamURLCache {
         return activeFetches[videoId]!.publisher
     }
 
+    /// In-flight prefetch set. Prevents duplicate POST /prefetch
+    /// requests for the same videoId. The HomeView/SearchView
+    /// prefetch calls fire 5+ times per view load, and a single
+    /// user session can fire 24+ concurrent /prefetch requests
+    /// for a recently-played list of 24 tracks. The backend's
+    /// `_transcode_semaphore` caps concurrent transcodes at 6,
+    /// so the rest queue. URLSession's per-host connection
+    /// limit (default 4-6) and the 60s default timeout cause
+    /// most of them to time out with -1001.
+    ///
+    /// With this set, the 2nd through 24th call for the same
+    /// videoId is a no-op — the in-flight URLSessionTask
+    /// continues and writes the result to the cache.
+    private var inFlightPrefetches: Set<String> = []
+    private let inFlightPrefetchLock = NSLock()
+
     /// Fire-and-forget prefetch that warms the backend cache via `/prefetch`.
     /// Only runs on Wi-Fi to protect metered connections.
     func prefetch(videoId: String) {
@@ -215,12 +231,32 @@ class StreamURLCache {
         if memoryCache.object(forKey: key) != nil { return }
         if loadFromDisk(key: key) != nil { return }
 
-        guard NetworkMonitor.shared.connectionType == .wifi else { return }
+        // S17-H / PREFETCH-QUEUE-FIX (2026-08-08): skip if a
+        // prefetch for this videoId is already in flight. Without
+        // this, the iOS app fires 24+ duplicate /prefetch
+        // requests (one per HomeView/SearchView/PlaylistDetailView
+        // tap-through), all queueing behind the backend's
+        // _transcode_semaphore, most timing out at 60s.
+        inFlightPrefetchLock.lock()
+        let alreadyInFlight = inFlightPrefetches.contains(videoId)
+        if !alreadyInFlight {
+            inFlightPrefetches.insert(videoId)
+        }
+        inFlightPrefetchLock.unlock()
+        if alreadyInFlight { return }
+
+        guard NetworkMonitor.shared.connectionType == .wifi else {
+            // Not on Wi-Fi → release the in-flight slot
+            inFlightPrefetchLock.lock()
+            inFlightPrefetches.remove(videoId)
+            inFlightPrefetchLock.unlock()
+            return
+        }
 
         guard let url = URL(string: "\(APIService.shared.baseURL)/prefetch/\(videoId)") else { return }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        request.timeoutInterval = 5
+        request.timeoutInterval = 30
         // S17-H follow-up: /prefetch requires `require_session_user` on
         // the backend (same auth as /search and /library). Without the
         // Authorization header the call was a silent 401 — the user
@@ -232,11 +268,17 @@ class StreamURLCache {
         // "peaceplayer.session_token").
         APIService.addAuthHeader(to: &request)
 
-        URLSession.shared.dataTask(with: request) { _, response, _ in
+        let task = URLSession.shared.dataTask(with: request) { [weak self] _, response, _ in
+            // Release the in-flight slot regardless of outcome
+            self?.inFlightPrefetchLock.lock()
+            self?.inFlightPrefetches.remove(videoId)
+            self?.inFlightPrefetchLock.unlock()
+
             if let http = response as? HTTPURLResponse {
                 print("🔥 StreamURLCache: prefetch \(videoId) -> \(http.statusCode)")
             }
-        }.resume()
+        }
+        task.resume()
     }
 
     /// Prefetch the first several video IDs in a batch.
