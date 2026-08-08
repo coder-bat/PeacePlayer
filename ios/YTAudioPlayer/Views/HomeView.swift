@@ -179,6 +179,16 @@ struct HomeView: View {
                         favoriteArtistsSection
                             .padding(.top, 24)
 
+                        // S18 / P1-3: "On this day in your music" —
+                        // tracks the user played on this calendar day
+                        // in prior years. Gives a daily re-entry reason.
+                        // Gated by ff_on_this_day flag (default OFF
+                        // for v1.5; can flip in Settings → Labs later).
+                        if UserDefaults.standard.object(forKey: "ff_on_this_day") as? Bool ?? false {
+                            OnThisDaySection()
+                                .padding(.top, 24)
+                        }
+
                         // Recently played - horizontal scroll (with context menu per row)
                         recentlyPlayedSection
                             .padding(.top, 24)
@@ -1712,6 +1722,95 @@ struct HomeRecentTrackRow: View {
             .tint(Theme.cyberCyan)
             .disabled(isDownloaded)
         }
+    }
+}
+
+// MARK: - On This Day Section
+// S18 / P1-3: tracks the user played on this calendar day in
+// prior years. Hidden when no entries (e.g. brand-new user).
+private struct OnThisDaySection: View {
+    @StateObject private var viewModel = MemoryTimelineViewModel()
+    @StateObject private var playerState = PlayerState.shared
+
+    var body: some View {
+        Group {
+            if !viewModel.entries.isEmpty {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        Image(systemName: "calendar")
+                            .foregroundColor(Theme.cyberMagenta)
+                        Text("On This Day")
+                            .font(Typography.sectionHeader)
+                            .foregroundColor(.cyberDim)
+                        Spacer()
+                    }
+                    .padding(.horizontal, 20)
+
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 12) {
+                            ForEach(viewModel.entries) { entry in
+                                OnThisDayCard(entry: entry) {
+                                    HapticManager.light()
+                                    // Build a Track directly from the
+                                    // CDTrack's fields. Track has no
+                                    // `from(cdTrack:)` initializer.
+                                    let track = Track(
+                                        videoId: entry.track.videoId ?? "",
+                                        title: entry.track.title ?? "Unknown",
+                                        artists: entry.track.artists,
+                                        album: entry.track.album,
+                                        durationSeconds: Int(entry.track.durationSeconds),
+                                        thumbnails: entry.track.thumbnailURLs.compactMap { URL(string: $0) }.map { Thumbnail(url: $0, width: 0, height: 0) },
+                                        isExplicit: entry.track.isExplicit,
+                                        videoType: entry.track.videoType
+                                    )
+                                    playerState.play(track: track)
+                                }
+                            }
+                        }
+                        .padding(.horizontal, 20)
+                    }
+                }
+                .onAppear { viewModel.loadIfNeeded() }
+            }
+        }
+    }
+}
+
+private struct OnThisDayCard: View {
+    let entry: MemoryTimelineViewModel.MemoryEntry
+    let onTap: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(String(entry.year))
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .foregroundColor(Theme.cyberMagenta)
+
+                Text(entry.track.title ?? "Unknown")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(.white)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+
+                Text(entry.track.displayArtist)
+                    .font(.system(size: 10))
+                    .foregroundColor(Theme.cyberTextSecondary)
+                    .lineLimit(1)
+            }
+            .frame(width: 140, alignment: .leading)
+            .padding(12)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(Theme.cyberSurface)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(Theme.cyberMagenta.opacity(0.3), lineWidth: 1)
+                    )
+            )
+        }
+        .buttonStyle(.plain)
     }
 }
 
