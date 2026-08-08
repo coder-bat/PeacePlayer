@@ -155,7 +155,7 @@ struct QueueView: View {
                                         Label("Remove", systemImage: "trash")
                                     }
                                 }
-                                .swipeActions(edge: .trailing) {
+                                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                                     Button(role: .destructive) {
                                         HapticManager.light()
                                         let actualIndex = playerState.currentIndex + 1 + index
