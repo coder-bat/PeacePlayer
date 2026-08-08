@@ -342,6 +342,55 @@ struct SettingsView: View {
                         .textCase(.uppercase)
                 }
 
+                // MARK: - Labs Section (S18 / v1.6)
+                // Feature flags. Each toggle is opt-in so the user
+                // can decide whether to enable experimental /
+                // risky behaviors. Defaults match the shipping
+                // v1.5 state.
+                Section {
+                    LabsToggle(
+                        key: "ff_on_this_day",
+                        defaultValue: false,
+                        icon: "calendar",
+                        iconColor: Theme.cyberMagenta,
+                        title: "On This Day",
+                        subtitle: "Show tracks you played on this day in prior years"
+                    )
+                    LabsToggle(
+                        key: "ff_capsule_prewarn",
+                        defaultValue: false,
+                        icon: "bell.badge",
+                        iconColor: Theme.cyberYellow,
+                        title: "Capsule Pre-Warning",
+                        subtitle: "Notify 7 days before a Time Capsule unlocks"
+                    )
+                    LabsToggle(
+                        key: "ff_daily_recap",
+                        defaultValue: false,
+                        icon: "clock.arrow.circlepath",
+                        iconColor: Theme.cyberCyan,
+                        title: "Daily Recap",
+                        subtitle: "If you haven't played in 24h, remind you of your last track"
+                    )
+                    LabsToggle(
+                        key: "ff_cross_feature_wiring",
+                        defaultValue: true,
+                        icon: "antenna.radiowaves.left.and.right",
+                        iconColor: Theme.cyberMagenta,
+                        title: "Memory-Boosted Anti-Algorithm",
+                        subtitle: "Songs you've written memories for are seeded more often"
+                    )
+                } header: {
+                    Text("Labs")
+                        .font(Typography.sectionHeader)
+                        .foregroundColor(Theme.cyberMagenta)
+                        .textCase(.uppercase)
+                } footer: {
+                    Text("Experimental features. Each toggle is independent.")
+                        .font(.caption)
+                        .foregroundColor(Theme.cyberTextSecondary)
+                }
+
                 // MARK: - Music Sources Section
                 Section {
                     // YouTube (always active)
@@ -874,5 +923,67 @@ struct FavoriteArtistFlowLayout: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - Labs Toggle
+// S18 / v1.6: small row used by the Labs section. Binds a
+// UserDefaults key to a Toggle so the user can flip feature
+// flags without a code change. `defaultValue` is the initial
+// value when the key is absent and the value the rest of the
+// app sees via UserDefaults.standard.bool(forKey:).
+private struct LabsToggle: View {
+    let key: String
+    let defaultValue: Bool
+    let icon: String
+    let iconColor: Color
+    let title: String
+    let subtitle: String
+
+    @State private var isOn: Bool
+
+    init(
+        key: String,
+        defaultValue: Bool,
+        icon: String,
+        iconColor: Color,
+        title: String,
+        subtitle: String
+    ) {
+        self.key = key
+        self.defaultValue = defaultValue
+        self.icon = icon
+        self.iconColor = iconColor
+        self.title = title
+        self.subtitle = subtitle
+        // Read the current value from UserDefaults at init.
+        // UserDefaults is the source of truth; the rest of
+        // the app reads the same key.
+        let current = (UserDefaults.standard.object(forKey: key) as? Bool) ?? defaultValue
+        self._isOn = State(initialValue: current)
+    }
+
+    var body: some View {
+        Toggle(isOn: Binding(
+            get: { isOn },
+            set: { newValue in
+                isOn = newValue
+                UserDefaults.standard.set(newValue, forKey: key)
+            }
+        )) {
+            HStack(spacing: 12) {
+                Image(systemName: icon)
+                    .foregroundColor(iconColor)
+                    .frame(width: 28)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .foregroundColor(.white)
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundColor(Theme.cyberTextSecondary)
+                }
+            }
+        }
+        .listRowBackground(Theme.cyberSurface)
     }
 }
