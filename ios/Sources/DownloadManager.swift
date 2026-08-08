@@ -352,7 +352,18 @@ class DownloadManager: ObservableObject {
     /// the query is a defense-in-depth fallback (the iOS app
     /// already sends the Bearer header).
     private func appendToken(to url: String) -> String {
-        guard let token = KeychainHelper.shared.read("session_token") else {
+        // S17-H / DOWNLOAD-STATUS-CHECK (2026-08-08): use the
+        // SAME keychain key the rest of the app uses
+        // ("peaceplayer.session_token", defined in APIService as
+        // `authTokenKeychainKey` and used by AuthService/SyncService).
+        // The earlier key "session_token" was a typo and read nil,
+        // so the fallback token was never appended to the URL —
+        // /library returned 401 (25 bytes of
+        // {"detail":"unauthorized"}) and the iOS app saved it as
+        // the audio file. BackgroundDownloadService now also checks
+        // the HTTP status code and surfaces non-2xx as a failure.
+        guard let token = KeychainHelper.shared.read(APIService.authTokenKeychainKey) else {
+            print("⚠️ appendToken: no session token in keychain (key=\(APIService.authTokenKeychainKey))")
             return url
         }
         if url.contains("token=") { return url }
