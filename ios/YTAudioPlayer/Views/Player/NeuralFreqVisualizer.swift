@@ -39,6 +39,14 @@ struct NeuralFreqVisualizer: View {
             }
         }
         .drawingGroup() // Rasterize entire canvas as a single Metal layer
+        // S18 / QW-8: a11y metadata for VoiceOver. Canvas is
+        // opaque to assistive tech by default; announce it as
+        // a visualizer with on/off state. The user already knows
+        // what's playing from the track title; the visualizer is
+        // decoration.
+        .accessibilityLabel("Audio visualizer")
+        .accessibilityValue(engine.isActive ? "Active" : "Inactive")
+        .accessibilityAddTraits(.updatesFrequently)
     }
 
     // MARK: - Neural (default) — bars from bottom, cyan→magenta gradient with glow
