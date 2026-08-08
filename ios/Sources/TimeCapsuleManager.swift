@@ -373,6 +373,44 @@ final class TimeCapsuleManager: ObservableObject {
         )
 
         UNUserNotificationCenter.current().add(request)
+
+        // S18 / P1-7: 7-day pre-unlock notification. Gives the
+        // user a heads-up that a capsule is about to open so they
+        // can plan to be in the app. Gated behind the
+        // ff_capsule_prewarn flag — default OFF for v1.5 to
+        // avoid a nag-pattern rollout. When the flag flips ON,
+        // a second UNNotificationRequest fires 7 days before
+        // unlockAt with the same deep-link userInfo.
+        if UserDefaults.standard.object(forKey: "ff_capsule_prewarn") as? Bool ?? false {
+            let prewarnDate = capsule.unlockAt.addingTimeInterval(-7 * 24 * 60 * 60)
+            // Only schedule the prewarn if the prewarn date is in
+            // the future. Past capsules shouldn't fire a prewarn.
+            if prewarnDate > Date() {
+                let prewarnContent = UNMutableNotificationContent()
+                prewarnContent.title = "Time Capsule unlocks in 7 days 💌"
+                prewarnContent.body = "Your capsule with \"\(trackTitle)\" opens in a week"
+                prewarnContent.sound = nil  // silent — it's a reminder, not an event
+                prewarnContent.categoryIdentifier = "TIME_CAPSULE"
+                prewarnContent.userInfo = [
+                    "capsuleId": capsuleId,
+                    "deepLink": "peaceplayer://capsule/\(capsuleId)"
+                ]
+                let prewarnComponents = Calendar.current.dateComponents(
+                    [.year, .month, .day, .hour, .minute],
+                    from: prewarnDate
+                )
+                let prewarnTrigger = UNCalendarNotificationTrigger(
+                    dateMatching: prewarnComponents,
+                    repeats: false
+                )
+                let prewarnRequest = UNNotificationRequest(
+                    identifier: "timecapsule-prewarn-\(capsuleId)",
+                    content: prewarnContent,
+                    trigger: prewarnTrigger
+                )
+                UNUserNotificationCenter.current().add(prewarnRequest)
+            }
+        }
     }
 
     func requestNotificationPermission() {

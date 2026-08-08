@@ -18,6 +18,30 @@ final class WalkDJAppDelegate: NSObject, UIApplicationDelegate, UNUserNotificati
         UNUserNotificationCenter.current().delegate = self
         AdaptiveWalkDJManager.shared.configure()
 
+        // S18 / P1-7: register the TIME_CAPSULE notification
+        // category with two actions. Even with the body of the
+        // notification work flag-gated off, the category is
+        // safe to register — actions only show when a user
+        // long-presses the banner. The actions give us a hook
+        // for future v1.6 work (Snooze, Mark as read).
+        let openAction = UNNotificationAction(
+            identifier: "TIME_CAPSULE_OPEN",
+            title: "Open Capsule",
+            options: [.foreground]
+        )
+        let snoozeAction = UNNotificationAction(
+            identifier: "TIME_CAPSULE_SNOOZE",
+            title: "Snooze 1 day",
+            options: []
+        )
+        let capsuleCategory = UNNotificationCategory(
+            identifier: "TIME_CAPSULE",
+            actions: [openAction, snoozeAction],
+            intentIdentifiers: [],
+            options: []
+        )
+        UNUserNotificationCenter.current().setNotificationCategories([capsuleCategory])
+
         // C-1 fix: scan for orphan downloads that completed while the app was
         // terminated. Without this, files saved to <Documents>/Downloads/ by
         // the URLSession background completion path are not registered in
