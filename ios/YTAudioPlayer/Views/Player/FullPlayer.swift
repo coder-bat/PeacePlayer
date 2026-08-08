@@ -802,19 +802,22 @@ private struct ProgressSection: View {
                 .frame(height: 48)
                 .transition(.opacity)
             } else {
-                // Fallback flat bar while waveform loads — reads clock directly
+                // Fallback flat bar while waveform loads — reads clock directly.
+                // S18 / QW-4: use cyberCyan instead of raw white so the
+                // fallback bar matches the waveform bar (no white→cyan
+                // flash when the user opens the player).
                 GeometryReader { geometry in
                     ZStack(alignment: .leading) {
                         RoundedRectangle(cornerRadius: CornerRadius.xxs)
-                            .fill(Color.white.opacity(0.2))
+                            .fill(Theme.cyberCyan.opacity(0.2))
                             .frame(height: 4)
 
                         RoundedRectangle(cornerRadius: CornerRadius.xxs)
-                            .fill(Color.white)
+                            .fill(Theme.cyberCyan)
                             .frame(width: max(0, geometry.size.width * CGFloat(clock.progress)), height: 4)
 
                         Circle()
-                            .fill(Color.white)
+                            .fill(Theme.cyberCyan)
                             .frame(width: 14, height: 14)
                             .shadow(radius: 4)
                             .offset(x: max(0, geometry.size.width * CGFloat(clock.progress)) - 7)
