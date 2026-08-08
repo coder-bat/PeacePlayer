@@ -153,71 +153,80 @@ struct VibeButton: View {
         let hour = Calendar.current.component(.hour, from: Date())
         let weekday = Calendar.current.component(.weekday, from: Date())
         let isWeekend = weekday == 1 || weekday == 7
-        
-        // Morning: 6-11
+
+        // S18 / P1-4: cyberpunk-accented contextual vibes. The 4
+        // accent colors map to time-of-day "energy" archetypes:
+        // cyan = cool/focus, magenta = hot/active, yellow = warm/upbeat,
+        // dim = quiet/wind-down. 8 distinct vibe definitions fit
+        // comfortably into 4 visual categories.
+
+        // Morning: 6-11 — yellow (warm, waking up)
         if hour >= 6 && hour < 11 {
             return VibeSuggestion(
                 icon: "sun.max.fill",
                 title: "Good Morning",
                 subtitle: "Start your day",
-                color: .orange,
+                color: Theme.cyberYellow,
                 searchQuery: "morning energy upbeat"
             )
         }
-        
-        // Work hours: 11-17 on weekdays
+
+        // Work hours: 11-17 on weekdays — cyan (cool, focused)
         if !isWeekend && hour >= 11 && hour < 17 {
             return VibeSuggestion(
                 icon: "briefcase.fill",
                 title: "Focus Mode",
                 subtitle: "Deep work flow",
-                color: .blue,
+                color: Theme.cyberCyan,
                 searchQuery: "focus concentration instrumental"
             )
         }
-        
-        // Evening: 17-22
+
+        // Evening: 17-22 — dim (quiet, winding down)
         if hour >= 17 && hour < 22 {
             return VibeSuggestion(
                 icon: "moon.stars.fill",
                 title: "Evening Chill",
                 subtitle: "Wind down",
-                color: .indigo,
+                color: Theme.cyberDim,
                 searchQuery: "chill evening relax"
             )
         }
-        
-        // Late night: 22-6
+
+        // Late night: 22-6 — dim (sleep)
         return VibeSuggestion(
             icon: "moon.fill",
             title: "Late Night",
             subtitle: "Sleep & dream",
-            color: .purple,
+            color: Theme.cyberDim,
             searchQuery: "sleep ambient calm"
         )
     }
-    
+
     private var defaultVibes: [VibeSuggestion] {
         [
+            // Workout: magenta (hot, high energy)
             VibeSuggestion(
                 icon: "flame.fill",
                 title: "Workout",
                 subtitle: "High energy",
-                color: .red,
+                color: Theme.cyberMagenta,
                 searchQuery: "workout gym pump up"
             ),
+            // Feel Good: yellow (warm, happy)
             VibeSuggestion(
                 icon: "heart.fill",
                 title: "Feel Good",
                 subtitle: "Happy vibes",
-                color: .pink,
+                color: Theme.cyberYellow,
                 searchQuery: "happy feel good pop"
             ),
+            // Rainy Day: cyan (cool, calm)
             VibeSuggestion(
                 icon: "cloud.rain.fill",
                 title: "Rainy Day",
                 subtitle: "Cozy & calm",
-                color: Theme.cyberDim,
+                color: Theme.cyberCyan,
                 searchQuery: "rainy day lo-fi acoustic"
             )
         ]
@@ -300,14 +309,20 @@ struct VibePickerSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     let allVibes: [VibeSuggestion] = [
-        VibeSuggestion(icon: "sun.max.fill", title: "Morning", subtitle: "Start your day", color: .orange, searchQuery: "morning"),
-        VibeSuggestion(icon: "briefcase.fill", title: "Focus", subtitle: "Work & study", color: .blue, searchQuery: "focus"),
-        VibeSuggestion(icon: "flame.fill", title: "Workout", subtitle: "High energy", color: .red, searchQuery: "workout"),
-        VibeSuggestion(icon: "moon.stars.fill", title: "Evening", subtitle: "Wind down", color: .indigo, searchQuery: "chill"),
-        VibeSuggestion(icon: "moon.fill", title: "Sleep", subtitle: "Rest easy", color: .purple, searchQuery: "sleep"),
-        VibeSuggestion(icon: "heart.fill", title: "Feel Good", subtitle: "Happy vibes", color: .pink, searchQuery: "happy"),
-        VibeSuggestion(icon: "cloud.rain.fill", title: "Rainy Day", subtitle: "Cozy & calm", color: Theme.cyberDim, searchQuery: "lofi"),
-        VibeSuggestion(icon: "party.popper.fill", title: "Party", subtitle: "Let's celebrate", color: .yellow, searchQuery: "party")
+        // S18 / P1-4: 8 vibes → 4 cyberpunk accents. Mapping rationale
+        // (color → vibe energy):
+        //   yellow  = warm, awake, celebratory (Morning, Feel Good, Party)
+        //   cyan    = cool, focused, calm     (Focus, Rainy Day)
+        //   magenta = hot, intense            (Workout)
+        //   dim     = quiet, restful          (Evening, Sleep)
+        VibeSuggestion(icon: "sun.max.fill", title: "Morning", subtitle: "Start your day", color: Theme.cyberYellow, searchQuery: "morning"),
+        VibeSuggestion(icon: "briefcase.fill", title: "Focus", subtitle: "Work & study", color: Theme.cyberCyan, searchQuery: "focus"),
+        VibeSuggestion(icon: "flame.fill", title: "Workout", subtitle: "High energy", color: Theme.cyberMagenta, searchQuery: "workout"),
+        VibeSuggestion(icon: "moon.stars.fill", title: "Evening", subtitle: "Wind down", color: Theme.cyberDim, searchQuery: "chill"),
+        VibeSuggestion(icon: "moon.fill", title: "Sleep", subtitle: "Rest easy", color: Theme.cyberDim, searchQuery: "sleep"),
+        VibeSuggestion(icon: "heart.fill", title: "Feel Good", subtitle: "Happy vibes", color: Theme.cyberYellow, searchQuery: "happy"),
+        VibeSuggestion(icon: "cloud.rain.fill", title: "Rainy Day", subtitle: "Cozy & calm", color: Theme.cyberCyan, searchQuery: "lofi"),
+        VibeSuggestion(icon: "party.popper.fill", title: "Party", subtitle: "Let's celebrate", color: Theme.cyberYellow, searchQuery: "party")
     ]
 
     var body: some View {
@@ -360,15 +375,15 @@ struct VibeGridItem: View {
                 VStack(spacing: 2) {
                     Text(vibe.title)
                         .font(.system(size: 16, weight: .semibold))
-                    
+
                     Text(vibe.subtitle)
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundColor(Theme.cyberTextSecondary)
                 }
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 20)
-            .background(Color(.systemGray6))
+            .background(Theme.cyberSurface)
             .cornerRadius(16)
         }
         .buttonStyle(.plain)
