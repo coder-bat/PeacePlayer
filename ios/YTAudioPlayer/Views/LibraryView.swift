@@ -36,6 +36,7 @@ struct LibraryView: View {
     @ObservedObject var undoService = UndoService.shared
     @State private var viewMode: LibraryViewMode = .grid
     @State private var showStorageInfo = false
+    @State private var showDownloadQueue = false
     @State private var selectedTracks: Set<String> = []
     @State private var isEditing = false
     @State private var searchQuery = ""
@@ -84,6 +85,41 @@ struct LibraryView: View {
 
                 ToolbarItem(placement: .navigationBarTrailing) {
                     HStack(spacing: 12) {
+                        // S18 (P0-1 rescue): Downloads queue + History
+                        // were orphaned because nothing observed
+                        // DownloadManager.showDownloadQueue. Surface
+                        // them via a bell in the Library toolbar.
+                        // The bell also shows a badge when there are
+                        // active or failed downloads.
+                        Button {
+                            HapticManager.light()
+                            showDownloadQueue = true
+                        } label: {
+                            ZStack(alignment: .topTrailing) {
+                                Image(systemName: "arrow.down.circle")
+                                    .font(.system(size: 17, weight: .semibold))
+                                    .foregroundColor(Theme.cyberCyan)
+                                // Badge: active OR failed downloads
+                                let activeCount = DownloadManager.shared.activeDownloads.count
+                                let failedCount = DownloadManager.shared.completedDownloads.filter {
+                                    if case .failed = $0.status { return true }; return false
+                                }.count
+                                if activeCount + failedCount > 0 {
+                                    Text("\(activeCount + failedCount)")
+                                        .font(.system(size: 9, weight: .bold, design: .monospaced))
+                                        .foregroundColor(.white)
+                                        .padding(.horizontal, 4)
+                                        .padding(.vertical, 1)
+                                        .background(
+                                            Capsule().fill(failedCount > 0 ? Theme.cyberMagenta : Theme.cyberYellow)
+                                        )
+                                        .offset(x: 6, y: -4)
+                                }
+                            }
+                        }
+                        .accessibilityLabel("Downloads")
+                        .accessibilityHint("Show download queue and history")
+
                         // 2026-06-28 (S6): show toolbar even when the
                         // library is empty so the sort menu is
                         // always accessible (it controls the
@@ -153,6 +189,9 @@ struct LibraryView: View {
                         viewModel.clearLibrary()
                     }
                 )
+            }
+            .sheet(isPresented: $showDownloadQueue) {
+                DownloadQueueView()
             }
             .alert("DELETE \(selectedTracks.count) TRACKS?", isPresented: $viewModel.showDeleteConfirmation) {
                 Button("CANCEL", role: .cancel) {
