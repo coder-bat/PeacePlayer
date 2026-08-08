@@ -296,6 +296,14 @@ final class TimeCapsuleManager: ObservableObject {
         capsule.openedAt = Self.trustedNow()
         try? context.save()
 
+        // S18 (P0-5): remove the pending unlock notification so the
+        // user doesn't get a "ready to open" banner for a capsule
+        // they already opened. Only deleteCapsule did this before —
+        // the open path was leaving the pending request in place.
+        UNUserNotificationCenter.current().removePendingNotificationRequests(
+            withIdentifiers: ["timecapsule-\(id.uuidString)"]
+        )
+
         refresh()
         return capsules.first { $0.id == id }
     }
@@ -325,6 +333,16 @@ final class TimeCapsuleManager: ObservableObject {
         content.sound = .default
         content.categoryIdentifier = "TIME_CAPSULE"
 
+        // S18 (P0-5): set userInfo so the notification response can
+        // deep-link to the vault. Without this, tapping the banner just
+        // opens the app to Home — the user has to find the vault via
+        // FullPlayer long-press, which most don't know about.
+        let capsuleId = capsule.id.uuidString
+        content.userInfo = [
+            "capsuleId": capsuleId,
+            "deepLink": "peaceplayer://capsule/\(capsuleId)"
+        ]
+
         let components = Calendar.current.dateComponents(
             [.year, .month, .day, .hour, .minute],
             from: capsule.unlockAt
@@ -332,7 +350,7 @@ final class TimeCapsuleManager: ObservableObject {
         let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
 
         let request = UNNotificationRequest(
-            identifier: "timecapsule-\(capsule.id.uuidString)",
+            identifier: "timecapsule-\(capsuleId)",
             content: content,
             trigger: trigger
         )

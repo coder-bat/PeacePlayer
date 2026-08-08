@@ -22,6 +22,11 @@ struct ContentView: View {
     @State private var selectedTab = 0
     @State private var showFullPlayer = false
     @State private var showRestorePrompt = false
+    // S18 (P0-5): Time Capsule vault sheet, posted by the
+    // notification response handler and the deep link router.
+    // Lives at the root (not behind the FullPlayer) so a cold
+    // launch from a notification banner can present it.
+    @State private var showTimeCapsuleVault = false
     // S13: prevent the restore prompt from re-appearing in the same
     // session after dismissal. Cleared when the app cold-launches
     // (UserDefaults is process-scoped via AppStorage).
@@ -121,6 +126,18 @@ struct ContentView: View {
                     .zIndex(1)
             }
 
+            // S18 (P0-5): Time Capsule vault sheet, presented at the
+            // root so notification taps work from any tab (Home /
+            // Search / Library) and from cold app launch. Wrapped
+            // in an empty View so the .sheet modifier has a stable
+            // contextual type (the bare .sheet after a conditional
+            // block confuses the type checker).
+            Color.clear
+                .frame(width: 0, height: 0)
+                .sheet(isPresented: $showTimeCapsuleVault) {
+                    TimeCapsuleVaultView()
+                }
+
             // Undo toast — above tab bar + MiniPlayer, below sheets
             VStack {
                 Spacer()
@@ -175,6 +192,13 @@ struct ContentView: View {
             withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
                 selectedTab = 1
             }
+        }
+        // S18 (P0-5): Time Capsule notification response posts this
+        // so the vault opens at the app root. Works from any tab
+        // and from cold launch (the response handler in
+        // WalkDJAppDelegate fires before the home screen renders).
+        .onReceive(NotificationCenter.default.publisher(for: .openTimeCapsuleVault)) { _ in
+            showTimeCapsuleVault = true
         }
         // S14: Settings / Playlists / Radio are no longer presented as
         // sheets from ContentView — HomeView's NavigationStack pushes
@@ -602,6 +626,11 @@ extension Notification.Name {
     // S13: posted by LibraryView's empty-state CTA. ContentView listens
     // and switches to the Search tab (tag 1).
     static let openSearch = Notification.Name("openSearch")
+    // S18 (P0-5): posted by WalkDJAppDelegate when the user taps a
+    // Time Capsule unlock notification, and by handleDeepLink when a
+    // peaceplayer://capsule/{id} URL is opened. ContentView
+    // listens and presents TimeCapsuleVaultView at the app root.
+    static let openTimeCapsuleVault = Notification.Name("openTimeCapsuleVault")
     // S13: posted by LibraryView when the user adds a track to the
     // queue from the row context menu. FullPlayer observes this to
     // pulse its Queue icon as feedback (Phase 4.1).

@@ -68,7 +68,22 @@ final class WalkDJAppDelegate: NSObject, UIApplicationDelegate, UNUserNotificati
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
-        AdaptiveWalkDJManager.shared.handleNotificationResponse(userInfo: response.notification.request.content.userInfo)
+        let userInfo = response.notification.request.content.userInfo
+
+        // S18 (P0-5): Time Capsule unlock notifications now carry
+        // userInfo["capsuleId"] + userInfo["deepLink"]. Route to the
+        // vault at the app root so the user lands on the actual
+        // capsule instead of Home. The AdaptiveWalkDJ handler is
+        // called too (no-op for non-Walk-DJ notifications).
+        if let capsuleId = userInfo["capsuleId"] as? String {
+            NotificationCenter.default.post(
+                name: .openTimeCapsuleVault,
+                object: nil,
+                userInfo: ["capsuleId": capsuleId]
+            )
+        }
+
+        AdaptiveWalkDJManager.shared.handleNotificationResponse(userInfo: userInfo)
         completionHandler()
     }
 }

@@ -109,6 +109,20 @@ struct YTAudioPlayerApp: App {
             handleShortcutDeepLink(url)
         case "walk-dj":
             adaptiveWalkDJ.handleWalkDJURL(url)
+        case "capsule":
+            // S18 (P0-5): peaceplayer://capsule/{uuid}
+            // The capsuleId is the path component (URL parsing strips
+            // the leading "/"). The notification response handler in
+            // WalkDJAppDelegate does the same routing.
+            let capsuleId = url.pathComponents
+                .first(where: { $0 != "/" && !$0.isEmpty }) ?? ""
+            if !capsuleId.isEmpty {
+                NotificationCenter.default.post(
+                    name: .openTimeCapsuleVault,
+                    object: nil,
+                    userInfo: ["capsuleId": capsuleId]
+                )
+            }
         default:
             break
         }
