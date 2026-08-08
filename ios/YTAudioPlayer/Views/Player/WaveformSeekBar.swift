@@ -24,6 +24,11 @@ struct WaveformSeekBar: View {
     /// Called on drag start/end for thumb visibility control.
     var onDragChange: ((Bool) -> Void)?
 
+    // S18 / P1-7: track which 5%-bucket the user is in so we can fire
+    // a haptic tick only on bucket changes (not on every drag pixel).
+    // Bucket = Int(progress * 20). 20 buckets = 5% increments.
+    @State private var lastTickBucket: Int = -1
+
     // MARK: - Layout
 
     private var barSpacing: CGFloat { 1.5 }
@@ -46,9 +51,23 @@ struct WaveformSeekBar: View {
                         let newProgress = min(max(0, Double(value.location.x / geo.size.width)), 1)
                         onSeek(newProgress)
                         onDragChange?(true)
+                        // S18 / P1-7: fire a haptic tick on every 5%
+                        // bucket the user crosses. The GestureEngine
+                        // .scrubTick case was defined but never called
+                        // — Apple Music / Spotify / SoundCloud all tick
+                        // the scrubber. Using GestureEngine (not
+                        // HapticManager) for the .scrubTick intensity
+                        // profile (impactLight at 0.3 intensity).
+                        let bucket = Int(newProgress * 20)
+                        if bucket != lastTickBucket {
+                            lastTickBucket = bucket
+                            GestureEngine.shared.triggerHaptic(.scrubTick)
+                        }
                     }
                     .onEnded { _ in
                         onDragChange?(false)
+                        // Reset bucket so a future scrub starts fresh.
+                        lastTickBucket = -1
                     }
             )
             // S13: a11y — Canvas is opaque to VoiceOver by default.
