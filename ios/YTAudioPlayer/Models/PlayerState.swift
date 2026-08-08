@@ -101,9 +101,13 @@ enum ContentSource: Equatable {
     }
 
     var tintColor: Color {
+        // S18 / P1-5: cyberpunk-themed source badges. .red YouTube was
+        // the only raw system color in the player chrome. Semantics:
+        // magenta = remote stream, cyan = local file. Strengthens the
+        // theme instead of fighting it.
         switch self {
-        case .youtube: return .red
-        case .local: return .green
+        case .youtube: return Theme.cyberMagenta
+        case .local:   return Theme.cyberCyan
         }
     }
 }
