@@ -780,12 +780,51 @@ struct FullPlayer: View {
 /// PlaybackClock so the 0.5s tick re-renders THIS view, not the parent
 /// FullPlayer body. This is the primary performance win from the
 /// PlaybackClock extraction.
+// S18 / P1-11: small time bubble that appears above the scrubber
+// thumb during drag. Apple Music / Spotify show a time label that
+// follows the thumb; previously the user had to look at the time
+// labels at the ends of the bar to see the seek time.
+private struct ScrubberTimeBubble: View {
+    let text: String
+    let thumbX: CGFloat
+
+    var body: some View {
+        Text(text)
+            .font(.system(size: 12, weight: .semibold, design: .monospaced))
+            .foregroundColor(.white)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(
+                RoundedRectangle(cornerRadius: CornerRadius.xs)
+                    .fill(Theme.cyberSurface)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: CornerRadius.xs)
+                            .stroke(Theme.cyberCyan.opacity(0.5), lineWidth: 1)
+                    )
+                    .shadow(color: .black.opacity(0.4), radius: 4, x: 0, y: 2)
+            )
+            // Center the bubble horizontally on the thumb x. The
+            // outer .offset on the caller adds -7 (half the 14pt
+            // thumb width) so the bubble's center sits on the
+            // thumb's center.
+            .offset(x: -30)
+    }
+}
+
 private struct ProgressSection: View {
     @ObservedObject var clock: PlaybackClock
     @State private var waveformPeaks: [Float]?
     let onSeek: (Double) -> Void
     let onScrubberDragChange: (Bool) -> Void
     let onScrubberDragEnded: () -> Void
+
+    // S18 / P1-11: time bubble state. While dragging, the bubble
+    // shows the time at the user's drag position (not the player's
+    // current time, which lags behind the seek). When not dragging,
+    // the bubble is hidden.
+    @State private var isDraggingBubble: Bool = false
+    @State private var dragProgressBubble: Double = 0
+    @State private var scrubberWidth: CGFloat = 0
 
     var body: some View {
         VStack(spacing: 4) {
@@ -806,6 +845,7 @@ private struct ProgressSection: View {
                 // S18 / QW-4: use cyberCyan instead of raw white so the
                 // fallback bar matches the waveform bar (no white→cyan
                 // flash when the user opens the player).
+                // S18 / P1-11: also drives the time-bubble state.
                 GeometryReader { geometry in
                     ZStack(alignment: .leading) {
                         RoundedRectangle(cornerRadius: CornerRadius.xxs)
@@ -821,15 +861,33 @@ private struct ProgressSection: View {
                             .frame(width: 14, height: 14)
                             .shadow(radius: 4)
                             .offset(x: max(0, geometry.size.width * CGFloat(clock.progress)) - 7)
+
+                        // S18 / P1-11: 24pt time bubble above the thumb
+                        // during drag. Position follows the user's
+                        // drag x. Shows dragProgress * duration.
+                        if isDraggingBubble {
+                            ScrubberTimeBubble(
+                                text: formatTime(dragProgressBubble * clock.duration),
+                                thumbX: max(0, geometry.size.width * CGFloat(dragProgressBubble)) - 7
+                            )
+                            .offset(x: max(0, geometry.size.width * CGFloat(dragProgressBubble)) - 7,
+                                    y: -22)
+                            .transition(.opacity)
+                        }
                     }
                     .contentShape(Rectangle())
+                    .onAppear { scrubberWidth = geometry.size.width }
                     .gesture(
                         DragGesture(minimumDistance: 0)
                             .onChanged { value in
                                 let newProgress = min(max(0, Double(value.location.x / geometry.size.width)), 1)
+                                isDraggingBubble = true
+                                dragProgressBubble = newProgress
+                                scrubberWidth = geometry.size.width
                                 onSeek(newProgress)
                             }
                             .onEnded { _ in
+                                isDraggingBubble = false
                                 onScrubberDragEnded()
                             }
                     )
