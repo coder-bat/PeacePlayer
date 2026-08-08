@@ -47,6 +47,7 @@ from apple_auth import (
     mint_session_jwt,
     current_user_from_request,
     get_or_create_user,
+    save_user,
     touch_last_seen,
     load_sync_blob,
     save_sync_blob,
