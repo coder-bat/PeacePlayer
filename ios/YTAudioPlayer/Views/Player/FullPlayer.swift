@@ -624,17 +624,16 @@ struct FullPlayer: View {
                         let horizontal = abs(value.translation.width)
                         let vertical = abs(value.translation.height)
                         guard horizontal > vertical else { return }
-                        // S17-H / FORMAT-18-FAST: cycle
-                        // through the three modes instead of
-                        // toggling a Bool. Swipe right →
-                        // next mode (poster → video →
-                        // visualizer → poster). Swipe left →
-                        // previous mode.
+                        // S17-H / FORMAT-18-FAST: cycle through the
+                        // three modes (poster → video → visualizer
+                        // → poster). S18 / QW-3: iOS convention is
+                        // swipe right = next sibling. The previous
+                        // logic (swipe right → previous) was reversed.
                         withAnimation(reduceMotion ? .none : .spring(response: 0.5, dampingFraction: 0.75)) {
                             if value.translation.width < 0 {
-                                artworkMode = artworkMode.next
-                            } else {
                                 artworkMode = artworkMode.previous
+                            } else {
+                                artworkMode = artworkMode.next
                             }
                         }
                     }
