@@ -456,23 +456,20 @@ class DownloadManager: ObservableObject {
                 self?.progressTimer = nil
             }
 
-            // Save to Core Data (can be done on background queue).
+            // Save to Core Data + verify on the SAME context. Previous
+            // S17-H / LIBRARY-SAVE-SILENT-FAIL split this into
+            // saveDownloadToCoreData (which called a fresh
+            // backgroundContext) and verifyLibraryEntry (which called
+            // ANOTHER fresh backgroundContext). Two new background
+            // contexts don't always see each other's writes reliably
+            // — verify could return false even when save succeeded,
+            // firing the error haptic on a successful download.
             //
-            // S17-H / LIBRARY-SAVE-SILENT-FAIL (2026-08-08): the
-            // success haptic in handleDownloadSuccess was firing
-            // even when the CoreData save threw (because the
-            // success path was unconditional). That made the
-            // "Download complete" UI look like a success while
-            // the file silently failed to land in the Library.
-            // saveDownloadToCoreData now surfaces the error via
-            // ErrorHandler — but the haptic still needs gating
-            // so it doesn't lie about a silent failure.
-            self.saveDownloadToCoreData(track: track, fileURL: fileURL)
-
-            // Verify the file was actually persisted. The save
-            // above runs on the background context; we re-fetch
-            // on the same context to confirm the row exists.
-            let savedOk = self.verifyLibraryEntry(videoId: track.videoId)
+            // saveDownloadToCoreDataWithVerify does save + verify on
+            // the same context, returns a single Bool. If the save
+            // itself throws, it surfaces the error via ErrorHandler
+            // and returns false (no silent success).
+            let savedOk = self.saveDownloadToCoreDataWithVerify(track: track, fileURL: fileURL)
 
             if savedOk {
                 self.handleDownloadSuccess(taskId, path: fileURL.path)
@@ -485,29 +482,6 @@ class DownloadManager: ObservableObject {
             self.isDownloading = false
             self.processQueue()
         }
-    }
-
-    /// Re-fetch the Library entry for `videoId` to confirm the
-    /// background-context save actually persisted. Returns false
-    /// if the CDDownloadedTrack row is missing or has no path.
-    /// Used by handleDownloadComplete to decide between success
-    /// haptic (file is in the library) and failure toast (silent
-    /// save failure, file is on disk but the Library can't see it).
-    private func verifyLibraryEntry(videoId: String) -> Bool {
-        let context = PersistenceController.shared.backgroundContext
-        var ok = false
-        context.performAndWait {
-            let request: NSFetchRequest<CDDownloadedTrack> = CDDownloadedTrack.fetchRequest()
-            request.predicate = NSPredicate(format: "track.videoId == %@", videoId)
-            request.fetchLimit = 1
-            if let download = try? context.fetch(request).first {
-                let path = download.localPath ?? ""
-                if !path.isEmpty && FileManager.default.fileExists(atPath: path) {
-                    ok = true
-                }
-            }
-        }
-        return ok
     }
 
     func handleDownloadError(trackId: String, error: Error) {
@@ -531,9 +505,36 @@ class DownloadManager: ObservableObject {
         }
     }
 
-    private func saveDownloadToCoreData(track: Track, fileURL: URL) {
-        // Use a background context for Core Data operations
+    /// Save the download to CoreData AND verify it persisted, on a
+    /// single context. Returns true only when both the save and the
+    /// on-disk file check pass.
+    ///
+    /// S17-H / LIBRARY-SAVE-SAME-CTX (2026-08-08): the previous
+    /// version split this into `saveDownloadToCoreData` +
+    /// `verifyLibraryEntry`, each calling
+    /// `PersistenceController.shared.backgroundContext` (which
+    /// returns a fresh `newBackgroundContext()` on every call).
+    /// Two new background contexts don't reliably see each other's
+    /// writes — verify could return false even when save succeeded,
+    /// firing the error haptic on a successful download. The
+    /// 2026-08-08 "haptic on cancel, no Library entry" report was
+    /// this exact bug, made worse by the actual /library 401 (the
+    /// other fix in this commit) that prevented the file from ever
+    /// being downloaded in the first place.
+    ///
+    /// On any failure path (save throws, fetch returns nothing,
+    /// file missing on disk) this surfaces the error via
+    /// ErrorHandler so the user gets a toast, not just a silent
+    /// haptic.
+    private func saveDownloadToCoreDataWithVerify(track: Track, fileURL: URL) -> Bool {
+        // Single context for save + verify. Using viewContext for
+        // the verify would auto-merge, but writing to viewContext
+        // and reading from it on the same call is fragile (the
+        // main-thread viewContext isn't a write context). A single
+        // background context is the right place for both.
         let context = PersistenceController.shared.backgroundContext
+
+        var success = false
 
         context.performAndWait {
             do {
@@ -544,11 +545,9 @@ class DownloadManager: ObservableObject {
                 trackRequest.fetchLimit = 1
 
                 if let existingTrack = try context.fetch(trackRequest).first {
-                    // Use existing track
                     cdTrack = existingTrack
                     print("📀 Using existing CDTrack: \(track.title)")
                 } else {
-                    // Create new track
                     cdTrack = CDTrack(context: context)
                     cdTrack.videoId = track.videoId
                     cdTrack.title = track.title
@@ -569,13 +568,11 @@ class DownloadManager: ObservableObject {
                 downloadRequest.fetchLimit = 1
 
                 if let existingDownload = try context.fetch(downloadRequest).first {
-                    // Update existing download record
                     existingDownload.localPath = fileURL.path
                     existingDownload.fileSize = Int64((try? FileManager.default.attributesOfItem(atPath: fileURL.path)[.size] as? Int64) ?? 0)
                     existingDownload.downloadedAt = Date()
                     print("📀 Updated existing CDDownloadedTrack: \(track.title)")
                 } else {
-                    // Create new downloaded track record
                     let downloadedTrack = CDDownloadedTrack(context: context)
                     downloadedTrack.localPath = fileURL.path
                     downloadedTrack.fileSize = Int64((try? FileManager.default.attributesOfItem(atPath: fileURL.path)[.size] as? Int64) ?? 0)
@@ -588,14 +585,30 @@ class DownloadManager: ObservableObject {
 
                 try context.save()
                 print("✅ Saved download to Core Data: \(track.title)")
+
+                // Same-context verify: refetch the row we just
+                // wrote and confirm both the row exists and the
+                // file is on disk. Done in the same performAndWait
+                // so we know the save has flushed and our fetch
+                // sees the new row.
+                let verifyRequest: NSFetchRequest<CDDownloadedTrack> = CDDownloadedTrack.fetchRequest()
+                verifyRequest.predicate = NSPredicate(format: "track.videoId == %@", track.videoId)
+                verifyRequest.fetchLimit = 1
+
+                if let row = try context.fetch(verifyRequest).first,
+                   !row.localPath.isEmpty,
+                   FileManager.default.fileExists(atPath: row.localPath) {
+                    success = true
+                } else {
+                    let pathCheck = (try? context.fetch(verifyRequest).first?.localPath) ?? "<no row>"
+                    print("❌ verify-after-save: row missing or file gone (path=\(pathCheck))")
+                    DispatchQueue.main.async {
+                        ErrorHandler.shared.show(
+                            .downloadFailed("Saved \(track.title) but couldn't find it again — try re-downloading")
+                        )
+                    }
+                }
             } catch {
-                // S17-H / LIBRARY-SAVE-SILENT-FAIL (2026-08-08): previously
-                // the catch block only printed to the log. The user saw
-                // a "Download complete" haptic from handleDownloadSuccess
-                // (which runs unconditionally after this function returns)
-                // but no entry in the Library because the save threw.
-                // Surface the error via ErrorHandler so the user knows
-                // the download actually failed.
                 let errorDesc = "\(error)"
                 print("❌ Failed to save download to Core Data: \(errorDesc)")
                 print("   track.videoId = \(track.videoId), fileURL = \(fileURL.path)")
@@ -607,6 +620,8 @@ class DownloadManager: ObservableObject {
                 }
             }
         }
+
+        return success
     }
     
     private func updateProgress(for id: UUID, progress: Double) {
@@ -652,16 +667,42 @@ class DownloadManager: ObservableObject {
     private func handleDownloadFailure(_ id: UUID, error: String) {
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
-            
+
             if let index = self.activeDownloads.firstIndex(where: { $0.id == id }) {
-                var task = self.activeDownloads[index]
-                task.status = .failed(error)
-                task.completionTime = Date()
-                
+                let task = self.activeDownloads[index]
+                let title = task.track.title
+                let localizedError = error
+                var failedTask = task
+                failedTask.status = .failed(localizedError)
+                failedTask.completionTime = Date()
+
                 self.activeDownloads.remove(at: index)
-                self.completedDownloads.append(task)
-                
+                self.completedDownloads.append(failedTask)
+
                 HapticManager.error()
+
+                // S17-H / DOWNLOAD-FAILURE-TOAST (2026-08-08):
+                // also surface a toast. Previously the only user
+                // signal for a download failure was the error
+                // haptic — no ErrorHandler call, so the user
+                // saw the ring disappear + haptic and had no
+                // idea what went wrong. The 2026-08-08 report
+                // "haptic on cancel, no error, nothing in
+                // library" was the most recent symptom: a
+                // background 401 meant the file never landed,
+                // the error haptic fired silently, and the
+                // Library stayed empty. Now every failure path
+                // shows a toast.
+                //
+                // Skip the toast for "stalled" messages where
+                // the stall watchdog already shows a toast (in
+                // stallWatchdogTick). Otherwise we'd toast
+                // twice.
+                if !localizedError.lowercased().contains("stalled") {
+                    ErrorHandler.shared.show(
+                        .downloadFailed("\(title): \(localizedError)")
+                    )
+                }
             }
         }
     }

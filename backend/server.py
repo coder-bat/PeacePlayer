@@ -1526,14 +1526,39 @@ async def list_library(request: Request, user: dict = Depends(require_session_us
 # to pull the converted file down. This avoids the iOS
 # URLSession hitting YouTube's CDN throttle (the server-side
 # /download endpoint already does Range-chunked YouTube fetches).
+#
+# S17-H / DOWNLOAD-AUTH-FIX (2026-08-08): also accept the session
+# JWT via ?token=... query param, same as /audio and /fast. The
+# iOS app's download path uses URLSession.downloadTask(with: url)
+# (a background URLSession) which can't easily set the
+# Authorization header, so the token has to ride along in the URL.
+# The previous signature used Depends(require_session_user) which
+# only reads the Authorization header — every iOS download hit 401
+# with a 25-byte body, the status check in iOS surfaced an error
+# haptic, no Library entry ever appeared. This inline auth matches
+# the /audio and /fast pattern.
 @app.api_route("/library/{filename}", methods=["GET", "HEAD"])
 @limiter.limit("30/minute")
-async def get_library_file(filename: str, request: Request, user: dict = Depends(require_session_user),):
+async def get_library_file(filename: str, request: Request):
     """
     Download a previously-downloaded track from the server's
     local library (~/Music/YTAudio/). Use after POST /download
     returns the file path.
     """
+    # Inline auth (same pattern as /audio and /fast): accept the
+    # Authorization header OR the ?token= query param. iOS background
+    # URLSession can only send headers set at task creation, and the
+    # iOS app currently appends the token to the URL instead, so the
+    # query-param path is the one that actually carries traffic.
+    from urllib.parse import unquote
+    auth_header = request.headers.get('Authorization') or ''
+    if not auth_header:
+        query_token = request.query_params.get('token')
+        if query_token:
+            auth_header = f'Bearer {unquote(query_token)}'
+    user = current_user_from_request(auth_header)
+    if not user:
+        raise HTTPException(status_code=401, detail="unauthorized")
     import urllib.parse
     decoded_filename = urllib.parse.unquote(filename)
     # S17-H: defense against path traversal. The extractor names
