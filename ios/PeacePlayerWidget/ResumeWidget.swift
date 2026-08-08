@@ -196,7 +196,7 @@ struct MediumResumeView: View {
                 artworkView(size: 82)
 
                 VStack(alignment: .leading, spacing: 5) {
-                    // Status chip
+                    // Status chip + optional Time Capsule pill
                     HStack(spacing: 5) {
                         Circle()
                             .fill(entry.snapshot.isPlaying ? WidgetTheme.cyberCyan : Color.gray)
@@ -204,6 +204,25 @@ struct MediumResumeView: View {
                         Text(entry.snapshot.isPlaying ? "PLAYING" : "PAUSED")
                             .font(.system(size: 8, weight: .bold, design: .monospaced))
                             .foregroundColor(entry.snapshot.isPlaying ? WidgetTheme.cyberCyan : .gray)
+
+                        // S18 / P1-6: unread-capsule indicator. Tapping
+                        // the pill deep-links to the vault via the
+                        // peaceplayer://capsule URL.
+                        if entry.snapshot.hasUnlockedCapsule {
+                            Spacer().frame(width: 4)
+                            Link(destination: URL(string: "peaceplayer://capsule")!) {
+                                HStack(spacing: 3) {
+                                    Text("💌")
+                                        .font(.system(size: 8))
+                                    Text("CAPSULE READY")
+                                        .font(.system(size: 7, weight: .bold, design: .monospaced))
+                                }
+                                .foregroundColor(.black)
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 2)
+                                .background(Capsule().fill(WidgetTheme.cyberYellow))
+                            }
+                        }
                     }
 
                     Text(entry.snapshot.hasContent ? entry.snapshot.title : "Nothing Playing")

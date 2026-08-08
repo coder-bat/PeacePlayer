@@ -44,6 +44,11 @@ struct NowPlayingSnapshot: Codable {
     let nextTitle: String
     let nextArtist: String
     let currentVolume: Float  // 0.0–1.0
+    // S18 / P1-6: unread-state indicator for the home-screen
+    // widget. True when there's at least one Time Capsule
+    // ready to open. The widget renders a small 💌 pill and
+    // tapping it deep-links to the vault.
+    let hasUnlockedCapsule: Bool
 
     var hasContent: Bool    { !title.isEmpty }
     var hasNextTrack: Bool  { !nextTitle.isEmpty }
@@ -58,7 +63,8 @@ struct NowPlayingSnapshot: Codable {
         progress: Double,
         nextTitle: String = "",
         nextArtist: String = "",
-        currentVolume: Float = 1.0
+        currentVolume: Float = 1.0,
+        hasUnlockedCapsule: Bool = false
     ) {
         self.title = title
         self.artist = artist
@@ -68,6 +74,7 @@ struct NowPlayingSnapshot: Codable {
         self.nextTitle = nextTitle
         self.nextArtist = nextArtist
         self.currentVolume = currentVolume
+        self.hasUnlockedCapsule = hasUnlockedCapsule
     }
 
     // Backwards-compatible decoder: old snapshots won't have the new keys
@@ -81,6 +88,7 @@ struct NowPlayingSnapshot: Codable {
         nextTitle        = (try? c.decodeIfPresent(String.self, forKey: .nextTitle))  ?? ""
         nextArtist       = (try? c.decodeIfPresent(String.self, forKey: .nextArtist)) ?? ""
         currentVolume    = (try? c.decodeIfPresent(Float.self,  forKey: .currentVolume)) ?? 1.0
+        hasUnlockedCapsule = (try? c.decodeIfPresent(Bool.self, forKey: .hasUnlockedCapsule)) ?? false
     }
 
     static let empty = NowPlayingSnapshot(

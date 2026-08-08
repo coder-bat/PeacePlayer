@@ -37,7 +37,8 @@ private let darwinControlCallback: CFNotificationCallback = { _, _, name, _, _ i
                     artworkURLString: cur.artworkURLString,
                     isPlaying: cur.isPlaying, progress: cur.progress,
                     nextTitle: cur.nextTitle, nextArtist: cur.nextArtist,
-                    currentVolume: Float(v)
+                    currentVolume: Float(v),
+                    hasUnlockedCapsule: TimeCapsuleManager.shared.readyToOpen.count > 0
                 ))
             }
         case DarwinCmd.executeShortcut:

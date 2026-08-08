@@ -365,7 +365,10 @@ class NowPlayingService {
             progress: progress,
             nextTitle: nextTrack?.title ?? "",
             nextArtist: nextTrack?.displayArtist ?? "",
-            currentVolume: Float(PlayerState.shared.volume)
+            currentVolume: Float(PlayerState.shared.volume),
+            // S18 / P1-6: surface unread-capsule count to the widget.
+            // The widget renders a 💌 pill when this is true.
+            hasUnlockedCapsule: TimeCapsuleManager.shared.readyToOpen.count > 0
         ))
         // C-2026-06-28: widget timeline reloads are documented as
         // asynchronous (they schedule work in the widget extension's
