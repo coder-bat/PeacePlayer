@@ -20,6 +20,7 @@ import CoreData
 import UserNotifications
 import Combine
 import CryptoKit
+import UIKit
 
 struct TimeCapsuleSnapshot: Identifiable, Equatable {
     let id: UUID
@@ -227,6 +228,14 @@ final class TimeCapsuleManager: ObservableObject {
         } catch {
             capsules = []
         }
+
+        // S18 (QW-1): keep the app icon badge in sync with the
+        // ready-to-open count whenever the manager refreshes. The
+        // scenePhase handler in YTAudioPlayerApp also sets the
+        // badge, but this catches the in-app cases: a capsule
+        // becomes ready while the user is in the foreground, the
+        // user opens one and the badge should drop, etc.
+        UIApplication.shared.applicationIconBadgeNumber = readyToOpen.count
     }
 
     var pendingCapsules: [TimeCapsuleSnapshot] {

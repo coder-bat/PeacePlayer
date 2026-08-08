@@ -55,6 +55,16 @@ struct YTAudioPlayerApp: App {
                 _ = ShortcutPlaybackController.shared.executePendingCommand()
             }
 
+            // S18 (QW-1): set the app icon badge to the number of
+            // ready-to-open Time Capsules whenever the scene phase
+            // changes (any direction). 0 clears the badge. The badge
+            // also doubles as a retention nudge — even at 0, the user
+            // gets visual confirmation "I'm caught up".
+            // Also call WidgetCenter so the home-screen widgets pick
+            // up the new state.
+            let readyCount = TimeCapsuleManager.shared.readyToOpen.count
+            UIApplication.shared.applicationIconBadgeNumber = readyCount
+
             adaptiveWalkDJ.handleScenePhaseChange(isActive: phase == .active)
 
             // S17-H / S17-LOCK: re-activate the audio session on
