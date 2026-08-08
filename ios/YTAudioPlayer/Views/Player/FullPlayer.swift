@@ -1117,15 +1117,24 @@ private struct ProgressSection: View {
         // the iOS Music app's more-actions sheet pattern.
         VStack(spacing: 4) {
             HStack(spacing: 0) {
-                // Lyrics
-                MoreActionButton(
-                    icon: "text.quote",
-                    title: "Lyrics",
-                    action: {
-                        HapticManager.light()
-                        showLyrics = true
-                    }
-                )
+                // Lyrics — only for music tracks. Podcasts and
+                // audiobooks always have an empty lyrics response.
+                // S18 / QW-6: hide the cell for non-music content
+                // types. Use the same Color.clear placeholder as
+                // the haptic-disabled cell to keep the 4-column
+                // grid balanced.
+                if playerState.contentType == .track {
+                    MoreActionButton(
+                        icon: "text.quote",
+                        title: "Lyrics",
+                        action: {
+                            HapticManager.light()
+                            showLyrics = true
+                        }
+                    )
+                } else {
+                    Color.clear.frame(maxWidth: .infinity)
+                }
 
                 // Guitar Chords
                 MoreActionButton(
