@@ -1,4 +1,32 @@
-name: Deploy to Server
+name: Deploy to Server (macOS launchd)
+
+# S17-H (2026-08-08): rewritten for the user's actual deploy target
+# — an always-on Mac mini running the backend via launchd on port
+# 8181, NOT a Linux server on port 6060 with systemctl / viralmusic.
+# The previous 4 deploy workflows (deploy.yml, deploy-password.yml,
+# docker-deploy.yml, docker-deploy-password.yml) all assumed a Linux
+# systemd host at ~/ViralMusic, port 6060, service name "viralmusic".
+# None of that matched reality; all 4 deploy jobs have been red since
+# the workflows were created. The 3 password-auth + docker variants
+# are pure duplicates — deleted in this commit.
+#
+# To make this work, add 3 GitHub repo secrets:
+#   SERVER_HOST     — Tailscale IP or hostname of the Mac mini
+#                     (e.g. "100.77.213.42" or "coders-macmini")
+#   SERVER_USER     — the macOS account that owns the launchd plist
+#                     (e.g. "coderbat")
+#   SSH_PRIVATE_KEY — private key for an SSH key whose public half is
+#                     in ~/.ssh/authorized_keys on the Mac mini as
+#                     the SERVER_USER. Generate with
+#                     `ssh-keygen -t ed25519 -C "ci-deploy" -f /tmp/ci_deploy_key`
+#                     on your local Mac, copy the .pub to the Mac
+#                     mini, paste the .priv into the GitHub secret.
+#   SERVER_PORT     — (optional) SSH port, defaults to 22
+#
+# Prerequisite on the Mac mini (one-time):
+#   git clone https://github.com/coder-bat/PeacePlayer.git ~/iYMusic/YTAudioSystem
+#   # Backend deps + launchd plist already exist from local dev; no
+#   # extra setup needed beyond the clone.
 
 on:
   push:
@@ -17,29 +45,29 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-          
+
       - name: Cache pip packages
         uses: actions/cache@v4
         with:
           path: ~/.cache/pip
           key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
-          
+
       - name: Install dependencies
         run: |
           cd backend
           pip install -r requirements.txt
           pip install pytest flake8
-          
+
       - name: Lint with flake8
         run: |
           cd backend
           flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
-          
+
       - name: Run tests
         run: |
           cd backend
@@ -49,62 +77,73 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
-    
+
     steps:
       - uses: actions/checkout@v4
-      
-      - name: Deploy to server via SSH
+
+      - name: Deploy to Mac mini via launchd
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: ${{ secrets.SERVER_PORT || '22' }}
+          command_timeout: 10m
           script: |
             set -e
-            echo "🚀 Starting deployment..."
-            
-            # Navigate to app directory
-            cd ~/ViralMusic
-            
-            # Backup current version (for rollback)
-            echo "📦 Creating backup..."
-            BACKUP_DIR="~/backups/viralmusic-$(date +%Y%m%d-%H%M%S)}"
-            mkdir -p ~/backups
-            cp -r backend "$BACKUP_DIR" 2>/dev/null || true
-            
-            # Pull latest code
+            echo "🚀 Deploying PeacePlayer backend to Mac mini..."
+
+            # Hardcoded path the user picked. Change here if the repo
+            # lives somewhere else on the Mac mini. The launchd plist
+            # is at ~/Library/LaunchAgents/com.peaceplayer.backend.plist
+            # and points at this directory.
+            REPO_DIR="$HOME/iYMusic/YTAudioSystem"
+            cd "$REPO_DIR"
+
+            # Pull latest. The Mac mini was originally cloned with the
+            # user's own credentials (HTTPS PAT in osxkeychain, or SSH
+            # key), so fetch + reset-hard-origin works without any
+            # extra auth from the CI side.
+            #
+            # NB: if osxkeychain hangs on the Mac mini (a known macOS
+            # Sequoia issue per the user's memory notes), run
+            # `git config --global credential.helper store` once on
+            # the Mac mini to fall back to a plaintext cache. Or use
+            # SSH-based clone (`git@github.com:coder-bat/PeacePlayer.git`).
             echo "📥 Pulling latest code..."
             git fetch origin
-            git reset --hard origin/$(git rev-parse --abbrev-ref HEAD)
-            
-            # Setup/update Python environment
-            echo "🐍 Setting up Python environment..."
+            git reset --hard origin/main
+
+            # Backend venv: only re-install if requirements.txt changed.
+            # The Mac's system Python is 3.10+; the venv was originally
+            # `python3 -m venv venv` from backend/.
+            echo "🐍 Updating backend venv..."
             cd backend
             if [ ! -d "venv" ]; then
               python3 -m venv venv
             fi
-            ./venv/bin/pip install --upgrade pip
-            ./venv/bin/pip install -r requirements.txt
-            
-            # Restart service
-            echo "🔄 Restarting service..."
-            if command -v systemctl &> /dev/null; then
-              sudo systemctl restart viralmusic || sudo systemctl start viralmusic
-              sudo systemctl status viralmusic --no-pager
-            elif command -v supervisorctl &> /dev/null; then
-              sudo supervisorctl restart viralmusic || sudo supervisorctl start viralmusic
-              sudo supervisorctl status viralmusic
-            else
-              # Fallback: kill and restart
-              pkill -f "python server.py" || true
-              nohup ./venv/bin/python server.py > server.log 2>&1 &
-            fi
-            
-            # Health check
-            echo "🏥 Health check..."
-            sleep 3
-            curl -f http://localhost:6060/ || exit 1
-            
-            echo "✅ Deployment successful!"
-            echo "📊 Server status: $(curl -s http://localhost:6060/ | grep -o '"status":"[^"]*"')"
+            ./venv/bin/pip install -q -r requirements.txt
+
+            # Restart the launchd agent. `kickstart -k` = kill + restart.
+            # The target is `gui/<uid>/<label>` for a user-level agent.
+            echo "🔄 Restarting launchd agent com.peaceplayer.backend..."
+            LABEL="gui/$(id -u)/com.peaceplayer.backend"
+            launchctl kickstart -k "$LABEL"
+
+            # Wait for the backend to come up on port 8181 (the user's
+            # actual port — was hardcoded 6060 in the old workflows).
+            echo "⏳ Waiting for backend on :8181..."
+            for i in 1 2 3 4 5 6 7 8 9 10; do
+              if curl -fs http://localhost:8181/health > /dev/null 2>&1; then
+                echo "✅ Backend healthy after ${i}s"
+                curl -s http://localhost:8181/health | head -c 200
+                echo
+                exit 0
+              fi
+              sleep 1
+            done
+            echo "❌ Backend did not respond on :8181 within 10s"
+            echo "Check the launchd agent manually:"
+            echo "  launchctl print gui/\$(id -u)/com.peaceplayer.backend"
+            echo "  tail -50 ~/Library/Logs/com.peaceplayer.backend.log 2>/dev/null || true"
+            exit 1
