@@ -1544,16 +1544,24 @@ struct AirPlayIcon: View {
 struct AirPlayRoutePickerView: UIViewRepresentable {
     func makeUIView(context: Context) -> UIView {
         let routePicker = AVRoutePickerView()
-        routePicker.activeTintColor = .clear
+        // S18 / P1-9: surface a route-active indicator. The
+        // .clear tint was hiding the active state — when a
+        // route was active, the icon didn't change. Now the
+        // active state is cyberCyan (matches the cyberpunk
+        // theme). Theme.cyberCyan is Color(red: 0, green: 0.9,
+        // blue: 1). The surrounding AirPlayIcon stays white
+        // (inactive) and iOS renders a subtle filled glyph when
+        // the user is routed to an external destination.
+        routePicker.activeTintColor = UIColor(red: 0, green: 0.9, blue: 1, alpha: 1)
         routePicker.tintColor = .clear
         routePicker.prioritizesVideoDevices = false
-        
+
         // Ensure the picker is tappable by not disabling user interaction
         routePicker.isUserInteractionEnabled = true
-        
+
         return routePicker
     }
-    
+
     func updateUIView(_ uiView: UIView, context: Context) {}
 }
 
