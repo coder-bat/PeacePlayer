@@ -266,6 +266,56 @@ extension BackgroundDownloadService: URLSessionDownloadDelegate {
         guard let videoId = downloadTask.taskDescription,
               let task = activeDownloads[videoId] else { return }
 
+        // S17-H / DOWNLOAD-STATUS-CHECK (2026-08-08): URLSession
+        // calls didFinishDownloadingTo for ANY 2xx-5xx response,
+        // including 401 (25 bytes of {"detail":"unauthorized"})
+        // and 404 (small HTML page). Without this check, the
+        // BackgroundDownloadService would treat a 25-byte error
+        // JSON as a valid audio file, move it to the permanent
+        // location, and report "Download complete" — leaving the
+        // user with a corrupt file in their library and the
+        // DownloadManager thinking everything is fine.
+        //
+        // Symptom (reported by user 2026-08-08): "when i
+        // downloaded from search, it said download success but
+        // only 25 bytes download". Backend log showed a
+        // /library/{filename} → 401 (25 bytes) for that exact
+        // request. Root cause was URLSession not picking up the
+        // Bearer token in the Authorization header, so the
+        // appendToken-in-query fallback should have kicked in but
+        // didn't (likely stale keychain on a relaunched session).
+        //
+        // This check makes the failure visible instead of silent.
+        if let http = downloadTask.response as? HTTPURLResponse,
+           !(200..<300).contains(http.statusCode) {
+            // Read the error body so we can surface a useful
+            // message instead of a generic "Download failed".
+            var errorBody = ""
+            if let data = try? Data(contentsOf: location) {
+                errorBody = String(data: data, encoding: .utf8) ?? "<binary>"
+                if errorBody.count > 200 { errorBody = String(errorBody.prefix(200)) + "..." }
+            }
+            // The "downloaded" file is actually a 25-byte error
+            // body. Don't move it to the permanent location.
+            try? FileManager.default.removeItem(at: location)
+            downloadQueue.async { [weak self] in
+                self?.activeDownloads.removeValue(forKey: videoId)
+            }
+            let err = NSError(
+                domain: "BackgroundDownloadService",
+                code: http.statusCode,
+                userInfo: [
+                    NSLocalizedDescriptionKey: "Download failed: HTTP \(http.statusCode) \(errorBody)"
+                ]
+            )
+            errorSubject.send((videoId, err))
+            DispatchQueue.main.async { [weak self] in
+                self?.delegate?.downloadDidFail(videoId: videoId, error: err)
+            }
+            print("❌ Download failed: \(videoId) HTTP \(http.statusCode) — \(errorBody)")
+            return
+        }
+
         do {
             // Move file to permanent location
             let permanentURL = try AudioFileManager.shared.moveDownloadedFile(
