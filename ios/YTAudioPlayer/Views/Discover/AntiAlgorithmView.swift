@@ -59,7 +59,7 @@ struct AntiAlgorithmView: View {
                     .frame(width: 100, height: 100)
                 Image(systemName: "dice.fill")
                     .font(.system(size: 44))
-                    .foregroundColor(.orange)
+                    .foregroundColor(Theme.cyberYellow)
             }
 
             Text("Break Your Bubble")
@@ -76,7 +76,7 @@ struct AntiAlgorithmView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Your top artists")
                         .font(.caption)
-                        .foregroundColor(.orange)
+                        .foregroundColor(Theme.cyberYellow)
 
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 80), spacing: 8)], spacing: 8) {
                         ForEach(profile.artists.prefix(8), id: \.0) { artist, count in
@@ -146,7 +146,7 @@ struct AntiAlgorithmView: View {
     private var loadingView: some View {
         VStack(spacing: 16) {
             ProgressView()
-                .tint(.orange)
+                .tint(Theme.cyberYellow)
                 .scaleEffect(1.5)
             Text("Finding your frontier...")
                 .font(.subheadline)
@@ -162,10 +162,10 @@ struct AntiAlgorithmView: View {
             // Session badge
             HStack {
                 Image(systemName: "antenna.radiowaves.left.and.right")
-                    .foregroundColor(.orange)
+                    .foregroundColor(Theme.cyberYellow)
                 Text("Exploring...")
                     .font(.headline)
-                    .foregroundColor(.orange)
+                    .foregroundColor(Theme.cyberYellow)
                 Spacer()
                 Button("End") {
                     HapticManager.light()
@@ -182,7 +182,7 @@ struct AntiAlgorithmView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Frontier Queue")
                         .font(.caption)
-                        .foregroundColor(.orange)
+                        .foregroundColor(Theme.cyberYellow)
 
                     ForEach(engine.explorationQueue) { track in
                         HStack(spacing: 12) {
