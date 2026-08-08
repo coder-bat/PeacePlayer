@@ -93,7 +93,15 @@ class DataManager: ObservableObject {
         recentlyPlayed = updated
         saveRecentlyPlayed()
         persistPlayHistory(for: track, playbackProgress: playbackProgress)
-        
+
+        // S18 / v1.6 / P1-7: feed the daily recap notifier. The
+        // notifier cancels any pending recap (user is engaged right
+        // now) and bumps its consecutive-days counter; after 3 days
+        // it permanently disables the recap. The flag-gate lives in
+        // DailyRecapNotifier.evaluateRecapState, called separately
+        // on scene phase .active.
+        DailyRecapNotifier.shared.recordTrackPlay()
+
         // Update stats
         tracksPlayedCount += 1
         saveStats()

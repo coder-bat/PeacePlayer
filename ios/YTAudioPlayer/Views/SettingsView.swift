@@ -370,7 +370,14 @@ struct SettingsView: View {
                         icon: "clock.arrow.circlepath",
                         iconColor: Theme.cyberCyan,
                         title: "Daily Recap",
-                        subtitle: "If you haven't played in 24h, remind you of your last track"
+                        subtitle: "If you haven't played in 24h, remind you of your last track",
+                        // When the user flips the toggle, the notifier
+                        // cancels any pending recap (if turning OFF) or
+                        // clears the "permanently disabled by 3
+                        // consecutive play days" flag (if turning ON).
+                        onChange: { enabled in
+                            DailyRecapNotifier.shared.handleFlagChange(enabled: enabled)
+                        }
                     )
                     LabsToggle(
                         key: "ff_cross_feature_wiring",
@@ -932,6 +939,11 @@ struct FavoriteArtistFlowLayout: View {
 // flags without a code change. `defaultValue` is the initial
 // value when the key is absent and the value the rest of the
 // app sees via UserDefaults.standard.bool(forKey:).
+//
+// Optional `onChange` closure fires AFTER the value is written
+// to UserDefaults, so subscribers can re-evaluate derived state
+// (e.g. DailyRecapNotifier clears its permanent-disable flag
+// when the user re-enables ff_daily_recap).
 private struct LabsToggle: View {
     let key: String
     let defaultValue: Bool
@@ -939,6 +951,7 @@ private struct LabsToggle: View {
     let iconColor: Color
     let title: String
     let subtitle: String
+    let onChange: ((Bool) -> Void)?
 
     @State private var isOn: Bool
 
@@ -948,7 +961,8 @@ private struct LabsToggle: View {
         icon: String,
         iconColor: Color,
         title: String,
-        subtitle: String
+        subtitle: String,
+        onChange: ((Bool) -> Void)? = nil
     ) {
         self.key = key
         self.defaultValue = defaultValue
@@ -956,6 +970,7 @@ private struct LabsToggle: View {
         self.iconColor = iconColor
         self.title = title
         self.subtitle = subtitle
+        self.onChange = onChange
         // Read the current value from UserDefaults at init.
         // UserDefaults is the source of truth; the rest of
         // the app reads the same key.
@@ -969,6 +984,7 @@ private struct LabsToggle: View {
             set: { newValue in
                 isOn = newValue
                 UserDefaults.standard.set(newValue, forKey: key)
+                onChange?(newValue)
             }
         )) {
             HStack(spacing: 12) {

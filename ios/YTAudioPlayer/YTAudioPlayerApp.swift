@@ -53,6 +53,13 @@ struct YTAudioPlayerApp: App {
                     executeWidgetCommand(cmd)
                 }
                 _ = ShortcutPlaybackController.shared.executePendingCommand()
+
+                // S18 / v1.6 / P1-7: re-evaluate the daily recap on
+                // every foreground. If the user has been away 24+ hours
+                // AND the Labs flag is on AND they haven't been
+                // permanently disabled by 3 consecutive play days, a
+                // 8pm notification is scheduled for the last track.
+                DailyRecapNotifier.shared.evaluateRecapState()
             }
 
             // S18 (QW-1): set the app icon badge to the number of

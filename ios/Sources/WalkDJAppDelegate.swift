@@ -107,6 +107,21 @@ final class WalkDJAppDelegate: NSObject, UIApplicationDelegate, UNUserNotificati
             )
         }
 
+        // S18 / v1.6 / P1-7: daily recap notifications carry
+        // userInfo["videoId"] + userInfo["deepLink"]. Tapping the
+        // banner should resume that track. Reconstruct the URL from
+        // the userInfo (defensive — the deepLink field is the
+        // canonical source) and feed it through handleDeepLink via
+        // .onOpenURL. We do this by reconstructing a URL and posting
+        // it; the app's .onOpenURL closure in ContentView will fire
+        // and run handleDeepLink normally.
+        if let deepLink = userInfo["deepLink"] as? String,
+           let url = URL(string: deepLink) {
+            DispatchQueue.main.async {
+                UIApplication.shared.open(url)
+            }
+        }
+
         AdaptiveWalkDJManager.shared.handleNotificationResponse(userInfo: userInfo)
         completionHandler()
     }
