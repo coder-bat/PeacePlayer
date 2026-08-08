@@ -456,13 +456,58 @@ class DownloadManager: ObservableObject {
                 self?.progressTimer = nil
             }
 
-            // Save to Core Data (can be done on background queue)
+            // Save to Core Data (can be done on background queue).
+            //
+            // S17-H / LIBRARY-SAVE-SILENT-FAIL (2026-08-08): the
+            // success haptic in handleDownloadSuccess was firing
+            // even when the CoreData save threw (because the
+            // success path was unconditional). That made the
+            // "Download complete" UI look like a success while
+            // the file silently failed to land in the Library.
+            // saveDownloadToCoreData now surfaces the error via
+            // ErrorHandler — but the haptic still needs gating
+            // so it doesn't lie about a silent failure.
             self.saveDownloadToCoreData(track: track, fileURL: fileURL)
 
-            self.handleDownloadSuccess(taskId, path: fileURL.path)
+            // Verify the file was actually persisted. The save
+            // above runs on the background context; we re-fetch
+            // on the same context to confirm the row exists.
+            let savedOk = self.verifyLibraryEntry(videoId: track.videoId)
+
+            if savedOk {
+                self.handleDownloadSuccess(taskId, path: fileURL.path)
+            } else {
+                print("❌ Library save failed for \(track.title) — skipping success haptic")
+                // Mark the task as failed (so the UI shows a retry button)
+                // and surface a real failure to the user.
+                self.handleDownloadFailure(taskId, error: "Library save failed")
+            }
             self.isDownloading = false
             self.processQueue()
         }
+    }
+
+    /// Re-fetch the Library entry for `videoId` to confirm the
+    /// background-context save actually persisted. Returns false
+    /// if the CDDownloadedTrack row is missing or has no path.
+    /// Used by handleDownloadComplete to decide between success
+    /// haptic (file is in the library) and failure toast (silent
+    /// save failure, file is on disk but the Library can't see it).
+    private func verifyLibraryEntry(videoId: String) -> Bool {
+        let context = PersistenceController.shared.backgroundContext
+        var ok = false
+        context.performAndWait {
+            let request: NSFetchRequest<CDDownloadedTrack> = CDDownloadedTrack.fetchRequest()
+            request.predicate = NSPredicate(format: "track.videoId == %@", videoId)
+            request.fetchLimit = 1
+            if let download = try? context.fetch(request).first {
+                let path = download.localPath ?? ""
+                if !path.isEmpty && FileManager.default.fileExists(atPath: path) {
+                    ok = true
+                }
+            }
+        }
+        return ok
     }
 
     func handleDownloadError(trackId: String, error: Error) {
@@ -544,8 +589,22 @@ class DownloadManager: ObservableObject {
                 try context.save()
                 print("✅ Saved download to Core Data: \(track.title)")
             } catch {
-                print("❌ Failed to save download to Core Data: \(error)")
+                // S17-H / LIBRARY-SAVE-SILENT-FAIL (2026-08-08): previously
+                // the catch block only printed to the log. The user saw
+                // a "Download complete" haptic from handleDownloadSuccess
+                // (which runs unconditionally after this function returns)
+                // but no entry in the Library because the save threw.
+                // Surface the error via ErrorHandler so the user knows
+                // the download actually failed.
+                let errorDesc = "\(error)"
+                print("❌ Failed to save download to Core Data: \(errorDesc)")
+                print("   track.videoId = \(track.videoId), fileURL = \(fileURL.path)")
                 context.rollback()
+                DispatchQueue.main.async {
+                    ErrorHandler.shared.show(
+                        .downloadFailed("Couldn't save \(track.title) to library: \(errorDesc)")
+                    )
+                }
             }
         }
     }
