@@ -21,6 +21,7 @@ import UserNotifications
 import Combine
 import CryptoKit
 import UIKit
+import WidgetKit
 
 struct TimeCapsuleSnapshot: Identifiable, Equatable {
     let id: UUID
@@ -236,6 +237,13 @@ final class TimeCapsuleManager: ObservableObject {
         // becomes ready while the user is in the foreground, the
         // user opens one and the badge should drop, etc.
         UIApplication.shared.applicationIconBadgeNumber = readyToOpen.count
+
+        // S18 / P1-2: also reload widget timelines so the
+        // ResumeWidget's 💌 pill (P1-6) reflects the new state
+        // within seconds, not on its 15-min auto-refresh tick.
+        // Cheap: only fires on the badge change path (refresh,
+        // open, scene-phase).
+        WidgetCenter.shared.reloadAllTimelines()
     }
 
     var pendingCapsules: [TimeCapsuleSnapshot] {
