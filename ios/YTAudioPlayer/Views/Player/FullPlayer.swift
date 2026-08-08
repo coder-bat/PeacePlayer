@@ -1857,11 +1857,15 @@ struct ShareSheet: View {
                         .frame(height: 300)
                         .overlay(
                             Text("Tap Generate to create share card")
-                                .foregroundColor(.secondary)
+                                .foregroundColor(Theme.cyberTextSecondary)
                         )
                 }
                 
                 // Action Buttons
+                // S18 / P1-14: cyberpunk-accented action colors.
+                // Generate Card = primary (cyan), QR Code = magenta,
+                // Copy Link = yellow, Share = dim. No more rainbow
+                // on a cyberpunk player.
                 LazyVGrid(columns: [
                     GridItem(.flexible()),
                     GridItem(.flexible())
@@ -1869,31 +1873,31 @@ struct ShareSheet: View {
                     ShareActionButton(
                         icon: "photo",
                         title: "Generate Card",
-                        color: .blue
+                        color: Theme.cyberCyan
                     ) {
                         generateCard()
                     }
-                    
+
                     ShareActionButton(
                         icon: "qrcode",
                         title: "QR Code",
-                        color: .green
+                        color: Theme.cyberMagenta
                     ) {
                         showQRCode = true
                     }
-                    
+
                     ShareActionButton(
                         icon: "link",
                         title: "Copy Link",
-                        color: .orange
+                        color: Theme.cyberYellow
                     ) {
                         copyLink()
                     }
-                    
+
                     ShareActionButton(
                         icon: "square.and.arrow.up",
                         title: "Share",
-                        color: .purple
+                        color: Theme.cyberDim
                     ) {
                         shareTrack()
                     }
@@ -1977,11 +1981,11 @@ struct ShareActionButton: View {
                 
                 Text(title)
                     .font(.caption)
-                    .foregroundColor(.primary)
+                    .foregroundColor(Theme.cyberTextSecondary)
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 16)
-            .background(Color(.systemGray6))
+            .background(Theme.cyberSurface)
             .cornerRadius(CornerRadius.md)
         }
         .buttonStyle(.plain)
@@ -2013,12 +2017,12 @@ struct QRCodeView: View {
                         .font(.headline)
                     Text(track.displayArtist)
                         .font(.subheadline)
-                        .foregroundColor(.secondary)
+                        .foregroundColor(Theme.cyberTextSecondary)
                 }
-                
+
                 Text("Scan to listen on YouTube Music")
                     .font(.caption)
-                    .foregroundColor(.secondary)
+                    .foregroundColor(Theme.cyberTextSecondary)
                 
                 Spacer()
             }
