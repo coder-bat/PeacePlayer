@@ -2752,6 +2752,13 @@ class PlayerState: ObservableObject {
             if self.retryCount < self.maxRetries, let item = self.currentItem {
                 self.retryCount += 1
                 print("🔄 Retrying after mid-track failure (attempt \(self.retryCount)/\(self.maxRetries))...")
+                // S18 / P1-10: surface a 'Reconnecting…' toast so the
+                // user knows the app is recovering from a mid-track
+                // failure. Without this, the silent retry looked like
+                // a hang to the user. The toast stays for the duration
+                // of the refresh (typically 1-3s) and dismisses on
+                // the next playbackState change.
+                ErrorHandler.shared.showInfo("Reconnecting…")
                 self.refreshAndPlayCurrentItem()
             } else {
                 print("❌ Max retries reached after failure, skipping to next track")

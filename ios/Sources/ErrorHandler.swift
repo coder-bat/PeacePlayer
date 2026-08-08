@@ -21,6 +21,10 @@ enum AppError: Error, Equatable {
     case playbackFailed(String)
     case authRequired
     case unknown(String)
+    // S18 / P1-10: non-error informational toast. Used for "in
+    // progress" feedback (e.g. "Reconnecting…") where we want a
+    // toast lifecycle without the negative framing of an error.
+    case info(String)
 
     var title: String {
         switch self {
@@ -34,6 +38,7 @@ enum AppError: Error, Equatable {
         case .playbackFailed: return "Playback Error"
         case .authRequired: return "Sign In Required"
         case .unknown: return "Something Went Wrong"
+        case .info: return ""
         }
     }
 
@@ -76,6 +81,8 @@ enum AppError: Error, Equatable {
             return "Please sign in to access this feature."
         case .unknown(let msg):
             return msg.isEmpty ? "An unexpected error occurred. Please try again." : msg
+        case .info(let msg):
+            return msg
         }
     }
 
@@ -84,6 +91,8 @@ enum AppError: Error, Equatable {
         case .network, .server, .rateLimited, .offline, .downloadFailed, .unknown:
             return true
         case .notFound, .parsing, .playbackFailed, .authRequired:
+            return false
+        case .info:
             return false
         }
     }
@@ -108,6 +117,8 @@ enum AppError: Error, Equatable {
             return "lock"
         case .unknown:
             return "exclamationmark.triangle"
+        case .info:
+            return "antenna.radiowaves.left.and.right"
         }
     }
 
@@ -121,6 +132,8 @@ enum AppError: Error, Equatable {
             return .red
         case .authRequired:
             return .blue
+        case .info:
+            return Theme.cyberCyan
         }
     }
 }
@@ -206,6 +219,20 @@ class ErrorHandler: ObservableObject {
             self.retryAction = retry
             self.showError = true
             HapticManager.error()
+        }
+    }
+
+    /// S18 / P1-10: show a non-error informational toast. Same
+    /// surface as `show(_:retry:)` but no error haptic and no
+    /// retry button — the user is being told something is in
+    /// progress, not that something went wrong.
+    func showInfo(_ message: String) {
+        DispatchQueue.main.async {
+            self.currentError = .info(message)
+            self.retryAction = nil
+            self.showError = true
+            // Light haptic only — no error pattern.
+            HapticManager.light()
         }
     }
     
