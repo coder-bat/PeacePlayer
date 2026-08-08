@@ -104,6 +104,11 @@ struct FullPlayer: View {
     @State private var showGestureCoach = false
     @State private var playbackSpeed: Float = 1.0
     @State private var isPulsing = false
+    // S18 (P0-2): toggle when the user taps the Haptic cell while
+    // the "Reduce Haptics" preference is on. A banner toast surfaces
+    // a Settings pointer for 3s. Reset on appearance of the next
+    // unrelated state change to keep the toast lifecycle simple.
+    @State private var hapticReduceToast = false
     @AppStorage("hasSeenGestureHints") private var hasSeenGestureHints = false
     @StateObject private var hapticEngine = HapticSymphonyEngine.shared
     @Environment(\.accessibilityReduceMotion) var reduceMotion
@@ -287,6 +292,23 @@ struct FullPlayer: View {
                 .opacity(showOrbitalMenu ? 1 : 0)
                 .animation(.easeInOut(duration: 0.2), value: showOrbitalMenu)
             }
+            // S18 (P0-2): when the user taps the Haptic cell while
+            // "Reduce Haptics" is on, surface a non-blocking toast
+            // that points to Settings. Auto-dismisses after 3s.
+            .overlay(alignment: .top) {
+                if hapticReduceToast {
+                    HapticReduceToast()
+                        .padding(.top, 60)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                        .task {
+                            try? await Task.sleep(nanoseconds: 3_000_000_000)
+                            withAnimation(.easeInOut(duration: 0.25)) {
+                                hapticReduceToast = false
+                            }
+                        }
+                }
+            }
+            .animation(.easeInOut(duration: 0.25), value: hapticReduceToast)
         }
     }
 
@@ -1122,21 +1144,38 @@ private struct ProgressSection: View {
                     }
                 )
 
-                // Haptic Symphony — only on devices with haptic
-                // hardware. Skip the cell entirely if not supported.
+                // Haptic Symphony — three states:
+                //   1. Device has no haptic hardware → blank placeholder
+                //      (keeps the 4-column grid balanced)
+                //   2. Device has haptics, but user has "Reduce Haptics"
+                //      on (or system Reduce Motion) → render the cell
+                //      disabled, action shows a helpful toast pointing
+                //      to Settings
+                //   3. Normal — tap to start/stop
                 if CHHapticEngine.capabilitiesForHardware().supportsHaptics {
+                    let isReduced = hapticEngine.isReducedByPreference
                     MoreActionButton(
-                        icon: hapticEngine.isActive ? "waveform.path.ecg.rectangle.fill" : "waveform.path.ecg.rectangle",
-                        title: hapticEngine.isActive ? "Haptic On" : "Haptic",
+                        icon: hapticEngine.isActive
+                            ? "waveform.path.ecg.rectangle.fill"
+                            : "waveform.path.ecg.rectangle",
+                        title: hapticEngine.isActive
+                            ? "Haptic On"
+                            : (isReduced ? "Haptic Off" : "Haptic"),
                         action: {
                             HapticManager.light()
                             if hapticEngine.isActive {
                                 hapticEngine.stop()
+                            } else if isReduced {
+                                // S18 (P0-2): user has "Reduce Haptics" on.
+                                // Don't start the engine. Surface a toast
+                                // that points to Settings.
+                                hapticReduceToast = true
                             } else {
                                 hapticEngine.start()
                             }
                         }
                     )
+                    .opacity(isReduced && !hapticEngine.isActive ? 0.45 : 1.0)
                 } else {
                     // Placeholder cell so the 4-column grid stays
                     // balanced on devices without haptic hardware.

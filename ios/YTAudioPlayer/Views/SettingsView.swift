@@ -290,6 +290,58 @@ struct SettingsView: View {
                         .textCase(.uppercase)
                 }
 
+                // MARK: - Accessibility Section (S18 / P0-2)
+                // Haptic Symphony runs a 30fps Core Haptics driver for
+                // the full duration of playback. For users with
+                // vestibular sensitivity, epilepsy, or a Core-Haptics
+                // triggering medical device, this can be uncomfortable
+                // or unsafe. Provide a single "Reduce Haptics" toggle
+                // that gates the engine (defers to system Reduce Motion
+                // when no explicit setting is present).
+                Section {
+                    Toggle(isOn: Binding(
+                        get: { UserDefaults.standard.bool(forKey: HapticSymphonyEngine.reducePreferenceKey) },
+                        set: { newValue in
+                            UserDefaults.standard.set(newValue, forKey: HapticSymphonyEngine.reducePreferenceKey)
+                            // If the user just turned OFF reduce, they
+                            // may have left the engine running (the
+                            // previous state was suppressed). Start
+                            // it now if a track is playing and the
+                            // device supports haptics.
+                            if !newValue,
+                               HapticSymphonyEngine.shared.isSupported,
+                               HapticSymphonyEngine.shared.canStart,
+                               PlayerState.shared.playbackState == .playing {
+                                HapticSymphonyEngine.shared.start()
+                            }
+                            // If the user just turned ON reduce, stop
+                            // the engine immediately.
+                            if newValue, HapticSymphonyEngine.shared.isActive {
+                                HapticSymphonyEngine.shared.stop()
+                            }
+                        }
+                    )) {
+                        HStack(spacing: 12) {
+                            Image(systemName: "hand.raised.slash.fill")
+                                .foregroundColor(Theme.cyberYellow)
+                                .frame(width: 28)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Reduce Haptics")
+                                    .foregroundColor(.white)
+                                Text("Suppress Haptic Symphony in the player")
+                                    .font(.caption)
+                                    .foregroundColor(Theme.cyberDim)
+                            }
+                        }
+                    }
+                    .listRowBackground(Theme.cyberSurface)
+                } header: {
+                    Text("Accessibility")
+                        .font(Typography.sectionHeader)
+                        .foregroundColor(Theme.cyberCyan)
+                        .textCase(.uppercase)
+                }
+
                 // MARK: - Music Sources Section
                 Section {
                     // YouTube (always active)

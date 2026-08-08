@@ -10,9 +10,37 @@ import Foundation
 import CoreHaptics
 import Combine
 import QuartzCore
+import UIKit
 
 final class HapticSymphonyEngine: ObservableObject {
     static let shared = HapticSymphonyEngine()
+
+    // S18 (P0-2 accessibility): UserDefaults key for the "Reduce
+    // Haptic Symphony" preference. Default respects the system
+    // Reduce Motion setting — if the user already asked for less
+    // motion, they almost certainly want less haptic. Otherwise
+    // default ON (haptic enabled) so existing users see no
+    // behavior change.
+    static let reducePreferenceKey = "haptic_symphony_reduce"
+
+    /// True when the user (or the system) has asked to suppress
+    /// Haptic Symphony. When this is true, `start()` is a no-op.
+    /// Read this from the UI to disable the action button and
+    /// show an inline "Reduce Haptics is on" hint.
+    var isReducedByPreference: Bool {
+        if UserDefaults.standard.object(forKey: Self.reducePreferenceKey) != nil {
+            return UserDefaults.standard.bool(forKey: Self.reducePreferenceKey)
+        }
+        // No explicit setting: defer to the system Reduce Motion.
+        return UIAccessibility.isReduceMotionEnabled
+    }
+
+    /// True if start() will actually run. False when the device
+    /// has no haptic hardware OR the user/system has asked to
+    /// reduce. UI uses this to disable the action button.
+    var canStart: Bool {
+        isSupported && !isReducedByPreference
+    }
 
     @Published var isActive: Bool = false
     @Published var isSupported: Bool = false
@@ -53,7 +81,13 @@ final class HapticSymphonyEngine: ObservableObject {
     // MARK: - Public API
 
     func start() {
-        guard isSupported, !isActive else { return }
+        // S18 (P0-2): respect the user's reduce preference AND the
+        // system Reduce Motion. If the user disabled the engine via
+        // Settings, or the OS-level accessibility setting is on, this
+        // is a no-op. The UI is expected to disable the action button
+        // in this case, but we double-check here as a safety net so
+        // the engine can never spin up against the user's wishes.
+        guard isSupported, !isActive, !isReducedByPreference else { return }
 
         do {
             engine = try CHHapticEngine()

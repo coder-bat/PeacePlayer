@@ -77,6 +77,7 @@
 		7A1B2C3D4E5F60718293A4C6 /* VinylRecordView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A1B2C3D4E5F60718293A4B5 /* VinylRecordView.swift */; };
 		7A1B2C3D4E5F60718293A4E8 /* VinylNowPlayingWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A1B2C3D4E5F60718293A4D7 /* VinylNowPlayingWidget.swift */; };
 		7C07C4E773283C6DEBAA8C16 /* UndoToastView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0AD7FD93A65608ABFCFB8FFC /* UndoToastView.swift */; };
+		D1647FB539507C8757460FA6 /* HapticReduceToast.swift in Sources */ = {isa = PBXBuildFile; fileRef = 35CD82D3D4481FFE1B96CEEF /* HapticReduceToast.swift */; };
 		7D496762667FBBEEB8155D6B /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E573FA0E404DC92944C06F18 /* SettingsView.swift */; };
 		7F18884C6472D54E69A88860 /* AddToPlaylistSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18CB5E604384AA12AE84E2D5 /* AddToPlaylistSheet.swift */; };
 		83F8EBD97CAF9AF95789DD14 /* QueuePrefetcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84C9EB7726123EC359E83F3D /* QueuePrefetcher.swift */; };
@@ -192,6 +193,7 @@
 		0235C33E045FE51378D34C35 /* AudiobookLibrary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudiobookLibrary.swift; sourceTree = "<group>"; };
 		0449744B02B62A5111EBC52F /* CrossfadeManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrossfadeManager.swift; sourceTree = "<group>"; };
 		0AD7FD93A65608ABFCFB8FFC /* UndoToastView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UndoToastView.swift; sourceTree = "<group>"; };
+		35CD82D3D4481FFE1B96CEEF /* HapticReduceToast.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HapticReduceToast.swift; sourceTree = "<group>"; };
 		0B9C54B9D7B79F7AE8AD5CAC /* CDTrack.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CDTrack.swift; sourceTree = "<group>"; };
 		0BFC375ECD06E998CB697145 /* QueueRestorer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueueRestorer.swift; sourceTree = "<group>"; };
 		0C5E9F809A825611AC8B66A3 /* GestureCoachOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GestureCoachOverlay.swift; sourceTree = "<group>"; };
@@ -597,6 +599,7 @@
 				B2A9468FFD7CCB3F04EED038 /* LikeButton.swift */,
 				00CA580AB7F5354A0D5782EA /* SongMemoryBadge.swift */,
 				0AD7FD93A65608ABFCFB8FFC /* UndoToastView.swift */,
+				35CD82D3D4481FFE1B96CEEF /* HapticReduceToast.swift */,
 				6FD6C9133D1AAC6ED27C1C6E /* VibeButton.swift */,
 			);
 			path = Components;
@@ -865,6 +868,7 @@
 				017ECF92A19304984CAAB334 /* TrackStore.swift in Sources */,
 				918664F868BBCB8A5BB21F46 /* UndoService.swift in Sources */,
 				7C07C4E773283C6DEBAA8C16 /* UndoToastView.swift in Sources */,
+				D1647FB539507C8757460FA6 /* HapticReduceToast.swift in Sources */,
 				28DA1B0BE3D506C0F8F453BD /* VibeButton.swift in Sources */,
 				4B0591D40CA1EDCFEA157A50 /* ViewExtensions.swift in Sources */,
 				C4E90D1C5EFDCB0B327E7039 /* WalkDJAppDelegate.swift in Sources */,
