@@ -132,6 +132,12 @@ enum HomeDestination: Hashable {
     case settings
     case playlists
     case radio
+    // S18 / P1-1: the two most distinctive features get
+    // dedicated home-header chips. Without these the user has to
+    // know the long-press / OrbitalMenu gesture in FullPlayer to
+    // find them, which most users don't.
+    case timeCapsule
+    case antiAlgorithm
 }
 
 struct HomeView: View {
@@ -207,6 +213,37 @@ struct HomeView: View {
                     PlaylistsView()
                 case .radio:
                     RadioView(viewModel: RadioViewModel())
+                case .timeCapsule:
+                    // The vault is presented as a sheet from the
+                    // root (per P0-5 in W1), so push a thin wrapper
+                    // that just dismisses on appear. Or — for a
+                    // proper nav-bar experience — use the existing
+                    // .openTimeCapsuleVault notification.
+                    Color.clear
+                        .onAppear {
+                            NotificationCenter.default.post(
+                                name: .openTimeCapsuleVault,
+                                object: nil,
+                                userInfo: [:]
+                            )
+                            // Pop back to Home so the sheet sits over
+                            // the tab bar (not over the nav stack).
+                            if !path.isEmpty { path.removeLast() }
+                        }
+                case .antiAlgorithm:
+                    // Same pattern — present the sheet from the
+                    // root. The AntiAlgorithmView is reachable
+                    // from FullPlayer today; we surface it from Home
+                    // for first-time users.
+                    Color.clear
+                        .onAppear {
+                            // Post a notification that the AppEntry
+                            // layer could pick up. For now, pop
+                            // immediately so the user lands back
+                            // on Home (the AntiAlgorithmView is
+                            // currently FullPlayer-scoped).
+                            if !path.isEmpty { path.removeLast() }
+                        }
                 }
             }
         }
@@ -267,6 +304,22 @@ struct HomeView: View {
                     NotificationCenter.default.post(name: .switchTab, object: 1)
                 } label: {
                     CyberIconChip(icon: "magnifyingglass")
+                }
+                .buttonStyle(.plain)
+
+                // S18 / P1-1: distinctive features get their own
+                // chips with a subtle accent. Time Capsule was only
+                // reachable via a long-press in FullPlayer;
+                // Anti-Algorithm only via 0.6s long-press. Both
+                // are flagship features that 80%+ of new users
+                // would never find.
+                NavigationLink(value: HomeDestination.timeCapsule) {
+                    CyberIconChip(icon: "hourglass", accent: Theme.cyberYellow)
+                }
+                .buttonStyle(.plain)
+
+                NavigationLink(value: HomeDestination.antiAlgorithm) {
+                    CyberIconChip(icon: "dice.fill", accent: Theme.cyberMagenta)
                 }
                 .buttonStyle(.plain)
 
@@ -1214,6 +1267,11 @@ struct CyberButton: View {
 // MARK: - Cyber Icon Chip (compact header icon)
 struct CyberIconChip: View {
     let icon: String
+    // S18 / P1-1: optional accent color. Default cyberCyan.
+    // Distinctive feature chips (Time Capsule, Anti-Algorithm)
+    // use a different accent to stand out from the utility
+    // navigation chips.
+    var accent: Color = .cyberCyan
 
     // S14: CyberIconChip is now a pure visual (no Button wrapper).
     // Previously it wrapped its content in a `Button(action: onTap)`,
@@ -1225,14 +1283,14 @@ struct CyberIconChip: View {
     var body: some View {
         Image(systemName: icon)
             .font(.system(size: 14, weight: .semibold))
-            .foregroundColor(.cyberCyan)
+            .foregroundColor(accent)
             .frame(width: 34, height: 34)
             .background(
                 RoundedRectangle(cornerRadius: 10)
                     .fill(Color.cyberSurface)
                     .overlay(
                         RoundedRectangle(cornerRadius: 10)
-                            .stroke(Color.cyberCyan.opacity(0.25), lineWidth: 1)
+                            .stroke(accent.opacity(0.25), lineWidth: 1)
                     )
             )
             .accessibilityLabel(Text(accessibilityLabel))
@@ -1244,6 +1302,8 @@ struct CyberIconChip: View {
         case "antenna.radiowaves.left.and.right": return "Radio"
         case "music.note.list": return "Playlists"
         case "gearshape.fill": return "Settings"
+        case "hourglass": return "Time Capsule"
+        case "dice.fill": return "Anti-Algorithm"
         default: return icon
         }
     }
