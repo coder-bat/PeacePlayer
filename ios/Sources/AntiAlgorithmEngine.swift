@@ -9,6 +9,7 @@
 import Foundation
 import CoreData
 import Combine
+import os.log
 
 final class AntiAlgorithmEngine: ObservableObject {
     static let shared = AntiAlgorithmEngine()
@@ -137,33 +138,60 @@ final class AntiAlgorithmEngine: ObservableObject {
     func startExplorationSession() {
         guard !isExploring else { return }
 
+        // S18 / v1.6.3: os_log breadcrumbs for the v1.6.1 real-device
+        // crash where the user tapped "Start Exploring" and the app
+        // died. Tag the entire flow so a Console.app or
+        // `idevicesyslog` capture can show exactly where the run
+        // stopped. The "exploration" category is unique to this
+        // engine; filter by category to ignore noise.
+        let log = OSLog(subsystem: "com.ytaudioplayer.app", category: "exploration")
+        os_log(.info, log: log, "AA: startExplorationSession enter")
+
         isLoading = true
-        let _ = analyzeListeningHistory()
+        let profile = analyzeListeningHistory()
+        os_log(.info, log: log, "AA: tasteProfile artists=%d seeds=%d", profile.artists.count, profile.seedCount)
 
         let radius: Float = lastExplorationRadius()
 
         fetchFrontierTracks(radius: radius) { [weak self] tracks in
-            guard let self = self, !tracks.isEmpty else {
-                self?.isLoading = false
+            guard let self = self else {
+                os_log(.error, log: log, "AA: self=nil on frontier completion")
+                return
+            }
+            os_log(.info, log: log, "AA: frontier returned %d tracks", tracks.count)
+            if tracks.isEmpty {
+                self.isLoading = false
                 return
             }
 
-            // Create CoreData session
-            let session = CDExplorationSession(context: self.context)
-            session.id = UUID()
-            session.startedAt = Date()
-            session.seedVideoIds = self.seedTracks
-            session.explorationRadius = radius
-            session.tracksQueued = Int16(tracks.count)
-            session.tracksCompleted = 0
-            session.tracksSkipped = 0
-            session.tracksLiked = 0
-            try? self.context.save()
+            do {
+                // S18 / v1.6.3: wrap the CoreData save + view-state
+                // mutation in a do-catch. The previous code used
+                // `try?` which silently swallowed the error; if the
+                // save threw AND the view state was already mutated
+                // to a half-built state, a subsequent re-render
+                // could trip a crash that's hard to attribute
+                // without a stack trace. Now we log + bail.
+                let session = CDExplorationSession(context: self.context)
+                session.id = UUID()
+                session.startedAt = Date()
+                session.seedVideoIds = self.seedTracks
+                session.explorationRadius = radius
+                session.tracksQueued = Int16(tracks.count)
+                session.tracksCompleted = 0
+                session.tracksSkipped = 0
+                session.tracksLiked = 0
+                try self.context.save()
+                os_log(.info, log: log, "AA: CoreData session saved id=%{public}@", session.id.uuidString)
 
-            self.explorationQueue = tracks
-            self.currentSession = ExplorationSessionSnapshot(from: session)
-            self.isExploring = true
-            self.isLoading = false
+                self.explorationQueue = tracks
+                self.currentSession = ExplorationSessionSnapshot(from: session)
+                self.isExploring = true
+                self.isLoading = false
+            } catch {
+                os_log(.error, log: log, "AA: save+publish failed: %{public}@", String(describing: error))
+                self.isLoading = false
+            }
         }
     }
 

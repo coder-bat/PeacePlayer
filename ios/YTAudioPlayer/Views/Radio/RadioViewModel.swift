@@ -7,6 +7,7 @@
 
 import SwiftUI
 import Combine
+import os.log
 
 enum RadioSection: String, CaseIterable {
     case stations = "Stations"
@@ -99,16 +100,26 @@ class RadioViewModel: ObservableObject {
     // MARK: - Radio Stations
     
     func loadTopStations() {
+        // S18 / v1.6.3: os_log breadcrumbs for the v1.6.1 real-device
+        // crash where the radio view showed the skeleton and then
+        // died when the data arrived. Filter by category "radio" in
+        // Console.app or `idevicesyslog`.
+        let log = OSLog(subsystem: "com.ytaudioplayer.app", category: "radio")
+        os_log(.info, log: log, "RV: loadTopStations begin")
         // Remove lazy loading guard - always refresh to ensure data is fresh
         // guard topStations.isEmpty else { return }
         isLoadingStations = true
         APIService.shared.getTopRadioStations(limit: 30)
             .sink(receiveCompletion: { [weak self] completion in
                 self?.isLoadingStations = false
-                if case .failure = completion {
+                if case .failure(let err) = completion {
+                    os_log(.error, log: log, "RV: loadTopStations failed: %{public}@", String(describing: err))
                     self?.setError("Failed to load stations")
+                } else {
+                    os_log(.info, log: log, "RV: loadTopStations completed (empty)")
                 }
             }, receiveValue: { [weak self] stations in
+                os_log(.info, log: log, "RV: loadTopStations received %d stations", stations.count)
                 self?.topStations = stations
                 // S18 / v1.6 / P1-5: cache for deep-link resolution.
                 // peaceplayer://radio/{stationId} looks up by stationuuid;
