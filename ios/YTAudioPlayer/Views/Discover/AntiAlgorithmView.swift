@@ -8,40 +8,65 @@
 import SwiftUI
 
 struct AntiAlgorithmView: View {
-    @StateObject private var engine = AntiAlgorithmEngine.shared
     @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        // S18 / v1.6.1: this is the SHEET entry point. Wraps the
+        // shared AntiAlgorithmContent in a NavigationStack with a
+        // Close button — used by FullPlayer's "Anti-Algorithm"
+        // sheet. The pushed entry point (HomeView → top-right
+        // dice icon) uses AntiAlgorithmScreen instead, which
+        // embeds AntiAlgorithmContent in the parent NavigationStack
+        // with a custom back button.
+        NavigationStack {
+            AntiAlgorithmContent()
+                .navigationTitle("Anti-Algorithm")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Close") {
+                            HapticManager.light()
+                            dismiss()
+                        }
+                            .foregroundColor(.cyberDim)
+                    }
+                }
+        }
+        .preferredColorScheme(.dark)
+    }
+}
+
+// MARK: - Anti-Algorithm Content (shared by sheet + pushed)
+
+/// The actual Anti-Algorithm UI. Lifted out of AntiAlgorithmView
+/// in v1.6.1 so it can be embedded directly inside HomeView's
+/// NavigationStack (via AntiAlgorithmScreen) without a nested
+/// NavigationStack. iOS does not allow NavigationStack inside
+/// another NavigationStack — the previous code worked around
+/// this with a "Color.clear placeholder that pops back" hack,
+/// which left the Home header icon opening a white screen and
+/// immediately bouncing back to Home.
+struct AntiAlgorithmContent: View {
+    @StateObject private var engine = AntiAlgorithmEngine.shared
     @State private var tasteProfile: (artists: [(String, Int)], seedCount: Int)?
 
     var body: some View {
-        NavigationStack {
-            ZStack {
-                Color.black.ignoresSafeArea()
+        ZStack {
+            Color.black.ignoresSafeArea()
 
-                ScrollView {
-                    VStack(spacing: 24) {
-                        if engine.isExploring {
-                            activeSessionView
-                        } else if engine.isLoading {
-                            loadingView
-                        } else {
-                            startView
-                        }
+            ScrollView {
+                VStack(spacing: 24) {
+                    if engine.isExploring {
+                        activeSessionView
+                    } else if engine.isLoading {
+                        loadingView
+                    } else {
+                        startView
+                    }
 
-                        statsSection
-                    }
-                    .padding()
+                    statsSection
                 }
-            }
-            .navigationTitle("Anti-Algorithm")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Close") {
-                        HapticManager.light()
-                        dismiss()
-                    }
-                        .foregroundColor(.cyberDim)
-                }
+                .padding()
             }
         }
         .preferredColorScheme(.dark)
@@ -297,6 +322,66 @@ private struct StatBlock: View {
         .padding(.vertical, 12)
         .background(Color.cyberSurface.opacity(0.05))
         .cornerRadius(10)
+    }
+}
+
+// MARK: - Anti-Algorithm Screen (pushed entry point)
+
+/// Pushed onto HomeView's NavigationStack when the user taps the
+/// Anti-Algorithm icon in the top-right header cluster. Uses a
+/// custom back button + custom title instead of the system nav
+/// bar to match the rest of the S18 design language. Hides the
+/// system nav bar so we don't get the duplicate "Anti-Algorithm"
+/// title pattern.
+struct AntiAlgorithmScreen: View {
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        ZStack(alignment: .top) {
+            Color.black.ignoresSafeArea()
+
+            VStack(spacing: 0) {
+                customHeader
+
+                AntiAlgorithmContent()
+            }
+        }
+        .toolbar(.hidden, for: .navigationBar)
+    }
+
+    // S18 / v1.6.1: custom header matches the Home headerSection
+    // pattern — a left-aligned title with a back chevron, no
+    // subtitle (the screen is self-describing). Same vertical
+    // rhythm (24pt bold monospaced) as the other destination
+    // screens, so Home → destination transitions don't shift the
+    // baseline.
+    private var customHeader: some View {
+        HStack(spacing: 12) {
+            Button {
+                HapticManager.light()
+                dismiss()
+            } label: {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundColor(Theme.cyberCyan)
+                    .frame(width: 32, height: 32)
+            }
+            .buttonStyle(.plain)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("ANTI-ALGORITHM")
+                    .font(.system(size: 22, weight: .bold, design: .monospaced))
+                    .foregroundColor(.white)
+                Text("break your bubble")
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .foregroundColor(Theme.cyberYellow)
+            }
+
+            Spacer()
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 16)
+        .padding(.bottom, 8)
     }
 }
 

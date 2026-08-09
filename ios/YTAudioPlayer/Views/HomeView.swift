@@ -241,19 +241,17 @@ struct HomeView: View {
                             if !path.isEmpty { path.removeLast() }
                         }
                 case .antiAlgorithm:
-                    // Same pattern — present the sheet from the
-                    // root. The AntiAlgorithmView is reachable
-                    // from FullPlayer today; we surface it from Home
-                    // for first-time users.
-                    Color.clear
-                        .onAppear {
-                            // Post a notification that the AppEntry
-                            // layer could pick up. For now, pop
-                            // immediately so the user lands back
-                            // on Home (the AntiAlgorithmView is
-                            // currently FullPlayer-scoped).
-                            if !path.isEmpty { path.removeLast() }
-                        }
+                    // S18 / v1.6.1: Anti-Algorithm is now a real
+                    // destination on Home's NavigationStack. The
+                    // previous "Color.clear + pop back" hack
+                    // was a no-op for the user — the dice icon
+                    // opened a white screen and bounced back to
+                    // Home. AntiAlgorithmScreen embeds the shared
+                    // AntiAlgorithmContent (no nested
+                    // NavigationStack — that crashes iOS) with
+                    // a custom back button matching the rest of
+                    // the S18 design language.
+                    AntiAlgorithmScreen()
                 }
             }
         }
