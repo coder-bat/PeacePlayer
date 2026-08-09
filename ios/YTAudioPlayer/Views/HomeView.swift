@@ -222,7 +222,14 @@ struct HomeView: View {
                 case .playlists:
                     PlaylistsView()
                 case .radio:
-                    RadioView(viewModel: RadioViewModel())
+                    // S18 / v1.6.4: RadioView now owns its viewModel
+                    // internally via @StateObject. Passing a fresh
+                    // RadioViewModel() here caused the viewModel to
+                    // be recreated every time HomeView re-rendered
+                    // (which happens on every PlayerState change —
+                    // play, pause, track-end), wiping the loaded
+                    // data and showing the skeleton again.
+                    RadioView()
                 case .timeCapsule:
                     // The vault is presented as a sheet from the
                     // root (per P0-5 in W1), so push a thin wrapper

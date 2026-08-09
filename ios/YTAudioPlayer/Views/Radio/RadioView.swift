@@ -3,7 +3,22 @@ import SwiftUI
 // MARK: - RadioView
 
 struct RadioView: View {
-    @ObservedObject var viewModel: RadioViewModel
+    // S18 / v1.6.4: was `@ObservedObject var viewModel: RadioViewModel`
+    // (passed in from HomeView's destination case). The problem:
+    // HomeView observes PlayerState (via `@StateObject`), and any
+    // PlayerState change (play, pause, track-end) re-renders HomeView,
+    // which re-evaluates the `case .radio: RadioView(viewModel:
+    // RadioViewModel())` body — creating a *new* RadioViewModel. The
+    // new viewModel starts with empty data; the old data is gone.
+    // The user reported "when i play or pause radio, the content in
+    // radio view disappears. if i go home and come back to radio
+    // view, it comes back again" — that's the .task firing on the
+    // new viewModel and reloading.
+    //
+    // Fix: own the viewModel inside RadioView via @StateObject so it
+    // survives parent re-renders. RadioView's viewModel is only used
+    // by RadioView itself, so hoisting it is safe.
+    @StateObject private var viewModel = RadioViewModel()
     @ObservedObject var library = AudiobookLibrary.shared
     @State private var showPodcastDetail: PodcastShow?
     @State private var selectedAudiobook: Audiobook?

@@ -188,6 +188,20 @@ final class AntiAlgorithmEngine: ObservableObject {
                 self.currentSession = ExplorationSessionSnapshot(from: session)
                 self.isExploring = true
                 self.isLoading = false
+
+                // S18 / v1.6.4: play the first track immediately and
+                // queue the rest. The user wanted a "start the
+                // radio, listen" experience instead of the previous
+                // "show me a list, pick one" flow. Previous behavior
+                // (v1.5.0 through v1.6.3) set `isExploring = true` and
+                // rendered the active session list, but didn't
+                // start playback — the user had to tap a track to
+                // begin. New behavior: first track plays right
+                // away, the rest go into the player's queue so
+                // they autoplay when the current track ends. This
+                // matches the user's mental model: "Start Exploring"
+                // means start, not "show me the list".
+                self.playFirstAndQueueRest(tracks: tracks, log: log)
             } catch {
                 os_log(.error, log: log, "AA: save+publish failed: %{public}@", String(describing: error))
                 self.isLoading = false
@@ -199,6 +213,68 @@ final class AntiAlgorithmEngine: ObservableObject {
         isExploring = false
         explorationQueue = []
         currentSession = nil
+    }
+
+    // S18 / v1.6.4: play the first exploration track immediately,
+    // pre-fetch stream URLs for the remaining tracks in parallel,
+    // and append each to the player's queue as its URL comes back.
+    // PlayerState's queue advances automatically when the current
+    // track ends, so the user gets a continuous "frontier radio"
+    // experience — no need to keep tapping.
+    private func playFirstAndQueueRest(tracks: [Track], log: OSLog) {
+        guard let first = tracks.first else {
+            os_log(.error, log: log, "AA: playFirstAndQueueRest called with empty tracks")
+            return
+        }
+        os_log(.info, log: log, "AA: playFirstAndQueueRest: first=%{public}@ remaining=%d", first.videoId, tracks.count - 1)
+
+        // S18 / v1.6.4: play the first track. play(track:) goes
+        // through the standard flow — checks local file, fetches
+        // stream URL, builds a QueueItem, adds it to the queue at
+        // currentIndex 0. The remaining tracks will be appended
+        // below as their stream URLs come back.
+        PlayerState.shared.play(track: first)
+
+        // The remaining tracks go through a per-track pre-fetch.
+        // For each, we call StreamURLCache (which is the same
+        // cache play(track:) uses), and as soon as the URL is
+        // back we add a QueueItem to the player's queue. The
+        // player advances currentIndex on track-end, so
+        // QueueItem[1] plays automatically when QueueItem[0]
+        // ends.
+        let remaining = Array(tracks.dropFirst())
+        let maxQueueSize = max(50, remaining.count + 5)
+        for track in remaining {
+            StreamURLCache.shared.getStreamUrl(videoId: track.videoId, quality: "low")
+                .sink(
+                    receiveCompletion: { completion in
+                        if case .failure(let err) = completion {
+                            os_log(.error, log: log, "AA: streamURL fetch failed for %{public}@: %{public}@", track.videoId, String(describing: err))
+                        }
+                    },
+                    receiveValue: { [weak self] streamInfo in
+                        let item = QueueItem(
+                            track: track,
+                            streamUrl: streamInfo.streamUrl,
+                            source: .stream
+                        )
+                        // S18 / v1.6.4: add to the player's queue.
+                        // The dedup-by-videoId in QueueStore.add
+                        // means we won't add a track that's
+                        // already in the queue. If the user ended
+                        // the session mid-flight, the next add
+                        // will be a no-op against the dropped
+                        // session.
+                        guard let self = self, self.isExploring else {
+                            os_log(.info, log: log, "AA: dropping queued track (session ended) %{public}@", track.videoId)
+                            return
+                        }
+                        PlayerState.shared.queueStore.add(item, maxQueueSize: maxQueueSize)
+                        os_log(.info, log: log, "AA: queued %{public}@ (%{public}@)", track.videoId, track.title)
+                    }
+                )
+                .store(in: &cancellables)
+        }
     }
 
     // MARK: - Feedback Tracking
