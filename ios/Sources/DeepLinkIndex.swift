@@ -30,6 +30,18 @@
 //  may lose one item but the cache will converge on the next
 //  refresh. Deep-link reads happen on the main thread.
 //
+//  S18 / v1.6.1: a real `lock` guards the dict + order updates.
+//  The original "best-effort" comment was wrong about a subtle
+//  case: Swift dictionaries are value types with copy-on-write,
+//  and concurrent in-place mutations on the same backing storage
+//  trigger a runtime exclusivity violation crash. Even though
+//  the APIService publisher adds `.receive(on: .main)`, the
+//  background queue's internal work between `.sink` invocations
+//  can overlap with the foreground `findX` reads, and a stray
+//  background access (e.g. an early init from a Combine setup
+//  in a non-main context) is enough to crash. NSLock is the
+//  cheapest correct fix; the critical sections are tiny.
+//
 
 import Foundation
 
@@ -46,6 +58,11 @@ final class DeepLinkIndex {
     // combinations the user is realistically going to see, with
     // headroom for search results.
     private let maxItemsPerType = 200
+
+    // NSLock that protects the three dicts + three order lists.
+    // Public mutators (updateX) take it; public readers
+    // (findX) take it for the read.
+    private let lock = NSLock()
 
     private(set) var stations: [String: RadioStation] = [:]
     private(set) var podcasts: [String: PodcastShow] = [:]    // keyed by feedUrl
@@ -64,6 +81,7 @@ final class DeepLinkIndex {
     // MARK: - Updates
 
     func updateStations(_ list: [RadioStation]) {
+        lock.lock()
         for s in list {
             if stations[s.stationuuid] == nil {
                 stationOrder.append(s.stationuuid)
@@ -71,10 +89,16 @@ final class DeepLinkIndex {
             stations[s.stationuuid] = s
         }
         evict(&stationOrder, &stations)
-        persist(stations, key: stationsKey)
+        let snapshot = stations
+        lock.unlock()
+        // Persist outside the lock — UserDefaults is thread-safe
+        // and the encode can be expensive on cold launch when the
+        // cache has 200 items.
+        persist(snapshot, key: stationsKey)
     }
 
     func updatePodcasts(_ list: [PodcastShow]) {
+        lock.lock()
         for p in list {
             if podcasts[p.feedUrl] == nil {
                 podcastOrder.append(p.feedUrl)
@@ -82,10 +106,13 @@ final class DeepLinkIndex {
             podcasts[p.feedUrl] = p
         }
         evict(&podcastOrder, &podcasts)
-        persist(podcasts, key: podcastsKey)
+        let snapshot = podcasts
+        lock.unlock()
+        persist(snapshot, key: podcastsKey)
     }
 
     func updateAudiobooks(_ list: [Audiobook]) {
+        lock.lock()
         for b in list {
             if audiobooks[b.id] == nil {
                 audiobookOrder.append(b.id)
@@ -93,21 +120,29 @@ final class DeepLinkIndex {
             audiobooks[b.id] = b
         }
         evict(&audiobookOrder, &audiobooks)
-        persist(audiobooks, key: audiobooksKey)
+        let snapshot = audiobooks
+        lock.unlock()
+        persist(snapshot, key: audiobooksKey)
     }
 
     // MARK: - Lookups (for handleDeepLink)
 
     func findStation(_ stationId: String) -> RadioStation? {
-        stations[stationId]
+        lock.lock()
+        defer { lock.unlock() }
+        return stations[stationId]
     }
 
     func findPodcast(_ feedUrl: String) -> PodcastShow? {
-        podcasts[feedUrl]
+        lock.lock()
+        defer { lock.unlock() }
+        return podcasts[feedUrl]
     }
 
     func findAudiobook(_ bookId: String) -> Audiobook? {
-        audiobooks[bookId]
+        lock.lock()
+        defer { lock.unlock() }
+        return audiobooks[bookId]
     }
 
     // MARK: - Persistence

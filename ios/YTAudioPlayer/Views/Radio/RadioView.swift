@@ -7,6 +7,11 @@ struct RadioView: View {
     @ObservedObject var library = AudiobookLibrary.shared
     @State private var showPodcastDetail: PodcastShow?
     @State private var selectedAudiobook: Audiobook?
+    // S18 / v1.6.1: custom back button dismisses the pushed
+    // destination. @Environment(\.dismiss) works for both
+    // pushed and presented views, so it pops the parent
+    // NavigationStack here.
+    @Environment(\.dismiss) private var dismiss
 
     private func dismissKeyboard() {
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
@@ -18,6 +23,15 @@ struct RadioView: View {
         // earlier iteration added one, which crashed on push: iOS
         // does not allow NavigationStack nested inside another
         // NavigationStack.)
+        //
+        // S18 / v1.6.1: hide the system nav bar. The previous
+        // .navigationTitle("Radio") + .navigationBarTitleDisplayMode
+        // (.inline) drew a system nav bar with a back chevron AND a
+        // "Radio" label, then the custom headerSection below drew
+        // its own "RADIO" label. Two competing titles in the same
+        // view looked broken; hiding the system bar keeps just the
+        // custom chrome. The back chevron is now in the custom
+        // header (headerSection).
         ZStack {
             Theme.cyberBackground.ignoresSafeArea()
 
@@ -63,8 +77,7 @@ struct RadioView: View {
                 }
             }
         }
-        .navigationTitle("Radio")
-        .navigationBarTitleDisplayMode(.inline)
+        .toolbar(.hidden, for: .navigationBar)
         .task {
             viewModel.loadTopStations()
             viewModel.loadTopPodcasts()
@@ -100,7 +113,22 @@ struct RadioView: View {
     // MARK: - Header
 
     var headerSection: some View {
-        HStack {
+        HStack(spacing: 12) {
+            // S18 / v1.6.1: custom back chevron. Replaces the
+            // system back button that came with the system nav
+            // bar. Same icon weight and tint as AntiAlgorithmScreen
+            // so the destinations share a back-button language.
+            Button {
+                HapticManager.light()
+                dismiss()
+            } label: {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundColor(Theme.cyberCyan)
+                    .frame(width: 32, height: 32)
+            }
+            .buttonStyle(.plain)
+
             VStack(alignment: .leading, spacing: 4) {
                 Text("RADIO")
                     .font(.system(size: 24, weight: .bold, design: .monospaced))
