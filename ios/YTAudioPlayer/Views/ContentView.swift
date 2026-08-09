@@ -27,10 +27,6 @@ struct ContentView: View {
     // Lives at the root (not behind the FullPlayer) so a cold
     // launch from a notification banner can present it.
     @State private var showTimeCapsuleVault = false
-    // S18 / v1.6: Liked Songs quick-access sheet, posted by the
-    // heart tab in CyberpunkTabBar. Same root-level pattern as
-    // TimeCapsuleVault so it works from any tab.
-    @State private var showLikedSongs = false
     // S13: prevent the restore prompt from re-appearing in the same
     // session after dismissal. Cleared when the app cold-launches
     // (UserDefaults is process-scoped via AppStorage).
@@ -62,6 +58,20 @@ struct ContentView: View {
                     .tag(0)
                 SearchView(viewModel: searchViewModel)
                     .tag(1)
+                // S18 / v1.6.1: Liked Songs is now a real tab
+                // (tag 2), not a sheet. The heart icon in the
+                // bottom bar switches to this tab just like Home
+                // and Library — the user wanted consistent
+                // navigation chrome across all three. The view
+                // mirrors the pushed destination pattern (custom
+                // header + PlaylistDetailView) so the look is the
+                // same as the previous sheet, just presented as a
+                // tab. Tag 1 is still reserved for Search (the
+                // bottom bar only shows 3 of the 4 tabs, the Search
+                // tab is reached via the magnifying-glass chip on
+                // Home).
+                LikedSongsView()
+                    .tag(2)
                 LibraryView()
                     .tag(3)
             }
@@ -140,42 +150,6 @@ struct ContentView: View {
                 .frame(width: 0, height: 0)
                 .sheet(isPresented: $showTimeCapsuleVault) {
                     TimeCapsuleVaultView()
-                }
-
-            // S18 / v1.6: Liked Songs sheet, presented at the root
-            // from the heart tab in CyberpunkTabBar. Same pattern
-            // as the TimeCapsule sheet — works from any tab.
-            Color.clear
-                .frame(width: 0, height: 0)
-                .sheet(isPresented: $showLikedSongs) {
-                    if let liked = PlaylistManager.shared.playlists
-                        .first(where: { $0.isLikedSongsPlaylist }) {
-                        NavigationStack {
-                            PlaylistDetailView(playlist: liked)
-                        }
-                    } else {
-                        // Fallback: should be very rare —
-                        // PlaylistManager seeds the smart playlist
-                        // on first launch. Show a minimal empty
-                        // state so the sheet isn't blank.
-                        ZStack {
-                            Theme.cyberBackground.ignoresSafeArea()
-                            VStack(spacing: 12) {
-                                Image(systemName: "heart.slash")
-                                    .font(.system(size: 32, weight: .regular))
-                                    .foregroundColor(Theme.cyberDim)
-                                Text("Liked Songs")
-                                    .font(.title3.bold())
-                                    .foregroundColor(.white)
-                                Text("Tap the heart on any track to add it here.")
-                                    .font(.footnote)
-                                    .foregroundColor(Theme.cyberTextSecondary)
-                                    .multilineTextAlignment(.center)
-                                    .padding(.horizontal, 40)
-                            }
-                        }
-                        .presentationDetents([.medium])
-                    }
                 }
 
             // Undo toast — above tab bar + MiniPlayer, below sheets
@@ -259,12 +233,6 @@ struct ContentView: View {
                 selectedTab = 0
             }
             NotificationCenter.default.post(name: .openRadioView, object: nil)
-        }
-        // S18 / v1.6: heart tab in CyberpunkTabBar posts this.
-        // Present the Liked Songs sheet at the root — same pattern
-        // as TimeCapsuleVault.
-        .onReceive(NotificationCenter.default.publisher(for: .openLikedSongs)) { _ in
-            showLikedSongs = true
         }
         // S14: Settings / Playlists / Radio are no longer presented as
         // sheets from ContentView — HomeView's NavigationStack pushes
@@ -536,13 +504,11 @@ struct CyberpunkTabBar: View {
         let tag: Int
     }
 
-    // S18 / v1.6: added Liked Songs quick-access. The heart icon
-    // posts .openLikedSongs instead of switching tabs — there's no
-    // tab 2 in the TabView (tag 1 is reserved for Search, tag 3
-    // is Library). ContentView observes the notification and
-    // presents a sheet at the root with the Liked Songs playlist.
-    // The pill is still 3 icons at 60pt each, so the total width
-    // is 180pt (unchanged from the 2-icon version).
+    // S18 / v1.6.1: Liked Songs is now a real tab (tag 2), not
+    // a sheet. The heart icon in the pill switches to the Liked
+    // Songs tab exactly like Home and Library — uniform bottom-
+    // bar navigation. Tag 1 is reserved for Search (reached via
+    // the magnifying-glass chip on Home, not the bottom bar).
     private let tabs: [TabDef] = [
         TabDef(icon: "house.fill",            label: "Home",     tag: 0),
         TabDef(icon: "heart.fill",            label: "Liked",    tag: 2),
@@ -562,18 +528,6 @@ struct CyberpunkTabBar: View {
                     label: tab.label,
                     isSelected: selectedTab == tab.tag
                 ) {
-                    // S18 / v1.6: tag 2 (Liked) is special — it
-                    // posts a notification instead of switching
-                    // tabs. The user's mental model is "tap heart
-                    // to see my liked songs", not "go to a tab".
-                    if tab.tag == 2 {
-                        HapticManager.light()
-                        NotificationCenter.default.post(
-                            name: .openLikedSongs,
-                            object: nil
-                        )
-                        return
-                    }
                     guard selectedTab != tab.tag else { return }
                     HapticManager.light()
                     withAnimation(.spring(response: 0.28, dampingFraction: 0.72)) {
@@ -722,10 +676,6 @@ extension Notification.Name {
     // S18 / v1.6 / P1-5: same pattern as openPodcastShow but for
     // peaceplayer://audiobook/{bookId}.
     static let openAudiobook = Notification.Name("openAudiobook")
-    // S18 / v1.6: posted by the heart tab in CyberpunkTabBar.
-    // ContentView listens and presents a sheet at the root with
-    // the Liked Songs playlist.
-    static let openLikedSongs = Notification.Name("openLikedSongs")
     // S13: posted by LibraryView when the user adds a track to the
     // queue from the row context menu. FullPlayer observes this to
     // pulse its Queue icon as feedback (Phase 4.1).

@@ -142,6 +142,7 @@
 		D34732D7FF234A688B6BC012 /* NowPlayingLiveActivityWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7A783AFF778464EB7C3B72C /* NowPlayingLiveActivityWidget.swift */; };
 		D37834AA30D9890282DAD69E /* SongMemorySheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66BD129E2917B007A83C0746 /* SongMemorySheet.swift */; };
 		D68E450CDE257229340947C7 /* LibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1AD3F94F37ADACD364BBCA1A /* LibraryView.swift */; };
+		D1E0F0B10000000000000B04 /* LikedSongsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1E0F0B10000000000000F04 /* LikedSongsView.swift */; };
 		D736F1C7E3BA205A66708909 /* SendTapBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7F4082B02CB8809B3DCAC6F /* SendTapBridge.swift */; };
 		DB9DAAE2A5A74B189474C9C2 /* AudioEqualizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE96AA9F018F4BB79CDA287D /* AudioEqualizer.swift */; };
 		DD0F6A4EA6E4C8B49C31A695 /* StreamURLCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E66C354542939670E8FAE52 /* StreamURLCache.swift */; };
@@ -217,6 +218,7 @@
 		1A4D4641A6DFB5120002B115 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		1ABDD1EC6042FE4A7F590CA1 /* ChordsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChordsView.swift; sourceTree = "<group>"; };
 		1AD3F94F37ADACD364BBCA1A /* LibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryView.swift; sourceTree = "<group>"; };
+		D1E0F0B10000000000000F04 /* LikedSongsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LikedSongsView.swift; sourceTree = "<group>"; };
 		1B89643747E78C4027FF9AD9 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		1C5B36394A531D9C8D93AAFD /* YTAudioPlayer.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = YTAudioPlayer.entitlements; sourceTree = "<group>"; };
 		1DEC17BC10A2C1547FC59BE9 /* ShareHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareHelper.swift; sourceTree = "<group>"; };
@@ -381,6 +383,7 @@
 				A1B2C3D400060000000000A1 /* LandingView.swift */,
 				A1B2C3D4000C00000000001 /* AvatarPickerSheet.swift */,
 				1AD3F94F37ADACD364BBCA1A /* LibraryView.swift */,
+				D1E0F0B10000000000000F04 /* LikedSongsView.swift */,
 				3981584A595276084E907877 /* MainContainerView.swift */,
 				0BFC375ECD06E998CB697145 /* QueueRestorer.swift */,
 				6AF72E449870436F01005365 /* RecentlyPlayedView.swift */,
@@ -831,6 +834,7 @@
 				3FEE30CDE16A8EBD1B1F97A2 /* ImageCache.swift in Sources */,
 				DD0F6A4EA6E4C8B49C31A695 /* StreamURLCache.swift in Sources */,
 				D68E450CDE257229340947C7 /* LibraryView.swift in Sources */,
+				D1E0F0B10000000000000B04 /* LikedSongsView.swift in Sources */,
 				5C3D4A6FE26E4C494C3E8FB4 /* LibraryViewModel.swift in Sources */,
 				63C543D28F620E719F782C46 /* LikeButton.swift in Sources */,
 				3BB2A579043A9DD6436D840D /* LyricsView.swift in Sources */,
