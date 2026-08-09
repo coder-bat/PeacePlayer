@@ -25,6 +25,21 @@ targets:
     sources:
       - path: YTAudioPlayer
       - path: Sources
+        # S18 / v1.6.6: these four files are orphans from a feature
+        # branch ("Add unified sources, chords API, and CoreData",
+        # 35ba4c5) that was never fully merged. They reference
+        # methods (hasPlexSource, isLiked, insertNext,
+        # playbackError, generic, track.downloaded, etc.) that
+        # don't exist on the corresponding types — the pre-merge
+        # build was working because the pbxproj had these files
+        # excluded from the main app target. Excluding them here
+        # keeps the build green until the branch is either
+        # completed or removed.
+        excludes:
+          - "UnifiedLibraryViewModel.swift"
+          - "UnifiedPlaylist.swift"
+          - "UnifiedTrack.swift"
+          - "MusicSourceRegistry.swift"
     resources:
       - path: YTAudioPlayer/LaunchScreen.storyboard
       - path: YTAudioPlayer/Assets.xcassets
@@ -77,6 +92,22 @@ targets:
     sources:
       - path: PeacePlayerWidget
       - path: Sources/SharedNowPlayingState.swift
+      - path: Sources/SharedArtworkCache.swift
+      # S18 / v1.6.6: shared cyber color palette so the widget's
+      # WidgetTheme can reference the same values as the main
+      # app's Theme (CV-6: WidgetTheme is a 4-color fork of the
+      # 30-token Theme). This file is the single source of truth
+      # for cyberpunk colors + widget-safe text tokens.
+      - path: Sources/SharedCyberColors.swift
+      # NowPlayingActivityAttributes is consumed by both the
+      # widget (for the Live Activity payload) and the main app
+      # (LiveActivityManager). Living in PeacePlayerWidget/ used
+      # to mean only the widget target compiled it; the main app
+      # would see the type as undeclared. Moving the file to
+      # Sources/ (via the git mv below) and listing it here
+      # makes xcodegen register it in both targets' Sources
+      # build phases — one source of truth, both compile cleanly.
+      - path: Sources/NowPlayingActivityAttributes.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.ytaudioplayer.app.widget

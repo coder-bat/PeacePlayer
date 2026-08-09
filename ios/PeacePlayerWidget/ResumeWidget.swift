@@ -199,7 +199,9 @@ struct MediumResumeView: View {
                     // Status chip + optional Time Capsule pill
                     HStack(spacing: 5) {
                         Circle()
-                            .fill(entry.snapshot.isPlaying ? WidgetTheme.cyberCyan : Color.gray)
+                            // S18 / v1.6.6: was `Color.gray`. Now uses
+                            // the shared widgetInactiveTint token.
+                            .fill(entry.snapshot.isPlaying ? WidgetTheme.cyberCyan : WidgetTheme.inactiveTint)
                             .frame(width: 5, height: 5)
                         Text(entry.snapshot.isPlaying ? "PLAYING" : "PAUSED")
                             .font(.system(size: 8, weight: .bold, design: .monospaced))

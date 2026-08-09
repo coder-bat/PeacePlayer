@@ -24,10 +24,16 @@ struct VinylRecordView: View {
     var body: some View {
         ZStack {
             // ── 1. Outer disc: deep black with subtle radial gradient ──
+            // S18 / v1.6.6: was `Color(white: 0.22)` and `.black`.
+            // The disc highlight is a custom shade (0.22) that
+            // doesn't fit any existing token — kept as a local
+            // value. The deep-black outer ring uses
+            // WidgetTheme.cyberBackground so a future re-tune of
+            // the surface color applies here too.
             Circle()
                 .fill(
                     RadialGradient(
-                        colors: [Color(white: 0.22), .black],
+                        colors: [Color(white: 0.22), WidgetTheme.cyberBackground],
                         center: .center,
                         startRadius: size * 0.05,
                         endRadius: size * 0.5
@@ -36,14 +42,19 @@ struct VinylRecordView: View {
                 .frame(width: size, height: size)
                 .overlay(
                     // Edge highlight: gives the disc a tactile bevel feel.
+                    // S18 / v1.6.6: was `Color.white.opacity(0.28)` /
+                    // `Color.white.opacity(0.05)`. Now uses the
+                    // shared highlight tokens so the bevel's
+                    // brightness is consistent across the design
+                    // system.
                     Circle()
                         .strokeBorder(
                             LinearGradient(
                                 colors: [
-                                    Color.white.opacity(0.28),
+                                    WidgetTheme.highlightStrong,
                                     Color.clear,
                                     Color.clear,
-                                    Color.white.opacity(0.05)
+                                    WidgetTheme.highlightSoft
                                 ],
                                 startPoint: .topLeading,
                                 endPoint: .bottomTrailing
@@ -54,7 +65,9 @@ struct VinylRecordView: View {
                 .shadow(
                     color: isPlaying
                         ? WidgetTheme.cyberCyan.opacity(0.55)
-                        : Color.black.opacity(0.6),
+                        // S18 / v1.6.6: was `Color.black.opacity(0.6)`.
+                        // Now uses the shared shadowOverlay token.
+                        : WidgetTheme.shadowOverlay,
                     radius: isPlaying ? 10 : 6,
                     x: 0,
                     y: 3

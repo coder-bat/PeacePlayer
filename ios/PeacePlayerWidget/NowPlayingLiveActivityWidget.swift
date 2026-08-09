@@ -33,7 +33,11 @@ struct NowPlayingLiveActivityWidget: Widget {
                 attributes: context.attributes,
                 state: context.state
             )
-            .activityBackgroundTint(Color.black)
+            // S18 / v1.6.6: was `Color.black`. Now uses the shared
+            // cyberBackground token so the live activity's
+            // background matches the rest of the app's chrome
+            // (was a fork from CV-6's audit).
+            .activityBackgroundTint(WidgetTheme.cyberBackground)
             .activitySystemActionForegroundColor(.white)
         } dynamicIsland: { context in
             return DynamicIsland {

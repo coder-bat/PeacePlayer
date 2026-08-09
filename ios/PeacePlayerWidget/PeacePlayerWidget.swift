@@ -96,7 +96,10 @@ extension View {
         if #available(iOSApplicationExtension 17.0, *) {
             self.containerBackground(.black, for: .widget)
         } else {
-            self.background(Color.black)
+            // S18 / v1.6.6: was `Color.black`. Now uses the shared
+            // cyberBackground token so the widget's outer
+            // background matches the main app's chrome.
+            self.background(WidgetTheme.cyberBackground)
         }
     }
 }

@@ -1,38 +1,59 @@
+//
+//  WidgetTheme.swift
+//  PeacePlayerWidget
+//
+//  S18 / v1.6.6: thin wrapper around the shared cyber color tokens.
+//
+//  Before v1.6.6, this file was a parallel definition of the
+//  cyberpunk color palette that drifted from Theme.swift in the
+//  main app (CV-6 — "WidgetTheme is a 4-color fork of the
+//  30-token Theme"). Every brand tweak had to be applied in
+//  two places.
+//
+//  Now all the actual color values live in
+//  Sources/SharedCyberColors.swift, which is part of both
+//  targets. This file just aliases the shared tokens under
+//  the historical WidgetTheme.* names so all call sites keep
+//  compiling.
+//
+//  Adding new widget-only tokens? Add them to
+//  SharedCyberColors.swift and alias here.
+//
+
 import SwiftUI
 
-// Widget theme - values should match Theme.swift for visual consistency.
-// S15: widget extensions are separate targets and cannot import
-// Theme.swift directly. The previous fork only had 4 tokens
-// (cyberCyan/Magenta/Bg/Surface) and 30+ raw `Color.white` /
-// `Color.black` calls littered the widget files because the
-// text-color tokens (inverseText, dimText) didn't exist. Now we
-// expose the full palette the widgets need (cyberYellow, cyberDim,
-// inverseText, dimText, subtleText, strongText, shadowOverlay).
-// Drift risk: any future re-tune in Theme.swift must be mirrored
-// here. Track this with a unit test (see WidgetThemeDriftTests
-// when added) — or, better, lift the palette into a shared file
-// in both targets' Sources in a follow-up.
 enum WidgetTheme {
-    // Match Theme.swift - Cyberpunk Colors
-    static let cyberCyan = Color(red: 0, green: 0.9, blue: 1)
-    static let cyberMagenta = Color(red: 1, green: 0, blue: 0.6)
-    static let cyberYellow = Color(red: 1, green: 0.8, blue: 0)
-    static let cyberDim = Color(red: 0.45, green: 0.45, blue: 0.55)
-    static let cyberBg = Color.black  // Matches Theme.cyberBackground
-    static let cyberSurface = Color(red: 0.08, green: 0.08, blue: 0.12)  // Matches Theme.cyberSurface
+    // MARK: Cyberpunk Brand Colors (aliased to SharedCyberColors)
+    static let cyberBackground = Color.cyberBackground
+    static let cyberSurface = Color.cyberSurface
+    static let cyberCyan = Color.cyberCyan
+    static let cyberMagenta = Color.cyberMagenta
+    static let cyberYellow = Color.cyberYellow
+    static let cyberDim = Color.cyberDim
+    /// Historical alias — pre-v1.6.6 some code referenced
+    /// `WidgetTheme.cyberBg`. Kept as an alias so old call sites
+    /// don't break.
+    static let cyberBg = Color.cyberBackground
 
-    // Text colors — used to replace the 30+ `Color.white` / `Color.black`
-    // raw calls that lived in widget files because the previous
-    // WidgetTheme didn't define them.
-    static let inverseText = Color.white
-    static let dimText = Color.white.opacity(0.55)
-    static let subtleText = Color.white.opacity(0.35)
-    static let strongText = Color.white.opacity(0.85)
-    static let shadowOverlay = Color.black.opacity(0.5)
+    // MARK: Widget-Safe Text Colors
+    // These used to be raw `Color.white.opacity(...)` values
+    // defined in this file. Now they're aliased to the shared
+    // tokens so a re-tune of the design system happens once.
+    static let inverseText = Color.widgetInverseText
+    static let dimText = Color.widgetDimText
+    static let subtleText = Color.widgetSubtleText
+    static let strongText = Color.widgetStrongText
+    static let shadowOverlay = Color.widgetShadowOverlay
 
-    // Background tints — subtle white wash for inactive surfaces
-    // and slightly more visible fills for separators / hover.
-    static let subtleSurface = Color.white.opacity(0.1)
-    static let faintSurface = Color.white.opacity(0.06)
-    static let softSurface = Color.white.opacity(0.15)
+    // MARK: Widget Surface Tints
+    static let subtleSurface = Color.widgetSubtleSurface
+    static let faintSurface = Color.widgetFaintSurface
+    static let softSurface = Color.widgetSoftSurface
+
+    // MARK: Inactive / Disabled Tints
+    static let inactiveTint = Color.widgetInactiveTint
+
+    // MARK: Vinyl / Decorative Highlight Tints
+    static let highlightStrong = Color.widgetHighlightStrong
+    static let highlightSoft = Color.widgetHighlightSoft
 }

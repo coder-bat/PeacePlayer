@@ -52,6 +52,17 @@
          </BuildableReference>
       </MacroExpansion>
       <Testables>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "7195BDACE5345E91F0F6C0F5"
+               BuildableName = "YTAudioPlayerTests.xctest"
+               BlueprintName = "YTAudioPlayerTests"
+               ReferencedContainer = "container:YTAudioPlayer.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
       </Testables>
    </TestAction>
    <LaunchAction
@@ -66,16 +77,16 @@
       debugServiceExtension = "internal"
       allowLocationSimulation = "YES"
       launchAutomaticallySubstyle = "2">
-      <RemoteRunnable
-         runnableDebuggingMode = "2"
-         BundleIdentifier = "com.apple.springboard">
+      <BuildableProductRunnable
+         runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "716416BF920B6C9F1C6A6424"
             BuildableName = "PeacePlayerWidget.appex"
+            BlueprintName = "PeacePlayerWidget"
             ReferencedContainer = "container:YTAudioPlayer.xcodeproj">
          </BuildableReference>
-      </RemoteRunnable>
+      </BuildableProductRunnable>
    </LaunchAction>
    <ProfileAction
       buildConfiguration = "Release"

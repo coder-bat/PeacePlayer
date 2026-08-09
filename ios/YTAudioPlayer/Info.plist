@@ -17,7 +17,7 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.6.1</string>
+	<string>1.6.6</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -30,82 +30,14 @@
 		</dict>
 	</array>
 	<key>CFBundleVersion</key>
-	<string>3</string>
+	<string>4</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
-		<!-- S17 (CV-4): removed NSAllowsArbitraryLoads=true.
-		     That key was a MITM vector — any URL the user
-		     typed in Settings (LAN IP, Tailscale IP, but
-		     also a malicious public HTTP server) would be
-		     accepted, defeating ATS's HTTPS-only default
-		     on iOS 9+. Instead we allow only:
-		       (1) local networking (LAN: 10.x, 192.168.x,
-		           169.254.x) via NSAllowsLocalNetworking, and
-		       (2) explicit Tailscale endpoints via
-		           NSExceptionDomains below.
-		     Public HTTP is rejected.
-
-		     S17-H round 9: iOS does NOT include the
-		     Tailscale CGNAT range (100.64.0.0/10) in
-		     NSAllowsLocalNetworking's "local" set — the
-		     key only blesses LAN/link-local. So a Mac
-		     reachable at 100.77.213.42 (Tailscale) is
-		     still blocked by ATS for URLSession. AVPlayer
-		     uses a private network stack that bypasses ATS
-		     for streaming (which is why audio kept
-		     playing), but the search/library APIs go
-		     through URLSession and were -1022'd.
-
-		     The Tailscale MagicDNS hostname
-		     (coders-macbook-pro) and the full FQDN
-		     (coders-macbook-pro.tailnet.ts.net) are
-		     listed so the user can use either form in
-		     Settings → Backend Host. If Tailscale ever
-		     changes the Mac's IP, just update the
-		     100.77.213.42 line — or swap to the
-		     hostname, which is stable. -->
-		<key>NSAllowsLocalNetworking</key>
+		<key>NSAllowsArbitraryLoads</key>
 		<true/>
-		<key>NSExceptionDomains</key>
-		<dict>
-			<!-- Tailscale CGNAT address of the user's Mac.
-			     Update this if the Mac's Tailscale IP
-			     changes, or switch the iOS app's
-			     Backend Host to the MagicDNS name. -->
-			<key>100.77.213.42</key>
-			<dict>
-				<key>NSExceptionAllowsInsecureHTTPLoads</key>
-				<true/>
-				<key>NSIncludesSubdomains</key>
-				<true/>
-			</dict>
-			<!-- Tailscale MagicDNS short hostname. -->
-			<key>coders-macbook-pro</key>
-			<dict>
-				<key>NSExceptionAllowsInsecureHTTPLoads</key>
-				<true/>
-				<key>NSIncludesSubdomains</key>
-				<true/>
-			</dict>
-			<!-- Tailscale MagicDNS FQDN. -->
-			<key>coders-macbook-pro.tailnet.ts.net</key>
-			<dict>
-				<key>NSExceptionAllowsInsecureHTTPLoads</key>
-				<true/>
-				<key>NSIncludesSubdomains</key>
-				<true/>
-			</dict>
-		</dict>
 	</dict>
 	<key>NSMotionUsageDescription</key>
 	<string>Adaptive Walk DJ detects when you are walking so it can suggest a song at the right moment.</string>
-	<!-- S15: enable Live Activities for the Now Playing Lock
-	     Screen / Dynamic Island / StandBy integration. iOS 16.1+
-	     only; the API is gated at the call site. -->
-	<key>NSSupportsLiveActivities</key>
-	<true/>
-	<key>NSSupportsLiveActivitiesFrequentUpdates</key>
-	<true/>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>audio</string>

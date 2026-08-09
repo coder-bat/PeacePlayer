@@ -4,22 +4,23 @@
 //
 //  Design system - Colors, Typography, Spacing
 //
+//  S18 / v1.6.6: the cyberpunk color definitions now live in
+//  SharedCyberColors.swift (in Sources/) so the widget extension
+//  can reference the same values. This file's `Theme` enum is
+//  now a thin wrapper that aliases the shared colors — any
+//  re-tune of the design system happens in exactly one place
+//  and the main app + widgets stay in sync automatically.
+//
 
 import SwiftUI
-
-// MARK: - Cyberpunk Colors
-extension Color {
-    static let cyberBackground = Color.black
-    static let cyberSurface = Color(red: 0.08, green: 0.08, blue: 0.12)
-    static let cyberCyan = Color(red: 0, green: 0.9, blue: 1)
-    static let cyberMagenta = Color(red: 1, green: 0, blue: 0.6)
-    static let cyberYellow = Color(red: 1, green: 0.8, blue: 0)
-    static let cyberDim = Color(red: 0.45, green: 0.45, blue: 0.55)
-}
 
 // MARK: - Colors
 enum Theme {
     // MARK: Cyberpunk Colors (Global Access)
+    // Aliased to SharedCyberColors so widgets pick up the same
+    // values. If you need to change a cyberpunk color, edit
+    // SharedCyberColors.swift — both this enum and WidgetTheme
+    // will reflect the change.
     static let cyberBackground = Color.cyberBackground
     static let cyberSurface = Color.cyberSurface
     static let cyberCyan = Color.cyberCyan
@@ -32,7 +33,27 @@ enum Theme {
     // codebase drops to 2.32:1-3.66:1 (AA fail for body text). This
     // token is the safe replacement: 8.28:1 (AAA) at full opacity.
     // Use this for any foregroundColor on body / caption / hint text.
-    static let cyberTextSecondary = Color(red: 0.62, green: 0.62, blue: 0.72)
+    static let cyberTextSecondary = Color.cyberTextSecondary
+
+    // MARK: Widget-Safe Text Colors (aliased)
+    // Was previously defined inline here as `Color.white`,
+    // `Color.white.opacity(0.55)`, etc. Now aliased to the
+    // shared tokens so the values match what the widgets use.
+    //
+    // `inverseText` is already declared in the MARK: Text Colors
+    // block above (kept there for call-site compat — 200+ uses
+    // in the main app reference `Theme.inverseText`). The new
+    // tokens below are additions for the widget surface tints
+    // and dim/subtle text variants.
+    static let dimText = Color.widgetDimText
+    static let subtleText = Color.widgetSubtleText
+    static let strongText = Color.widgetStrongText
+    static let shadowOverlay = Color.widgetShadowOverlay
+
+    // MARK: Widget Surface Tints (aliased)
+    static let subtleSurface = Color.widgetSubtleSurface
+    static let faintSurface = Color.widgetFaintSurface
+    static let softSurface = Color.widgetSoftSurface
 
     // MARK: Background Colors
     static let background = Color(.systemBackground)
