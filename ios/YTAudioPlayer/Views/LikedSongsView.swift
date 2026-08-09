@@ -40,7 +40,17 @@ struct LikedSongsView: View {
 
                     if let liked = playlistManager.playlists
                         .first(where: { $0.isLikedSongsPlaylist }) {
-                        PlaylistDetailView(playlist: liked)
+                        // S18 / v1.6.2: hide the chevron.down dismiss
+                        // button. The PlaylistDetailView's sticky nav
+                        // bar includes a dismiss chevron by default for
+                        // its sheet use case; in the Liked Songs tab
+                        // there's no parent sheet to dismiss, and the
+                        // user switches tabs via the bottom bar. The
+                        // title + edit menu (if any) still show.
+                        PlaylistDetailView(
+                            playlist: liked,
+                            showsDismissButton: false
+                        )
                     } else {
                         // Fallback if the smart playlist hasn't
                         // seeded yet. Should be rare — see the

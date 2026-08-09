@@ -9,6 +9,17 @@ import SwiftUI
 
 struct PlaylistDetailView: View {
     let playlist: Playlist
+    // S18 / v1.6.2: the chevron.down dismiss button in the sticky
+    // nav bar at the top of the view was designed for the SHEET
+    // use case (PlaylistsView presents this as a sheet; tapping
+    // chevron.down dismisses the sheet). When PlaylistDetailView
+    // is embedded inside a Tab as the Liked Songs tab root, the
+    // chevron is meaningless — there's no parent to dismiss, the
+    // user switches tabs via the bottom bar. Default keeps the
+    // existing behavior (chevron shown) so all existing call
+    // sites are unchanged; LikedSongsView opts in to the new
+    // tab-friendly mode.
+    var showsDismissButton: Bool = true
     @StateObject private var playlistManager = PlaylistManager.shared
     @StateObject private var playerState = PlayerState.shared
     @StateObject private var trackStore = TrackStore.shared
@@ -170,19 +181,27 @@ struct PlaylistDetailView: View {
                 // Sticky Navigation Bar
                 VStack(spacing: 0) {
                     HStack(spacing: 12) {
-                        Button {
-                            dismiss()
-                        } label: {
-                            Image(systemName: "chevron.down")
-                                .font(.system(size: 20, weight: .semibold))
-                                .foregroundColor(.white)
-                                .frame(width: 36, height: 36)
-                                .background(Theme.cyberSurface)
-                                .overlay(
-                                    Circle()
-                                        .stroke(Theme.cyberCyan.opacity(0.3), lineWidth: 1)
-                                )
-                                .clipShape(Circle())
+                        // S18 / v1.6.2: hide the dismiss chevron when
+                        // this view is embedded as a tab (Liked Songs).
+                        // The chevron is only meaningful for the sheet
+                        // use case; in a tab there's no parent to
+                        // dismiss, and the user already has a bottom
+                        // bar for navigation.
+                        if showsDismissButton {
+                            Button {
+                                dismiss()
+                            } label: {
+                                Image(systemName: "chevron.down")
+                                    .font(.system(size: 20, weight: .semibold))
+                                    .foregroundColor(.white)
+                                    .frame(width: 36, height: 36)
+                                    .background(Theme.cyberSurface)
+                                    .overlay(
+                                        Circle()
+                                            .stroke(Theme.cyberCyan.opacity(0.3), lineWidth: 1)
+                                    )
+                                    .clipShape(Circle())
+                            }
                         }
 
                         Spacer()
