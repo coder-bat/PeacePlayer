@@ -99,24 +99,32 @@ struct ContentView: View {
                 .background(Color.clear)
             }
 
-            // Offline banner
+            // Offline / backend-unreachable banner
+            // S18 / v1.6.7 (CV-10): previously this banner only
+            // showed when the OS-level network was down
+            // (`!isConnected`). Tailscale-down, Mac-asleep, and
+            // "backend not running" all looked like stream
+            // failures with no signal. Now we distinguish two
+            // states:
+            //   - isConnected == false: OS network down (Wi-Fi off,
+            //     airplane mode). Show the original banner.
+            //   - isConnected && !isBackendReachable: Wi-Fi fine
+            //     but backend at baseURL isn't responding. Show
+            //     a different banner telling the user to check
+            //     the Mac / Tailscale.
+            // The user needs to know which problem they have
+            // because the fix is different.
             if !networkMonitor.isConnected {
-                VStack {
-                    HStack(spacing: 8) {
-                        Image(systemName: "wifi.slash")
-                            .font(.system(size: 12, weight: .bold))
-                        Text("Offline — downloaded music still available")
-                            .font(.system(size: 12, weight: .medium, design: .monospaced))
-                    }
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-                    .frame(maxWidth: .infinity)
-                    .background(Color.cyberSurface)
-                    Spacer()
-                }
-                .transition(.move(edge: .top).combined(with: .opacity))
-                .animation(.spring(response: 0.4), value: networkMonitor.isConnected)
+                offlineBanner(
+                    icon: "wifi.slash",
+                    message: "Offline — downloaded music still available"
+                )
+                .zIndex(2)
+            } else if !networkMonitor.isBackendReachable {
+                offlineBanner(
+                    icon: "server.rack",
+                    message: "Can't reach music library — is your Mac awake?"
+                )
                 .zIndex(2)
             }
 
@@ -280,6 +288,32 @@ struct ContentView: View {
             .transition(.move(edge: .bottom).combined(with: .opacity))
             .padding(.bottom, 8)
         }
+    }
+
+    // S18 / v1.6.7 (CV-10): the two offline banner states share
+    // the same visual treatment (full-width strip at the top of
+    // the screen, cyberSurface background, white text, monospaced
+    // caption). The icon + message vary. Extracted so adding a
+    // third state ("rate-limited", "auth expired", etc.) is a
+    // 1-line addition at the call site.
+    private func offlineBanner(icon: String, message: String) -> some View {
+        VStack {
+            HStack(spacing: 8) {
+                Image(systemName: icon)
+                    .font(.system(size: 12, weight: .bold))
+                Text(message)
+                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+            }
+            .foregroundColor(.white)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity)
+            .background(Color.cyberSurface)
+            Spacer()
+        }
+        .transition(.move(edge: .top).combined(with: .opacity))
+        .animation(.spring(response: 0.4), value: networkMonitor.isConnected)
+        .animation(.spring(response: 0.4), value: networkMonitor.isBackendReachable)
     }
 
     private func setupAppearance() {

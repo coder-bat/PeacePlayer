@@ -20,6 +20,17 @@ struct YTAudioPlayerApp: App {
         DataMigrationService.shared.performMigrationIfNeeded()
         // Sync library data immediately so widgets show correct state on launch
         WidgetSyncService.shared.syncLibraryData()
+        // S18 / v1.6.7 (CV-10): kick off the first backend
+        // health probe at launch + start the 60s steady-state
+        // cadence. The OS path monitor is already up by the
+        // time this runs; the first probe resolves within ~50ms
+        // on a healthy LAN. The CV-10 fix is the new state
+        // machine — without this probe, the offline banner
+        // could only show "Wi-Fi down" and had no way to
+        // distinguish "Wi-Fi up, backend asleep" from "all
+        // good".
+        NetworkMonitor.shared.checkBackendHealth()
+        NetworkMonitor.shared.startPeriodicHealthChecks()
 
         // 2026-06-28: restore the Apple Sign-In session from Keychain.
         // If we have a valid JWT, isAuthenticated flips to true and the
@@ -73,6 +84,17 @@ struct YTAudioPlayerApp: App {
             UIApplication.shared.applicationIconBadgeNumber = readyCount
 
             adaptiveWalkDJ.handleScenePhaseChange(isActive: phase == .active)
+
+            // S18 / v1.6.7 (CV-10): probe the backend on every
+            // foreground. The user might have switched apps for
+            // a while and the backend state could have changed
+            // (Mac sleep, Tailscale reconnect, manual backend
+            // restart). One quick /health ping is cheap and
+            // keeps the offline banner accurate without waiting
+            // for the 60s timer.
+            if phase == .active {
+                NetworkMonitor.shared.checkBackendHealth()
+            }
 
             // S17-H / S17-LOCK: re-activate the audio session on
             // every scene-phase change. iOS can downgrade or

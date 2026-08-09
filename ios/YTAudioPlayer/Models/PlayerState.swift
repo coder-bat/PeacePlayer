@@ -528,8 +528,13 @@ class PlayerState: ObservableObject {
     /// bulletproof fix for the "track pauses when I lock" bug.
     let audioSessionController = AudioSessionController()
 
-    // Adaptive quality switching
-    private var qualityUpgradeTimer: Timer?
+    // S18 / v1.6.7 (CV-11): adaptive quality switching has been
+    // extracted to `AdaptiveQualityManager`. PlayerState holds
+    // the manager; the manager owns its own timer + cancellable
+    // set so a fresh init doesn't leak subscriptions across
+    // upgrades. The flag is still here because it's checked by
+    // play(item:) to decide whether to schedule a new upgrade.
+    private var adaptiveQuality: AdaptiveQualityManager?
     private var isAdaptiveQualityEnabled = true
     private var hasUpgradedQuality = false
 
@@ -1510,9 +1515,15 @@ class PlayerState: ObservableObject {
         // the previous track.
         listeningTimeTracker.reset()
 
-        // Start adaptive quality timer if enabled
+        // Start adaptive quality timer if enabled.
+        // S18 / v1.6.7 (CV-11): the actual timer + URL fetch +
+        // seamless player-item swap now lives in
+        // AdaptiveQualityManager. PlayerState hands the manager
+        // the player + queue store and a closure for the live
+        // "is this still the current track?" check.
         if isAdaptiveQualityEnabled && item.source == .stream {
-            startQualityUpgradeTimer(for: item)
+            ensureAdaptiveQualityManager()
+            adaptiveQuality?.scheduleUpgrade(for: item)
         }
 
         print("✅ play() completed successfully for: \(item.track.title)")
@@ -1570,137 +1581,51 @@ class PlayerState: ObservableObject {
     }
 
     // MARK: - Adaptive Quality Switching
+    // S18 / v1.6.7 (CV-11): the timer + URL fetch + seamless
+    // player-item swap now lives in AdaptiveQualityManager. The
+    // manager owns its own cancellable set and timer, and reports
+    // the upgraded QueueItem back via a callback. PlayerState
+    // keeps the public `scheduleQualityUpgrade` / `cancelQualityUpgrade`
+    // API so call sites don't need to know about the manager.
 
-    private func startQualityUpgradeTimer(for item: QueueItem) {
-        // Cancel any existing timer
-        qualityUpgradeTimer?.invalidate()
-        hasUpgradedQuality = false
-
-        // Start a 5-second timer to upgrade quality after playback begins
-        qualityUpgradeTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: false) { [weak self] _ in
-            guard let self = self, self.playbackState.isPlaying else { return }
-            self.upgradeToHighQuality(for: item)
+    /// Lazily build the AdaptiveQualityManager. Idempotent
+    /// — calling twice doesn't create two managers or two
+    /// subscriptions. The closures read live PlayerState state
+    /// at the moment of upgrade, not a stale snapshot, so a
+    /// skip-mid-timer race is correctly caught.
+    private func ensureAdaptiveQualityManager() {
+        if adaptiveQuality != nil { return }
+        guard let player = player else { return }
+        let manager = AdaptiveQualityManager(
+            player: player,
+            queueStore: queueStore,
+            currentItemProvider: { [weak self] in self?.currentItem },
+            // Optional-unwrap self?.playbackState.isPlaying.
+            // When self is nil, the manager's pending timer
+            // should treat the play state as "not playing"
+            // (no upgrade attempt) rather than a fatal error.
+            isPlayingProvider: { [weak self] in self?.playbackState.isPlaying ?? false }
+        )
+        manager.currentIndexProvider = { [weak self] in self?.currentIndex }
+        manager.onItemUpgraded = { [weak self] (upgradedItem: QueueItem) in
+            // Manager already updated the queue; mirror the
+            // upgraded item in PlayerState's @Published
+            // currentItem so the UI re-renders.
+            self?.currentItem = upgradedItem
+            self?.applyVolume()
         }
+        self.adaptiveQuality = manager
     }
 
-    private func upgradeToHighQuality(for item: QueueItem) {
-        guard !hasUpgradedQuality else { return }
-        hasUpgradedQuality = true
-
-        print("🔊 Upgrading to high quality stream for: \(item.track.title)")
-
-        // C-2026-06-28: bypass StreamURLCache. The cache had an
-        // activeFetchLock deadlock on its first synchronous subscribe
-        // (the Just publisher's receiveCompletion tried to re-lock
-        // activeFetchLock from the same thread that held the outer
-        // lock). We now go direct to APIService for the upgrade.
-        APIService.shared.getStreamUrl(videoId: item.track.videoId, preferM4A: true, quality: "high")
-            .sink(
-                receiveCompletion: { [weak self] result in
-                    if case .failure(let error) = result {
-                        print("⚠️ Failed to get high quality stream: \(error)")
-                        // Keep playing low quality - not a critical error
-                    }
-                },
-                receiveValue: { [weak self] streamInfo in
-                    guard let self = self,
-                          self.playbackState.isPlaying,  // Only switch if still playing
-                          let currentItem = self.currentItem,
-                          currentItem.track.videoId == item.track.videoId,
-                          currentItem.source == .stream,  // Only switch streaming items (not local files)
-                          currentItem.streamUrl != streamInfo.streamUrl else {
-                        return
-                    }
-
-                    // Perform seamless quality switch
-                    self.performSeamlessQualitySwitch(to: streamInfo.streamUrl, for: item)
-                }
-            )
-            .store(in: &avPlayerController.cancellables)
-    }
-
-    private func performSeamlessQualitySwitch(to newUrl: String, for originalItem: QueueItem) {
-        guard let player = player,
-              let currentItem = player.currentItem else { return }
-
-        // Get current playback position
-        let currentTime = player.currentTime()
-        let wasPlaying = playbackState.isPlaying
-
-        print("🔊 Seamless quality switch at \(currentTime.seconds)s")
-
-        // Create new player item with high quality URL
-        guard let url = URL(string: newUrl) else { return }
-        let newPlayerItem = AVPlayerItem(url: url)
-
-        // Configure with same settings
-        newPlayerItem.preferredForwardBufferDuration = 5
-        newPlayerItem.canUseNetworkResourcesForLiveStreamingWhilePaused = false
-
-        // Replace item without stopping playback (if possible)
-        player.replaceCurrentItem(with: newPlayerItem)
-
-        // Seek to previous position
-        // QW-11 fix: use 0.5s tolerance instead of `.zero`. The exact seek
-        // was stalling 1-5s on slow networks during quality upgrade because
-        // AVPlayer has to download the exact keyframe. A 0.5s tolerance is
-        // imperceptible to the ear and completes near-instantly.
-        let tolerance = CMTime(seconds: 0.5, preferredTimescale: 1000)
-        player.seek(to: currentTime, toleranceBefore: tolerance, toleranceAfter: tolerance) { [weak self] _ in
-            guard let self = self else { return }
-
-            // Restore playback state
-            // S17-E: `player.play()` followed by `player.rate = 1.0`
-            // has a 1-frame race where the player starts at rate 0
-            // and only ramps to 1.0 on the next runloop tick — the
-            // user can hear the gap. `playImmediately(atRate:)` is
-            // the atomic single-call form that AVFoundation now
-            // recommends. (CrossfadeManager already uses it.)
-            if wasPlaying {
-                player.playImmediately(atRate: 1.0)
-            }
-
-            // Update current item with new URL
-            // S3-4: preserve replayGain across the quality switch
-            let upgradedItem = QueueItem(
-                track: originalItem.track,
-                streamUrl: newUrl,
-                source: .stream,
-                replayGain: originalItem.replayGain
-            )
-            self.currentItem = upgradedItem
-
-            // Update queue
-            // S17-G: `queue` is now a computed property backed by
-            // the store. To replace one element, rebuild the
-            // array and use the store's `replace(with:)`.
-            if self.currentIndex < self.queueStore.items.count {
-                var updatedItems = self.queueStore.items
-                updatedItems[self.currentIndex] = upgradedItem
-                self.queueStore.replace(with: updatedItems)
-            }
-
-            // S3-4: re-apply the gain on the (possibly new) player
-            applyVolume()
-
-            // QW-13 fix: re-install the visualizer tap on the new
-            // (high-quality) player item. installTap is only called in
-            // play(item:), so after a seamless quality switch the
-            // visualizer + haptic symphony engine would read silent buffers
-            // for the remainder of the track.
-            if let newItem = player.currentItem {
-                AudioVisualizerEngine.shared.installTap(on: newItem)
-            }
-
-            print("✅ Quality upgraded to high - seamless switch complete")
-        }
+    func scheduleQualityUpgrade(for item: QueueItem) {
+        ensureAdaptiveQualityManager()
+        adaptiveQuality?.scheduleUpgrade(for: item)
     }
 
     func cancelQualityUpgrade() {
-        qualityUpgradeTimer?.invalidate()
-        qualityUpgradeTimer = nil
+        adaptiveQuality?.cancelPendingUpgrade()
     }
-    
+
     func playQueue(at index: Int, isCrossfadeFallback: Bool = false) {
         // S17-H (P1-F5): see play(track:).
         markUserTouchedPlayback()

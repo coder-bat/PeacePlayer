@@ -1633,56 +1633,46 @@ struct HomeRecentTrackRow: View {
     }
 
     var body: some View {
-        Button(action: onPlay) {
-            HStack(spacing: 12) {
-                CachedAsyncImage(url: track.artworkURL) {
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(Color.cyberDim.opacity(0.3))
-                }
-                .frame(width: 50, height: 50)
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(track.title)
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundColor(.white)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-
-                    Text(track.displayArtist)
-                        .font(.system(size: 14))
-                        .foregroundColor(.cyberDim)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-                }
-
-                Spacer()
-
-                // Play indicator cluster
+        // S18 / v1.6.7 (CV-8): the artwork + title + artist
+        // block is now the unified TrackRow. The right-side
+        // cluster (downloaded icon + play/loading/playing
+        // indicator) is still custom because it's a 3-state
+        // compound indicator; folding it into the TrackRow
+        // accessory system would add a third bespoke case for
+        // one call site. The custom cluster is passed in via
+        // .custom(AnyView) so the rest of the row matches the
+        // global TrackRow design (font size, color, line
+        // limits, tap target).
+        TrackRow(
+            title: track.title,
+            subtitle: track.displayArtist,
+            artworkURL: track.artworkURL,
+            isPlaying: isPlaying,
+            titleSize: 16,
+            subtitleSize: 14,
+            accessory: .custom(AnyView(
                 HStack(spacing: 8) {
                     if isDownloaded {
                         Image(systemName: "arrow.down.circle.fill")
                             .font(.system(size: 14))
-                            .foregroundColor(.cyberCyan)
+                            .foregroundColor(Theme.cyberCyan)
                     }
-
-                    // Playing/Loading indicator
                     if isLoading {
                         ProgressView()
                             .scaleEffect(0.7)
-                            .tint(.cyberCyan)
+                            .tint(Theme.cyberCyan)
                     } else if isPlaying {
                         CyberPlayingBars()
                     } else {
                         Image(systemName: "play.fill")
                             .font(.system(size: 12, weight: .semibold))
-                            .foregroundColor(.cyberCyan)
+                            .foregroundColor(Theme.cyberCyan)
                     }
                 }
                 .frame(width: 36)
-            }
-        }
-        .buttonStyle(.plain)
+            )),
+            onTap: onPlay
+        )
         .contextMenu {
             // 2026-06-28: long-press menu for parity with the
             // recently-played list. Order matches iOS Music app
