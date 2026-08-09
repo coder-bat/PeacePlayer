@@ -12,6 +12,23 @@ struct SettingsView: View {
     @State private var showEqualizer = false  // S15: real 10-band EQ
     @State private var isSigningOut = false
     @State private var cacheSize: String = "Calculating..."
+
+    // S18 / v1.6.1: dynamic version string read from the bundle.
+    // Returns "1.6.0 (12)" — the marketing version plus the build
+    // number in parens, which is the conventional App Store format
+    // and makes "is the build the user is on newer than what I
+    // think" obvious at a glance. Falls back to "—" if the
+    // bundle is somehow missing the keys (should never happen in
+    // a real .app, but defensive is cheap).
+    private var appVersionString: String {
+        let dict = Bundle.main.infoDictionary
+        let short = dict?["CFBundleShortVersionString"] as? String ?? "—"
+        let build = dict?["CFBundleVersion"] as? String
+        if let build = build, !build.isEmpty {
+            return "\(short) (\(build))"
+        }
+        return short
+    }
     @State private var newArtistText: String = ""
     // S15: editable backend host. Persisted to UserDefaults under
     // APIService.baseURLOverrideDefaultsKey and read on the
@@ -710,7 +727,15 @@ struct SettingsView: View {
 
                         Spacer()
 
-                        Text("1.0.0")
+                        // S18 / v1.6.1: read the marketing version
+                        // (CFBundleShortVersionString, e.g. "1.6.0")
+                        // and the build number (CFBundleVersion, e.g.
+                        // "12") straight from the bundle. The old
+                        // hardcoded "1.0.0" only updated when someone
+                        // remembered to edit this string, which had
+                        // drifted from the actual shipping version
+                        // for the last several releases.
+                        Text(appVersionString)
                             .font(.system(size: 15, weight: .medium, design: .monospaced))
                             .foregroundColor(.secondary)
                     }
