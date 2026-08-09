@@ -239,7 +239,12 @@ struct AntiAlgorithmContent: View {
                             } label: {
                                 Image(systemName: "play.circle.fill")
                                     .font(.title3)
-                                    .foregroundColor(.orange)
+                                    // CV-3 / P1-13: was .orange — off-
+                                    // palette. cyberYellow matches the
+                                    // active-session badge color so the
+                                    // frontier queue reads as part of the
+                                    // same surface.
+                                    .foregroundColor(Theme.cyberYellow)
                             }
                         }
                     }
@@ -252,10 +257,17 @@ struct AntiAlgorithmContent: View {
             // Session stats
             if let session = engine.currentSession {
                 HStack(spacing: 24) {
-                    StatPill(label: "Queued", value: "\(session.tracksQueued)", color: .orange)
-                    StatPill(label: "Played", value: "\(session.tracksCompleted)", color: .green)
+                    // CV-3 / P1-13: was .orange / .green / .cyan. Now
+                    // uses the three cyberpunk accents (yellow for
+                    // forward-looking 'Queued', cyan for completed
+                    // 'Played', magenta for positive 'Liked') so the
+                    // pills read as part of the same design language
+                    // as the rest of the app rather than a stock
+                    // SwiftUI accent set.
+                    StatPill(label: "Queued", value: "\(session.tracksQueued)", color: Theme.cyberYellow)
+                    StatPill(label: "Played", value: "\(session.tracksCompleted)", color: Theme.cyberCyan)
                     StatPill(label: "Skipped", value: "\(session.tracksSkipped)", color: Theme.tertiaryText)
-                    StatPill(label: "Liked", value: "\(session.tracksLiked)", color: .cyan)
+                    StatPill(label: "Liked", value: "\(session.tracksLiked)", color: Theme.cyberMagenta)
                 }
             }
         }
@@ -313,7 +325,11 @@ private struct StatBlock: View {
         VStack(spacing: 4) {
             Text(value)
                 .font(.title2.bold())
-                .foregroundColor(.orange)
+                // CV-3 / P1-13: was .orange — off-palette. The
+                // Exploration History block uses cyberYellow
+                // to match the rest of the Anti-Algorithm
+                // surface (badge + queued pill).
+                .foregroundColor(Theme.cyberYellow)
             Text(title)
                 .font(.caption)
                 .foregroundColor(.cyberDim)

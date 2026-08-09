@@ -354,9 +354,22 @@ struct LibraryView: View {
                             // has confirmation beyond the haptic, and
                             // notify FullPlayer so the Queue icon can
                             // pulse (Phase 4.1).
+                            //
+                            // CV-1: was `restore: { /* no undo for
+                            // add-to-queue */ }`. The closure was a
+                            // no-op, and UndoService's empty-closure
+                            // heuristic can't introspect Swift
+                            // closures — it returned false, so the
+                            // Undo button appeared in the toast and
+                            // tapping it did nothing. Now we use the
+                            // explicit `showUndoButton: false` form,
+                            // which is honest: the toast shows a
+                            // checkmark + message, no fake Undo
+                            // button.
                             UndoService.shared.registerUndo(
                                 message: "Added \(track.title) to Queue",
-                                restore: { /* no undo for add-to-queue */ }
+                                restore: nil,
+                                showUndoButton: false
                             )
                             NotificationCenter.default.post(
                                 name: .trackAddedToQueue,
@@ -418,9 +431,22 @@ struct LibraryView: View {
                             // has confirmation beyond the haptic, and
                             // notify FullPlayer so the Queue icon can
                             // pulse (Phase 4.1).
+                            //
+                            // CV-1: was `restore: { /* no undo for
+                            // add-to-queue */ }`. The closure was a
+                            // no-op, and UndoService's empty-closure
+                            // heuristic can't introspect Swift
+                            // closures — it returned false, so the
+                            // Undo button appeared in the toast and
+                            // tapping it did nothing. Now we use the
+                            // explicit `showUndoButton: false` form,
+                            // which is honest: the toast shows a
+                            // checkmark + message, no fake Undo
+                            // button.
                             UndoService.shared.registerUndo(
                                 message: "Added \(track.title) to Queue",
-                                restore: { /* no undo for add-to-queue */ }
+                                restore: nil,
+                                showUndoButton: false
                             )
                             NotificationCenter.default.post(
                                 name: .trackAddedToQueue,

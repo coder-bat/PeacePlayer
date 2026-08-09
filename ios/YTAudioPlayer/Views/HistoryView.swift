@@ -53,14 +53,12 @@ struct HistoryView: View {
             ) {
                 Button("Clear All History", role: .destructive) {
                     HapticManager.medium()
-                    let count = viewModel.historyItems.count
-                    viewModel.clearHistory()
-                    // TODO: True undo requires re-creating CoreData entries; showing confirmation toast for now
-                    undoService.registerUndo(
-                        message: "Cleared \(count) history item\(count == 1 ? "" : "s")",
-                        restore: nil,
-                        showUndoButton: false
-                    )
+                    // CV-1: clearHistoryWithUndo captures the items
+                    // on the main context (before the batch delete
+                    // fires on the background context) and
+                    // registers a real undo. The toast now shows a
+                    // working Undo button.
+                    viewModel.clearHistoryWithUndo()
                 }
                 Button("Cancel", role: .cancel) {}
             } message: {
@@ -160,17 +158,12 @@ struct HistoryView: View {
                         memoryTrack = item.track
                     },
                     onDelete: {
-                        let itemTitle = item.track.title
-                        viewModel.deleteHistoryItem(item)
-                        // S15: History single-delete is destructive
-                        // (the play record is gone). No working
-                        // restore yet, so the toast is a
-                        // confirmation only — no fake Undo button.
-                        UndoService.shared.registerUndo(
-                            message: "Removed \"\(itemTitle)\"",
-                            restore: nil,
-                            showUndoButton: false
-                        )
+                        // CV-1: deleteHistoryItemWithUndo captures
+                        // the item, registers a real undo that
+                        // re-creates the CDPlayHistory row, then
+                        // deletes. The toast now has a working
+                        // Undo button.
+                        viewModel.deleteHistoryItemWithUndo(item)
                     },
                     onPlayNext: {
                         HapticManager.light()
@@ -600,8 +593,28 @@ class HistoryViewModel: ObservableObject {
     }
 
     func deleteHistoryItem(_ item: HistoryItem) {
-        let context = persistence.newBackgroundContext()
+        deleteHistoryItemWithUndo(item)
+    }
 
+    // CV-1: was a one-way delete — the Undo button on the toast was
+    // an honest "OK" indicator (no fake button) but the user got no
+    // way to recover. Now we register a real undo that re-creates
+    // the CDPlayHistory row with the original playedAt / progress /
+    // completed values. The capture happens BEFORE the delete
+    // fires on the background context, so the undo closure has
+    // the data it needs even if the row is gone.
+    func deleteHistoryItemWithUndo(_ item: HistoryItem) {
+        // Capture the data needed to restore. Item is a value type
+        // so the snapshot is implicit in the closure capture.
+        let snapshot = item
+        UndoService.shared.registerUndo(
+            message: "Removed \"\(snapshot.title)\"",
+            restore: { [weak self] in
+                self?.restoreHistoryItem(snapshot: snapshot)
+            }
+        )
+
+        let context = persistence.newBackgroundContext()
         context.perform {
             let request: NSFetchRequest<CDPlayHistory> = CDPlayHistory.fetchRequest()
             request.predicate = NSPredicate(format: "playedAt == %@", item.playedAt as NSDate)
@@ -618,6 +631,40 @@ class HistoryViewModel: ObservableObject {
             } catch {
                 print("❌ Error deleting history item: \(error)")
             }
+        }
+    }
+
+    private func restoreHistoryItem(snapshot: HistoryItem) {
+        let context = persistence.viewContext
+        // Re-find the CDTrack for the snapshot's videoId. If the
+        // track was also deleted from the library in the meantime
+        // we have nothing to attach a history row to, and undo is
+        // a no-op (the toast message still confirms the restore
+        // was attempted).
+        let trackRequest: NSFetchRequest<CDTrack> = CDTrack.fetchRequest()
+        trackRequest.predicate = NSPredicate(format: "videoId == %@", snapshot.track.videoId)
+        trackRequest.fetchLimit = 1
+
+        guard let track = (try? context.fetch(trackRequest))?.first else {
+            print("⚠️ restoreHistoryItem: track \(snapshot.track.videoId) no longer exists; undo is a no-op")
+            return
+        }
+
+        let history = CDPlayHistory.create(
+            for: track,
+            progress: snapshot.progress,
+            completed: snapshot.completed,
+            context: context
+        )
+        // CDPlayHistory.create sets playedAt = Date(); we need the
+        // original timestamp so the row sorts to the right
+        // position in the history list.
+        history.playedAt = snapshot.playedAt
+        do {
+            try context.save()
+            loadHistory()
+        } catch {
+            print("❌ restoreHistoryItem save failed: \(error)")
         }
     }
 
@@ -654,20 +701,40 @@ class HistoryViewModel: ObservableObject {
     }
 
     func clearHistory() {
-        let context = persistence.newBackgroundContext()
+        clearHistoryWithUndo()
+    }
 
-        context.perform {
+    // CV-1: was a one-way batch delete with no undo. Now captures
+    // every history row before deleting and re-creates them on
+    // undo. The capture must happen on the main thread (view
+    // context) because the background batch delete closes out the
+    // objects before we can read them.
+    func clearHistoryWithUndo() {
+        let context = persistence.viewContext
+        let request: NSFetchRequest<CDPlayHistory> = CDPlayHistory.fetchRequest()
+        let snapshots: [HistoryItem] = ((try? context.fetch(request)) ?? [])
+            .compactMap { HistoryItem(from: $0) }
+
+        UndoService.shared.registerUndo(
+            message: "Cleared \(snapshots.count) history item\(snapshots.count == 1 ? "" : "s")",
+            restore: { [weak self] in
+                self?.restoreHistoryItems(snapshots: snapshots)
+            }
+        )
+
+        let bgContext = persistence.newBackgroundContext()
+        bgContext.perform {
             let request: NSFetchRequest<NSFetchRequestResult> = CDPlayHistory.fetchRequest()
             let deleteRequest = NSBatchDeleteRequest(fetchRequest: request)
             deleteRequest.resultType = .resultTypeObjectIDs
 
             do {
-                let result = try context.execute(deleteRequest) as? NSBatchDeleteResult
+                let result = try bgContext.execute(deleteRequest) as? NSBatchDeleteResult
                 if let objectIDs = result?.result as? [NSManagedObjectID] {
                     let changes = [NSDeletedObjectsKey: objectIDs]
-                    NSManagedObjectContext.mergeChanges(fromRemoteContextSave: changes, into: [context])
+                    NSManagedObjectContext.mergeChanges(fromRemoteContextSave: changes, into: [bgContext])
                 }
-                try context.save()
+                try bgContext.save()
 
                 DispatchQueue.main.async {
                     self.historyItems = []
@@ -676,6 +743,43 @@ class HistoryViewModel: ObservableObject {
             } catch {
                 print("❌ Error clearing history: \(error)")
             }
+        }
+    }
+
+    private func restoreHistoryItems(snapshots: [HistoryItem]) {
+        guard !snapshots.isEmpty else { return }
+
+        let context = persistence.viewContext
+        // Resolve the CDTrack rows up front. If a snapshot's
+        // track was deleted from the library in the meantime,
+        // that single history row can't be restored (it has no
+        // parent). The rest are restored.
+        let trackRequest: NSFetchRequest<CDTrack> = CDTrack.fetchRequest()
+        let videoIds = snapshots.map { $0.track.videoId }
+        trackRequest.predicate = NSPredicate(format: "videoId IN %@", videoIds)
+
+        guard let tracks = try? context.fetch(trackRequest) else { return }
+        let tracksByVideoId = Dictionary(uniqueKeysWithValues: tracks.map { ($0.videoId, $0) })
+
+        for snapshot in snapshots {
+            guard let track = tracksByVideoId[snapshot.track.videoId] else { continue }
+            let history = CDPlayHistory.create(
+                for: track,
+                progress: snapshot.progress,
+                completed: snapshot.completed,
+                context: context
+            )
+            // Preserve the original playedAt so the row sorts to
+            // its original position in the history list. Sorting
+            // by playedAt is what the load query does.
+            history.playedAt = snapshot.playedAt
+        }
+
+        do {
+            try context.save()
+            loadHistory()
+        } catch {
+            print("❌ restoreHistoryItems save failed: \(error)")
         }
     }
 
