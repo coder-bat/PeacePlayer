@@ -362,25 +362,36 @@ struct FullPlayer: View {
                 // room and makes the track title feel
                 // like a distinct section, not crammed
                 // against the artwork.
+                //
+                // v1.6.12 (CV-17c): the hero itself is
+                // now 28pt taller (artHeight = h + 2 *
+                // waveAmplitude) so the poster covers
+                // the full wave range. Combined with the
+                // 28pt Spacer below, the wave's troughs
+                // have ~28pt of breathing room above the
+                // track title. To keep the bottom of the
+                // screen from overflowing, the section
+                // spacers and the bottom padding are
+                // tightened slightly (16→14, 32→20).
                 Spacer(minLength: 28)
                 trackInfoSection
-                Spacer(minLength: 16)
+                Spacer(minLength: 14)
 
                 // 2026-06-28 (S7b): progressSection is rendered inside
                 // playbackControlsSection already, so we don't add it
                 // here — that would produce a second progress bar.
                 playbackControlsSection
-                Spacer(minLength: 16)
+                Spacer(minLength: 14)
 
                 VolumeSlider()
                     .padding(.horizontal, 8)
-                Spacer(minLength: 16)
+                Spacer(minLength: 14)
 
                 moreActionsRow
                 Spacer(minLength: 8)
             }
             .padding(.horizontal, 20)
-            .padding(.bottom, 32)
+            .padding(.bottom, 20)
         }
     }
 
@@ -558,11 +569,28 @@ struct FullPlayer: View {
         // gap below the hero is now 28pt (was 16pt)
         // to accommodate the wave's troughs without
         // touching the track title.
+        //
+        // v1.6.12 (CV-17c): the artwork frame is now
+        // `h + 2 * waveAmplitude` (was `h`) and each
+        // poster / video / visualizer layer matches.
+        // The wave's `baseline` is set to `h` so the
+        // wave still oscillates around the original
+        // hero-bottom position. The extra 28pt of
+        // frame height is what lets the poster extend
+        // through the wave's full range — before this
+        // change, the poster was clipped at the
+        // frame's bottom (y = h), so the wave's
+        // troughs (at y = h + amplitude) showed the
+        // background through the gaps. Now the wave
+        // clips the poster, not the background — the
+        // troughs are full poster, just shaped.
         GeometryReader { geo in
             let w = geo.size.width
             let h = w * 0.68          // ~3:2 panoramic — room for album art without going too flat
             let waveAmplitude: CGFloat = 14
             let waveCount: Double = 2.5
+            let artHeight = h + 2 * waveAmplitude    // extra 28pt so the poster covers the wave's troughs
+            let waveBaseline: CGFloat = h            // wave oscillates around the original hero-bottom
 
             return ZStack {
                 // Artwork layer (poster — the static album art)
@@ -574,7 +602,7 @@ struct FullPlayer: View {
                                 .foregroundColor(.cyberDim)
                         )
                     CachedAsyncImage(url: playerState.currentItem?.track.artworkURL) { EmptyView() }
-                        .frame(width: w, height: h)
+                        .frame(width: w, height: artHeight)
 
                     if playerState.playbackState.isLoading {
                         Color.black.opacity(0.5)
@@ -636,29 +664,37 @@ struct FullPlayer: View {
                 // AVPlayerLayer reference and is what keeps
                 // iOS 26 happy when the artwork is showing.
                 PlayerVideoView(player: playerState.player)
-                    .frame(width: w, height: h)
+                    .frame(width: w, height: artHeight)
                     .opacity(artworkMode == .video ? 1 : 0)
 
                 // Visualizer layer (audio reactive)
                 ZStack {
                     Color.black
                     NeuralFreqVisualizer(engine: AudioVisualizerEngine.shared, style: .neural)
-                        .frame(width: w, height: h)
+                        .frame(width: w, height: artHeight)
                 }
                 .opacity(artworkMode == .visualizer ? 1 : 0)
             }
-            .frame(width: w, height: h)
+            .frame(width: w, height: artHeight)
             // v1.6.11 (CV-17a): wave-form clip on the
             // bottom edge. Replaces the previous
             // diagonal slash — the bottom of the hero
             // now oscillates as a sine wave, matching
             // the music theme.
-            .clipShape(CyberpunkWaveShape(amplitude: waveAmplitude, waves: waveCount))
+            //
+            // v1.6.12 (CV-17c): the wave's `baseline`
+            // is set to `h` (the original hero-bottom
+            // y) so the wave still oscillates around
+            // the same position even though the frame
+            // is now 28pt taller — the extra height
+            // is what lets the poster extend through
+            // the wave's troughs.
+            .clipShape(CyberpunkWaveShape(amplitude: waveAmplitude, waves: waveCount, baseline: waveBaseline))
             // Clean border — color reflects the active tab.
             // Also uses the wave shape so the border
             // follows the wavy bottom edge.
             .overlay(
-                CyberpunkWaveShape(amplitude: waveAmplitude, waves: waveCount)
+                CyberpunkWaveShape(amplitude: waveAmplitude, waves: waveCount, baseline: waveBaseline)
                     .stroke(
                         borderColor,
                         lineWidth: 1
@@ -672,7 +708,7 @@ struct FullPlayer: View {
             // wave read as a light-up equalizer
             // bar rather than a hard clip line.
             .overlay(
-                CyberpunkWaveEdge(amplitude: waveAmplitude, waves: waveCount)
+                CyberpunkWaveEdge(amplitude: waveAmplitude, waves: waveCount, baseline: waveBaseline)
                     .stroke(
                         LinearGradient(
                             colors: [
@@ -1652,18 +1688,33 @@ struct ArtworkBackground: View {
 /// kept around as `CyberpunkHeroShape` for any
 /// future use, but the artwork section now uses
 /// the wave shape.
+///
+/// v1.6.12 (CV-17c): added a `baseline` parameter so
+/// the wave's vertical position is decoupled from the
+/// rect's height. The artwork section now uses a
+/// taller frame (`h + 2 * amplitude`) so the poster
+/// extends through the full wave range — the wave
+/// clips the poster, not the background. The
+/// baseline defaults to `rect.height` for any
+/// caller that doesn't pass it (back-compat with
+/// the v1.6.11 layout), but the artwork section
+/// passes `h` so the wave sits at the original hero
+/// bottom and the new height just adds 28pt of
+/// poster below the wave's troughs.
 struct CyberpunkWaveShape: Shape {
     var amplitude: CGFloat = 14
     var waves: Double = 2.5
+    var baseline: CGFloat? = nil
 
     func path(in rect: CGRect) -> Path {
+        let waveBase = baseline ?? rect.height
         var path = Path()
         path.move(to: CGPoint(x: 0, y: 0))
         path.addLine(to: CGPoint(x: rect.width, y: 0))
-        path.addLine(to: CGPoint(x: rect.width, y: rect.height))
+        path.addLine(to: CGPoint(x: rect.width, y: waveBase))
 
-        // Wave from (width, height) to (0, height).
-        // `y = height - amplitude * sin(phase)` —
+        // Wave from (width, waveBase) to (0, waveBase).
+        // `y = waveBase - amplitude * sin(phase)` —
         // symmetric around the baseline. At sin=1
         // the wave is 14pt above the baseline (a
         // peak into the hero); at sin=-1 it's 14pt
@@ -1675,7 +1726,7 @@ struct CyberpunkWaveShape: Shape {
             let x = rect.width - CGFloat(i) * stepX
             let progress = Double(i) / Double(segments)
             let phase = progress * waves * 2 * .pi
-            let y = rect.height - amplitude * sin(phase)
+            let y = waveBase - amplitude * sin(phase)
             path.addLine(to: CGPoint(x: x, y: y))
         }
 
@@ -1692,17 +1743,19 @@ struct CyberpunkWaveShape: Shape {
 struct CyberpunkWaveEdge: Shape {
     var amplitude: CGFloat = 14
     var waves: Double = 2.5
+    var baseline: CGFloat? = nil
 
     func path(in rect: CGRect) -> Path {
+        let waveBase = baseline ?? rect.height
         var path = Path()
         let segments = 100
         let stepX = rect.width / CGFloat(segments)
-        path.move(to: CGPoint(x: 0, y: rect.height))
+        path.move(to: CGPoint(x: 0, y: waveBase))
         for i in 1...segments {
             let x = CGFloat(i) * stepX
             let progress = Double(i) / Double(segments)
             let phase = progress * waves * 2 * .pi
-            let y = rect.height - amplitude * sin(phase)
+            let y = waveBase - amplitude * sin(phase)
             path.addLine(to: CGPoint(x: x, y: y))
         }
         return path
