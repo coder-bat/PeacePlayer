@@ -352,7 +352,17 @@ struct FullPlayer: View {
             }
 
             VStack(spacing: 0) {
-                Spacer(minLength: 16)
+                // v1.6.11 (CV-17b): the gap above the
+                // track title is now 28pt (was 16pt).
+                // The wave-form bottom edge of the hero
+                // dips 14pt below the hero's bounding
+                // box, so the original 16pt Spacer would
+                // have been visually eaten by the wave's
+                // troughs. 28pt gives the wave breathing
+                // room and makes the track title feel
+                // like a distinct section, not crammed
+                // against the artwork.
+                Spacer(minLength: 28)
                 trackInfoSection
                 Spacer(minLength: 16)
 
@@ -535,17 +545,24 @@ struct FullPlayer: View {
         // VStack's 24pt padding is no longer needed —
         // the artwork is now in its own ZStack directly
         // inside the outer VStack, so it naturally
-        // fills the full screen width. We also tightened
-        // the diagonal slash from 40pt to 24pt: the
-        // previous 40pt drop made the right side of the
-        // hero look "missing" (user reported the hero
-        // felt ~80% width), and a 24pt slash is enough
-        // to keep the cyberpunk diagonal aesthetic
-        // without making the hero feel narrow.
+        // fills the full screen width.
+        //
+        // v1.6.11 (CV-17a): the diagonal slash has
+        // been replaced with a wave-form bottom edge
+        // (`CyberpunkWaveShape` + `CyberpunkWaveEdge`).
+        // 2.5 full sine cycles across the width with
+        // 14pt amplitude. The wave oscillates
+        // symmetrically around the baseline — peaks
+        // 14pt up (into the hero), troughs 14pt down
+        // (into the gap above the track title). The
+        // gap below the hero is now 28pt (was 16pt)
+        // to accommodate the wave's troughs without
+        // touching the track title.
         GeometryReader { geo in
             let w = geo.size.width
             let h = w * 0.68          // ~3:2 panoramic — room for album art without going too flat
-            let slash: CGFloat = 24   // diagonal drop: right side is 24pt higher than left (was 40pt)
+            let waveAmplitude: CGFloat = 14
+            let waveCount: Double = 2.5
 
             return ZStack {
                 // Artwork layer (poster — the static album art)
@@ -631,15 +648,46 @@ struct FullPlayer: View {
                 .opacity(artworkMode == .visualizer ? 1 : 0)
             }
             .frame(width: w, height: h)
-            // Diagonal clip
-            .clipShape(CyberpunkHeroShape(slashDrop: slash))
-            // Clean border — color reflects the active tab
+            // v1.6.11 (CV-17a): wave-form clip on the
+            // bottom edge. Replaces the previous
+            // diagonal slash — the bottom of the hero
+            // now oscillates as a sine wave, matching
+            // the music theme.
+            .clipShape(CyberpunkWaveShape(amplitude: waveAmplitude, waves: waveCount))
+            // Clean border — color reflects the active tab.
+            // Also uses the wave shape so the border
+            // follows the wavy bottom edge.
             .overlay(
-                CyberpunkHeroShape(slashDrop: slash)
+                CyberpunkWaveShape(amplitude: waveAmplitude, waves: waveCount)
                     .stroke(
                         borderColor,
                         lineWidth: 1
                     )
+            )
+            // v1.6.11 (CV-17a): glowing cyan accent
+            // stroke along the wave — a thin
+            // light-up line that traces the bottom
+            // edge. Reinforces the "sound wave"
+            // aesthetic; the soft glow makes the
+            // wave read as a light-up equalizer
+            // bar rather than a hard clip line.
+            .overlay(
+                CyberpunkWaveEdge(amplitude: waveAmplitude, waves: waveCount)
+                    .stroke(
+                        LinearGradient(
+                            colors: [
+                                Theme.cyberCyan.opacity(0.0),
+                                Theme.cyberCyan.opacity(0.85),
+                                Theme.cyberMagenta.opacity(0.85),
+                                Theme.cyberCyan.opacity(0.85),
+                                Theme.cyberCyan.opacity(0.0)
+                            ],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        ),
+                        style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round)
+                    )
+                    .blur(radius: 0.6)
             )
             // Single clean shadow — color reflects the active tab
             .shadow(
@@ -1589,15 +1637,83 @@ struct ArtworkBackground: View {
 
 // MARK: - Cyberpunk Hero Shapes
 
-/// Full clip shape: sharp edges, diagonal bottom slash (left low → right high, i.e. /)
+/// v1.6.11 (CV-17a): full clip shape with a wave-form
+/// bottom edge. The bottom of the hero now oscillates
+/// around the baseline as a sine wave — 2.5 full
+/// cycles across the width with 14pt amplitude —
+/// matching the music theme. The wave oscillates
+/// symmetrically around the baseline: peaks go 14pt
+/// up (into the hero, so the artwork has a "sound
+/// wave" carved into its bottom), troughs go 14pt
+/// down (out of the hero, into the gap above the
+/// track title — see the increased Spacer in
+/// portraitContent). The previous diagonal slash
+/// (CyberpunkHeroShape / CyberpunkDiagonalEdge) is
+/// kept around as `CyberpunkHeroShape` for any
+/// future use, but the artwork section now uses
+/// the wave shape.
+struct CyberpunkWaveShape: Shape {
+    var amplitude: CGFloat = 14
+    var waves: Double = 2.5
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: 0, y: 0))
+        path.addLine(to: CGPoint(x: rect.width, y: 0))
+        path.addLine(to: CGPoint(x: rect.width, y: rect.height))
+
+        // Wave from (width, height) to (0, height).
+        // `y = height - amplitude * sin(phase)` —
+        // symmetric around the baseline. At sin=1
+        // the wave is 14pt above the baseline (a
+        // peak into the hero); at sin=-1 it's 14pt
+        // below (a trough into the gap). 100 segments
+        // gives a smooth curve at any width.
+        let segments = 100
+        let stepX = rect.width / CGFloat(segments)
+        for i in 0...segments {
+            let x = rect.width - CGFloat(i) * stepX
+            let progress = Double(i) / Double(segments)
+            let phase = progress * waves * 2 * .pi
+            let y = rect.height - amplitude * sin(phase)
+            path.addLine(to: CGPoint(x: x, y: y))
+        }
+
+        path.addLine(to: CGPoint(x: 0, y: 0))
+        path.closeSubpath()
+        return path
+    }
+}
+
+/// Just the bottom wave — used for the glowing cyan
+/// accent stroke that traces the bottom edge of the
+/// hero. Renders as a thin cyan line with a soft glow,
+/// reinforcing the "sound wave" feel.
+struct CyberpunkWaveEdge: Shape {
+    var amplitude: CGFloat = 14
+    var waves: Double = 2.5
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        let segments = 100
+        let stepX = rect.width / CGFloat(segments)
+        path.move(to: CGPoint(x: 0, y: rect.height))
+        for i in 1...segments {
+            let x = CGFloat(i) * stepX
+            let progress = Double(i) / Double(segments)
+            let phase = progress * waves * 2 * .pi
+            let y = rect.height - amplitude * sin(phase)
+            path.addLine(to: CGPoint(x: x, y: y))
+        }
+        return path
+    }
+}
+
+// v1.6.10 (CV-16a) kept for any future use; the
+// artwork section now uses the wave shape. The
+// diagonal edge / slash look is no longer the
+// primary hero aesthetic.
 struct CyberpunkHeroShape: Shape {
-    // v1.6.10 (CV-16a): tightened from 40 to 24.
-    // The 40pt drop made the right side of the hero
-    // feel visually missing when the user saw the
-    // full-screen player; 24pt is enough to keep the
-    // cyberpunk diagonal aesthetic without making the
-    // hero feel narrow. See the comment in
-    // artworkSection for the reasoning.
     var slashDrop: CGFloat = 24
 
     func path(in rect: CGRect) -> Path {
@@ -1611,10 +1727,7 @@ struct CyberpunkHeroShape: Shape {
     }
 }
 
-/// Just the bottom diagonal — used for the glowing cyan accent stroke
 struct CyberpunkDiagonalEdge: Shape {
-    // v1.6.10 (CV-16a): match CyberpunkHeroShape's
-    // tightened slash. See comment above.
     var slashDrop: CGFloat = 24
 
     func path(in rect: CGRect) -> Path {
