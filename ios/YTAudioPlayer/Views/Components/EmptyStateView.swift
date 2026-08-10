@@ -10,36 +10,44 @@ import SwiftUI
 enum EmptyStateType {
     case search
     case library
+    case liked
     case noResults(query: String)
     case noInternet
     case error(message: String)
-    
+
     var icon: String {
         switch self {
         case .search: return "magnifyingglass"
         case .library: return "music.note.list"
+        case .liked: return "heart.slash"
         case .noResults: return "magnifyingglass.circle"
         case .noInternet: return "wifi.slash"
         case .error: return "exclamationmark.triangle"
         }
     }
-    
+
     var title: String {
         switch self {
         case .search: return "Search Music"
         case .library: return "Your Library is Empty"
+        // v1.6.9 (CV-15b): Liked mode gets its own
+        // empty state — the Library one talked about
+        // downloads which doesn't apply.
+        case .liked: return "No Liked Tracks Yet"
         case .noResults(let query): return "No results for \"\(query)\""
         case .noInternet: return "No Connection"
         case .error: return "Something Went Wrong"
         }
     }
-    
+
     var message: String {
         switch self {
         case .search:
             return "Search for songs, artists, or albums from YouTube Music"
         case .library:
             return "Download songs to listen offline. Your downloads will appear here."
+        case .liked:
+            return "Tap the heart on any track to start collecting favourites."
         case .noResults:
             return "Try a different search term or check your spelling"
         case .noInternet:

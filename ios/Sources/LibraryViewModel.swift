@@ -23,6 +23,41 @@ struct DownloadedTrackItem: Identifiable {
     let thumbnailURL: URL?
     let track: Track
 
+    // v1.6.9 (CV-15b): explicit memberwise
+    // initializer. The struct used to only have
+    // `init(from: CDDownloadedTrack)` which
+    // suppressed the auto-synthesized memberwise
+    // init. We need the memberwise init for the
+    // Liked mode placeholder (see below), so we
+    // re-declare it here.
+    init(
+        id: String,
+        videoId: String,
+        title: String,
+        artist: String,
+        album: String,
+        durationSeconds: Int,
+        fileSize: Int64,
+        fileSizeFormatted: String,
+        downloadedAt: Date,
+        localPath: String,
+        thumbnailURL: URL?,
+        track: Track
+    ) {
+        self.id = id
+        self.videoId = videoId
+        self.title = title
+        self.artist = artist
+        self.album = album
+        self.durationSeconds = durationSeconds
+        self.fileSize = fileSize
+        self.fileSizeFormatted = fileSizeFormatted
+        self.downloadedAt = downloadedAt
+        self.localPath = localPath
+        self.thumbnailURL = thumbnailURL
+        self.track = track
+    }
+
     init(from download: CDDownloadedTrack) {
         let cdTrack = download.track
         self.videoId = cdTrack?.videoId ?? ""
@@ -45,6 +80,34 @@ struct DownloadedTrackItem: Identifiable {
             thumbnails: [],
             isExplicit: false,
             videoType: "UNKNOWN"
+        )
+    }
+
+    // v1.6.9 (CV-15b): synthetic DownloadedTrackItem
+    // for a liked track that may or may not be
+    // downloaded. Lets the Liked mode use the same
+    // row components as Downloaded without
+    // duplicating the row UI. fileSize / localPath /
+    // downloadedAt are zero/empty — the row UI hides
+    // them in Liked mode (via the `mode` parameter
+    // on GridTrackCell / ListTrackRow), and the
+    // context menu's "Remove from Library" action
+    // becomes "Unlike" instead of a destructive
+    // delete.
+    static func likedPlaceholder(track: Track) -> DownloadedTrackItem {
+        DownloadedTrackItem(
+            id: track.videoId,
+            videoId: track.videoId,
+            title: track.title,
+            artist: track.displayArtist,
+            album: track.album,
+            durationSeconds: track.durationSeconds,
+            fileSize: 0,
+            fileSizeFormatted: "",
+            downloadedAt: Date(timeIntervalSince1970: 0),
+            localPath: "",
+            thumbnailURL: track.artworkURL,
+            track: track
         )
     }
 }

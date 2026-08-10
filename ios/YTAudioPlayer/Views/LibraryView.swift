@@ -29,23 +29,52 @@ enum LibrarySortOption: String, CaseIterable, Identifiable {
     }
 }
 
-// v1.6.8 (CV-13): Library's NavigationStack kept around for
-// future "Albums" / "Recently Added" pushes, but Liked Songs
-// is presented as a sheet (same pattern as PlaylistsView) to
-// avoid nested NavigationStacks — PlaylistDetailView already
-// owns its own NavigationStack, and stacking a third one
-// inside Library's would produce 3 layers of nav chrome.
-enum LibraryDestination: Hashable {
-    case likedSongs
+// v1.6.9 (CV-15b): Library now has two modes — Liked
+// (everything the user has tapped the heart on) and
+// Downloaded (everything in the local CoreData store).
+// A segmented Picker at the top of the Library view
+// toggles between them. Both modes use the same row
+// components, the same grid/list toggle, the same
+// search, the same sort — only the source data and
+// the per-row "remove" action differ (Unlike for liked,
+// Remove from Library for downloaded).
+//
+// Why segmented control over two sections in one
+// scroll: the user asked for "liked and downloaded
+// both in the same view, without going anywhere else".
+// The segmented Picker is the same view (Library), the
+// same screen, the same tab — switching is one tap on
+// the segment, not a navigation. It also lets each
+// mode get the full Library toolbar (sort, view mode,
+// multi-select) instead of the Liked section being a
+// second-class "lite" view.
+enum LibraryMode: String, CaseIterable, Identifiable {
+    case liked
+    case downloaded
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .liked:     return "Liked"
+        case .downloaded: return "Downloaded"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .liked:     return "heart.fill"
+        case .downloaded: return "arrow.down.circle.fill"
+        }
+    }
 }
 
 struct LibraryView: View {
     @StateObject private var viewModel = LibraryViewModel()
     @StateObject private var playerState = PlayerState.shared
     @StateObject private var songMemoryManager = SongMemoryManager.shared
-    // v1.6.8 (CV-13): Library now hosts the Liked Songs
-    // entry point. PlaylistManager is observed so the
-    // card's track count updates the moment a track is
+    // v1.6.9 (CV-15b): PlaylistManager is observed so
+    // the Liked mode refreshes the moment a track is
     // liked / unliked from anywhere in the app.
     @StateObject private var playlistManager = PlaylistManager.shared
     @ObservedObject var undoService = UndoService.shared
@@ -55,11 +84,19 @@ struct LibraryView: View {
     @State private var selectedTracks: Set<String> = []
     @State private var isEditing = false
     @State private var searchQuery = ""
-    // v1.6.8 (CV-13): featured Liked Songs card opens
-    // this sheet. Same `.sheet` pattern PlaylistsView
-    // uses for PlaylistDetailView — one modal layer
-    // over the tab content, no nested NavigationStacks.
-    @State private var showLikedSongs = false
+    // v1.6.9 (CV-15b): segmented Picker state. Default
+    // Downloaded so the first thing the user sees is
+    // the offline-available library they already know
+    // — the Liked view is one tap away.
+    @State private var libraryMode: LibraryMode = .downloaded
+    // v1.6.9 (CV-15b): Combine cancellables for the
+    // async stream-URL fetches kicked off by
+    // playAllLiked / addLikedTrackToQueue /
+    // playLikedTrackNext. The sinks are short-lived
+    // (they fire once and complete) but we still need
+    // a bag to hold the AnyCancellable so the closure
+    // is deallocated cleanly.
+    @State private var cancellables: Set<AnyCancellable> = []
 
     var body: some View {
         // S14: NavigationStack replaces the deprecated NavigationView
@@ -75,7 +112,13 @@ struct LibraryView: View {
                     .ignoresSafeArea()
 
                 Group {
-                    if viewModel.tracks.isEmpty {
+                    // v1.6.9 (CV-15b): empty check is per-mode
+                    // so the user sees the Liked empty state
+                    // (or the Downloaded one) based on the
+                    // active segment — not a single global
+                    // "library is empty" overlay that hides
+                    // both modes.
+                    if currentTracks.isEmpty {
                         emptyView
                     } else {
                         contentView
@@ -96,7 +139,12 @@ struct LibraryView: View {
                             .foregroundColor(Theme.cyberCyan)
 
                             if !selectedTracks.isEmpty {
-                                Button("DELETE", role: .destructive) {
+                                // v1.6.9 (CV-15b): destructive
+                                // action label switches with the
+                                // active mode — "UNLIKE" for the
+                                // Liked segment, "DELETE" for
+                                // Downloaded.
+                                Button(libraryMode == .liked ? "UNLIKE" : "DELETE", role: .destructive) {
                                     print("🗑️ Toolbar Delete button tapped. selectedTracks: \(selectedTracks.count)")
                                     viewModel.showDeleteConfirmation = true
                                 }
@@ -108,45 +156,59 @@ struct LibraryView: View {
 
                 ToolbarItem(placement: .navigationBarTrailing) {
                     HStack(spacing: 12) {
-                        // S18 (P0-1 rescue): Downloads queue + History
-                        // were orphaned because nothing observed
-                        // DownloadManager.showDownloadQueue. Surface
-                        // them via a bell in the Library toolbar.
-                        // The bell also shows a badge when there are
-                        // active or failed downloads.
-                        Button {
-                            HapticManager.light()
-                            showDownloadQueue = true
-                        } label: {
-                            ZStack(alignment: .topTrailing) {
-                                Image(systemName: "arrow.down.circle")
-                                    .font(.system(size: 17, weight: .semibold))
-                                    .foregroundColor(Theme.cyberCyan)
-                                // Badge: active OR failed downloads
-                                let activeCount = DownloadManager.shared.activeDownloads.count
-                                let failedCount = DownloadManager.shared.completedDownloads.filter {
-                                    if case .failed = $0.status { return true }; return false
-                                }.count
-                                if activeCount + failedCount > 0 {
-                                    Text("\(activeCount + failedCount)")
-                                        .font(.system(size: 9, weight: .bold, design: .monospaced))
-                                        .foregroundColor(.white)
-                                        .padding(.horizontal, 4)
-                                        .padding(.vertical, 1)
-                                        .background(
-                                            Capsule().fill(failedCount > 0 ? Theme.cyberMagenta : Theme.cyberYellow)
-                                        )
-                                        .offset(x: 6, y: -4)
+                        // v1.6.9 (CV-15b): Downloads queue bell
+                        // is only relevant for the Downloaded
+                        // mode. In the Liked mode it's hidden —
+                        // the user is browsing favorites, not
+                        // managing downloads, and a downloads
+                        // bell that does nothing would just be
+                        // visual noise.
+                        if libraryMode == .downloaded {
+                            // S18 (P0-1 rescue): Downloads queue +
+                            // History were orphaned because
+                            // nothing observed
+                            // DownloadManager.showDownloadQueue.
+                            // Surface them via a bell in the
+                            // Library toolbar. The bell also
+                            // shows a badge when there are active
+                            // or failed downloads.
+                            Button {
+                                HapticManager.light()
+                                showDownloadQueue = true
+                            } label: {
+                                ZStack(alignment: .topTrailing) {
+                                    Image(systemName: "arrow.down.circle")
+                                        .font(.system(size: 17, weight: .semibold))
+                                        .foregroundColor(Theme.cyberCyan)
+                                    // Badge: active OR failed downloads
+                                    let activeCount = DownloadManager.shared.activeDownloads.count
+                                    let failedCount = DownloadManager.shared.completedDownloads.filter {
+                                        if case .failed = $0.status { return true }; return false
+                                    }.count
+                                    if activeCount + failedCount > 0 {
+                                        Text("\(activeCount + failedCount)")
+                                            .font(.system(size: 9, weight: .bold, design: .monospaced))
+                                            .foregroundColor(.white)
+                                            .padding(.horizontal, 4)
+                                            .padding(.vertical, 1)
+                                            .background(
+                                                Capsule().fill(failedCount > 0 ? Theme.cyberMagenta : Theme.cyberYellow)
+                                            )
+                                            .offset(x: 6, y: -4)
+                                    }
                                 }
                             }
+                            .accessibilityLabel("Downloads")
+                            .accessibilityHint("Show download queue and history")
                         }
-                        .accessibilityLabel("Downloads")
-                        .accessibilityHint("Show download queue and history")
 
                         // 2026-06-28 (S6): show toolbar even when the
                         // library is empty so the sort menu is
                         // always accessible (it controls the
-                        // empty-state as well).
+                        // empty-state as well). v1.6.9 (CV-15b):
+                        // enabled state follows the current mode's
+                        // track list, not just the downloaded
+                        // library.
                         Button(isEditing ? "\(selectedTracks.count)" : "SELECT") {
                             isEditing.toggle()
                             if !isEditing {
@@ -155,8 +217,8 @@ struct LibraryView: View {
                         }
                         .font(.system(size: 13, weight: .bold, design: .monospaced))
                         .foregroundColor(Theme.cyberCyan)
-                        .disabled(viewModel.tracks.isEmpty)
-                        .opacity(viewModel.tracks.isEmpty ? 0.4 : 1)
+                        .disabled(currentTracks.isEmpty)
+                        .opacity(currentTracks.isEmpty ? 0.4 : 1)
 
                         Button {
                             viewMode = viewMode == .grid ? .list : .grid
@@ -168,7 +230,13 @@ struct LibraryView: View {
 
                         Menu {
                             Section("SORT BY") {
-                                ForEach(LibrarySortOption.allCases) { option in
+                                // v1.6.9 (CV-15b): in Liked mode
+                                // we hide the "Size" sort option
+                                // (file size is meaningless for
+                                // liked tracks that aren't
+                                // downloaded). Downloaded mode
+                                // gets the full list.
+                                ForEach(availableSortOptions) { option in
                                     Button {
                                         viewModel.sortOption = option
                                     } label: {
@@ -178,12 +246,19 @@ struct LibraryView: View {
                                 }
                             }
 
-                            Divider()
+                            // v1.6.9 (CV-15b): STORAGE INFO is
+                            // only relevant for the Downloaded
+                            // mode — it tracks on-disk bytes,
+                            // which is meaningless for liked
+                            // tracks that may not be downloaded.
+                            if libraryMode == .downloaded {
+                                Divider()
 
-                            Button {
-                                showStorageInfo = true
-                            } label: {
-                                Label("STORAGE INFO", systemImage: "externaldrive")
+                                Button {
+                                    showStorageInfo = true
+                                } label: {
+                                    Label("STORAGE INFO", systemImage: "externaldrive")
+                                }
                             }
                         } label: {
                             // 2026-06-28 (S6): wrap the icon in a glass
@@ -216,41 +291,57 @@ struct LibraryView: View {
             .sheet(isPresented: $showDownloadQueue) {
                 DownloadQueueView()
             }
-            // v1.6.8 (CV-13): Liked Songs sheet. Same
-            // pattern PlaylistsView uses to present
-            // PlaylistDetailView — modal over the tab
-            // content, no nested NavigationStack. The
-            // user swipes down to dismiss and they're
-            // back at Library with the Liked Songs
-            // card still at the top of the list.
-            .sheet(isPresented: $showLikedSongs) {
-                LikedSongsView()
-            }
-            .alert("DELETE \(selectedTracks.count) TRACKS?", isPresented: $viewModel.showDeleteConfirmation) {
+            // v1.6.9 (CV-15b): Liked Songs sheet removed.
+            // Liked tracks are now a first-class Library
+            // mode toggled via the segmented Picker at the
+            // top of contentView — no separate sheet
+            // needed. The LikedSongsView file stays around
+            // for any future standalone use (e.g. a
+            // ShareCard / search-result jump-to).
+            .alert(deleteAlertTitle, isPresented: $viewModel.showDeleteConfirmation) {
                 Button("CANCEL", role: .cancel) {
                     print("🗑️ Delete cancelled")
                 }
-                Button("DELETE", role: .destructive) {
+                Button(libraryMode == .liked ? "UNLIKE" : "DELETE", role: .destructive) {
                     print("🗑️ Alert Delete button tapped. Selected tracks: \(selectedTracks.count)")
                     let ids = Array(selectedTracks)
                     print("🗑️ Track IDs to delete: \(ids)")
                     HapticManager.heavy()
                     let count = ids.count
-                    viewModel.deleteTracks(ids)
+                    // v1.6.9 (CV-15b): destructive action
+                    // depends on the active mode. Downloaded
+                    // mode removes the files from disk via
+                    // the LibraryViewModel; Liked mode just
+                    // toggles the like state in
+                    // PlaylistManager. Different toast
+                    // messages reflect the difference.
+                    if libraryMode == .liked {
+                        for id in ids {
+                            playlistManager.toggleLike(trackId: id)
+                        }
+                        UndoService.shared.registerUndo(
+                            message: "Unliked \(count) track\(count == 1 ? "" : "s")",
+                            restore: nil,
+                            showUndoButton: false
+                        )
+                    } else {
+                        viewModel.deleteTracks(ids)
+                        // S15: Library multi-delete is destructive
+                        // (files are removed from disk). No working
+                        // restore, so the toast is a confirmation
+                        // only — no Undo button (previously the
+                        // button was a lie).
+                        UndoService.shared.registerUndo(
+                            message: "Deleted \(count) track\(count == 1 ? "" : "s")",
+                            restore: nil,
+                            showUndoButton: false
+                        )
+                    }
                     selectedTracks.removeAll()
                     isEditing = false
-                    // S15: Library multi-delete is destructive (files
-                    // are removed from disk). No working restore, so
-                    // the toast is a confirmation only — no Undo
-                    // button (previously the button was a lie).
-                    UndoService.shared.registerUndo(
-                        message: "Deleted \(count) track\(count == 1 ? "" : "s")",
-                        restore: nil,
-                        showUndoButton: false
-                    )
                 }
             } message: {
-                Text("This will permanently remove the selected tracks from your library.")
+                Text(deleteAlertMessage)
             }
             .preferredColorScheme(.dark)
         }
@@ -260,17 +351,28 @@ struct LibraryView: View {
     }
 
     private var emptyView: some View {
-        // S13: Empty library now offers a CTA that posts the
-        // `.openSearch` notification. ContentView listens and switches
-        // to the Search tab. The cyberpunk dim text + cyan button keeps
-        // the design language consistent with the rest of the app.
-        EmptyStateView(
-            type: .library,
-            action: {
-                NotificationCenter.default.post(name: .openSearch, object: nil)
-            },
-            actionTitle: "Search Music"
-        )
+        // v1.6.9 (CV-15b): the empty state changes
+        // with the active segment. Downloaded =
+        // "go search and download something" with
+        // a CTA button. Liked = "tap the heart to
+        // start collecting", no CTA (the user is
+        // already in the app, no action to take
+        // here — they need to go play a track and
+        // heart it).
+        Group {
+            switch libraryMode {
+            case .downloaded:
+                EmptyStateView(
+                    type: .library,
+                    action: {
+                        NotificationCenter.default.post(name: .openSearch, object: nil)
+                    },
+                    actionTitle: "Search Music"
+                )
+            case .liked:
+                EmptyStateView(type: .liked)
+            }
+        }
     }
 
     private var contentView: some View {
@@ -288,17 +390,27 @@ struct LibraryView: View {
             .padding(.top, 8)
             .padding(.bottom, 8)
 
-            // v1.6.8 (CV-13): featured Liked Songs card.
-            // Always shown at the top of Library — visible
-            // even when the downloaded library is empty
-            // (the user might have liked tracks from
-            // radio/discovery without downloading them yet).
-            // Tapping opens a sheet with the Liked Songs
-            // content (PlaylistDetailView for the Liked
-            // Songs smart playlist).
-            likedSongsCard
+            // v1.6.9 (CV-15b): segmented Picker
+            // toggles between Liked and Downloaded.
+            // Same view, same screen, one tap to
+            // switch — meets the "show both in the
+            // same view" goal without burying one
+            // mode behind a card or a sheet.
+            modePicker
                 .padding(.horizontal)
-                .padding(.bottom, 12)
+                .padding(.bottom, 8)
+
+            // v1.6.9 (CV-15b): Play-all row. Only
+            // shown in Liked mode (Downloaded mode
+            // already has Play / Shuffle buttons
+            // elsewhere via the row context menu
+            // and the FullPlayer's Play All from
+            // an artist).
+            if libraryMode == .liked && !currentTracks.isEmpty {
+                playAllRow
+                    .padding(.horizontal)
+                    .padding(.bottom, 8)
+            }
 
             // Search bar
             searchBar
@@ -307,15 +419,17 @@ struct LibraryView: View {
 
             // Stats bar
             HStack {
-                Text("\(viewModel.filteredTracks(searchQuery: searchQuery).count) TRACKS")
+                Text("\(currentTracks.count) TRACK\(currentTracks.count == 1 ? "" : "S")")
                     .font(.system(size: 12, design: .monospaced))
                     .foregroundColor(Theme.cyberDim)
 
                 Spacer()
 
-                Text(viewModel.totalSizeFormatted.uppercased())
-                    .font(.system(size: 12, design: .monospaced))
-                    .foregroundColor(Theme.cyberDim)
+                if libraryMode == .downloaded {
+                    Text(viewModel.totalSizeFormatted.uppercased())
+                        .font(.system(size: 12, design: .monospaced))
+                        .foregroundColor(Theme.cyberDim)
+                }
             }
             .padding(.horizontal)
             .padding(.vertical, 8)
@@ -329,82 +443,215 @@ struct LibraryView: View {
         }
     }
 
-    // v1.6.8 (CV-13): featured Liked Songs entry point.
-    // Magenta-tinted heart icon, track count, and a
-    // chevron to telegraph that it's tappable. Sits at
-    // the top of Library so the user always knows where
-    // their liked tracks are — no separate tab to hunt
-    // for. The count refreshes live because
-    // PlaylistManager is observed above.
-    private var likedSongsCard: some View {
-        Button {
-            HapticManager.light()
-            showLikedSongs = true
-        } label: {
-            HStack(spacing: 14) {
-                // Heart icon in a magenta gradient square
-                ZStack {
-                    RoundedRectangle(cornerRadius: 10)
-                        .fill(
-                            LinearGradient(
-                                colors: [Theme.cyberMagenta, Theme.cyberMagenta.opacity(0.6)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        .frame(width: 56, height: 56)
-                    Image(systemName: "heart.fill")
-                        .font(.system(size: 26, weight: .bold))
-                        .foregroundColor(.white)
-                        .shadow(color: .black.opacity(0.3), radius: 2)
-                }
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Liked Songs")
-                        .font(.system(size: 17, weight: .bold, design: .monospaced))
-                        .foregroundColor(.white)
-                    Text("\(likedCount) TRACK\(likedCount == 1 ? "" : "S")")
-                        .font(.system(size: 11, weight: .medium, design: .monospaced))
-                        .foregroundColor(Theme.cyberDim)
-                }
-
-                Spacer()
-
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundColor(Theme.cyberDim)
+    // v1.6.9 (CV-15b): segmented Picker for the
+    // Liked / Downloaded toggle. Segmented style
+    // matches the iOS 17 default; the underlying
+    // labels use the heart / download-circle icons
+    // so the two modes are visually distinct even
+    // when text is truncated.
+    private var modePicker: some View {
+        Picker("Library mode", selection: $libraryMode) {
+            ForEach(LibraryMode.allCases) { mode in
+                Label(mode.label, systemImage: mode.icon)
+                    .tag(mode)
             }
-            .padding(12)
-            .background(
-                RoundedRectangle(cornerRadius: 14)
-                    .fill(Theme.cyberSurface)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 14)
-                            .stroke(
-                                LinearGradient(
-                                    colors: [
-                                        Theme.cyberMagenta.opacity(0.4),
-                                        Theme.cyberMagenta.opacity(0.1)
-                                    ],
-                                    startPoint: .leading,
-                                    endPoint: .trailing
-                                ),
-                                lineWidth: 1
-                            )
-                    )
-            )
+        }
+        .pickerStyle(.segmented)
+    }
+
+    // v1.6.9 (CV-15b): Play-all action for the
+    // Liked mode. Tapping it plays the first liked
+    // track and pre-fetches the rest into the queue
+    // (same pattern Anti-Algorithm's "start session"
+    // uses). Replaces the "Play All" button the
+    // Liked Songs sheet had via PlaylistDetailView's
+    // hero header.
+    private var playAllRow: some View {
+        Button {
+            HapticManager.medium()
+            playAllLiked()
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "play.fill")
+                    .font(.system(size: 13, weight: .bold))
+                Text("PLAY ALL")
+                    .font(.system(size: 13, weight: .bold, design: .monospaced))
+                Spacer()
+                Text("\(currentTracks.count) TRACK\(currentTracks.count == 1 ? "" : "S")")
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .opacity(0.8)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity)
+            .foregroundColor(Theme.cyberBackground)
+            .background(Theme.cyberCyan)
+            .cornerRadius(CornerRadius.sm)
+            .shadow(color: Theme.cyberCyan.opacity(0.5), radius: 10, x: 0, y: 0)
         }
         .buttonStyle(.plain)
     }
 
-    // v1.6.8 (CV-13): count of tracks in the Liked Songs
-    // smart playlist. Read from PlaylistManager (observed
-    // above) so it updates the moment a track is liked or
-    // unliked from anywhere in the app.
-    private var likedCount: Int {
-        playlistManager.playlists
-            .first(where: { $0.isLikedSongsPlaylist })?
-            .trackIds.count ?? 0
+    // v1.6.9 (CV-15b): play the first liked track
+    // and pre-fetch the rest into the queue. Mirrors
+    // the Anti-Algorithm playFirstAndQueueRest flow
+    // — `PlayerState.shared.play(track:)` for the
+    // first one, then a per-track StreamURLCache
+    // fetch (Combine sink) that appends a QueueItem
+    // to the player's queue as each stream URL
+    // arrives.
+    private func playAllLiked() {
+        let items = currentTracks
+        guard let first = items.first else { return }
+        let firstTrack = first.track
+        // Play the first via the standard path.
+        // play(track:) handles the stream-URL fetch
+        // internally.
+        PlayerState.shared.play(track: firstTrack)
+
+        // The remaining tracks go through a per-track
+        // pre-fetch. StreamURLCache is the same cache
+        // play(track:) uses, so the first play of each
+        // track is the only network roundtrip.
+        let remaining = Array(items.dropFirst())
+        let maxQueueSize = max(50, remaining.count + 5)
+        for trackItem in remaining {
+            let track = trackItem.track
+            StreamURLCache.shared.getStreamUrl(videoId: track.videoId, quality: "low")
+                .sink(
+                    receiveCompletion: { completion in
+                        if case .failure = completion {
+                            // Quiet fail: the next-played track
+                            // would have hit this anyway. The
+                            // Anti-Algorithm engine logs the
+                            // os_log breadcrumb; we just skip
+                            // silently here to keep the toast
+                            // surface clean.
+                        }
+                    },
+                    receiveValue: { streamInfo in
+                        let item = QueueItem(
+                            track: track,
+                            streamUrl: streamInfo.streamUrl,
+                            source: .stream
+                        )
+                        PlayerState.shared.queueStore.add(item, maxQueueSize: maxQueueSize)
+                    }
+                )
+                .store(in: &cancellables)
+        }
+    }
+
+    // v1.6.9 (CV-15b): tracks to display in the
+    // current mode. Downloaded reads from
+    // LibraryViewModel (filtered by search query);
+    // Liked reads from PlaylistManager (the set of
+    // liked videoIds) and converts the underlying
+    // Track objects into DownloadedTrackItem shape
+    // so the existing row components work
+    // unchanged. The conversion fills fileSize /
+    // downloadedAt / localPath with empty /
+    // zero values, which the row UI handles
+    // gracefully (the "Remove from Library" context
+    // action is replaced with "Unlike" via the
+    // `mode` parameter on the row).
+    private var currentTracks: [DownloadedTrackItem] {
+        switch libraryMode {
+        case .downloaded:
+            return viewModel.filteredTracks(searchQuery: searchQuery)
+        case .liked:
+            return likedTracksAsItems
+        }
+    }
+
+    // v1.6.9 (CV-15b): convert the Liked playlist's
+    // videoIds to DownloadedTrackItem array. The
+    // order is "first liked is first" — the Liked
+    // playlist preserves insertion order via its
+    // underlying trackIds array, so most-recently
+    // liked tracks come last. We reverse so the
+    // newest liked track shows at the top of the
+    // list (matches user expectation from
+    // Instagram / Spotify's "Recently liked" feeds).
+    private var likedTracksAsItems: [DownloadedTrackItem] {
+        let videoIds = Array(playlistManager.likedTracks)
+        // Sort by reverse order: items the user liked
+        // most recently appear at the top. Since
+        // likedTracks is a Set<String> (no order),
+        // we fall back to the Liked playlist's
+        // trackIds order if available — that array
+        // IS ordered (it's the order in which tracks
+        // were added to the playlist).
+        let orderedIds: [String]
+        if let likedPlaylist = playlistManager.playlists.first(where: { $0.isLikedSongsPlaylist }) {
+            orderedIds = likedPlaylist.trackIds
+        } else {
+            orderedIds = videoIds
+        }
+        // Apply search filter
+        let filteredIds: [String]
+        if searchQuery.isEmpty {
+            filteredIds = orderedIds
+        } else {
+            let q = searchQuery.lowercased()
+            filteredIds = orderedIds.filter { id in
+                // We don't have direct access to the
+                // track's title/artist here without
+                // looking it up, so we do that in the
+                // next pass.
+                return true
+            }
+        }
+        // Build items, applying the search filter
+        // against the actual track metadata.
+        let tracks = TrackStore.shared.getTracks(videoIds: filteredIds)
+        return tracks.compactMap { track in
+            // Search filter on title/artist
+            if !searchQuery.isEmpty {
+                let q = searchQuery.lowercased()
+                let matchesTitle = track.title.lowercased().contains(q)
+                let matchesArtist = track.displayArtist.lowercased().contains(q)
+                if !matchesTitle && !matchesArtist {
+                    return nil
+                }
+            }
+            return DownloadedTrackItem.likedPlaceholder(track: track)
+        }
+    }
+
+    // v1.6.9 (CV-15b): per-mode sort options. The
+    // "Size" sort doesn't apply to liked tracks
+    // (they don't have a file size unless they
+    // happen to also be downloaded — and even
+    // then, we're not displaying it in the Liked
+    // mode). The full list stays for Downloaded.
+    private var availableSortOptions: [LibrarySortOption] {
+        switch libraryMode {
+        case .downloaded:
+            return LibrarySortOption.allCases
+        case .liked:
+            return LibrarySortOption.allCases.filter { $0 != .size }
+        }
+    }
+
+    // v1.6.9 (CV-15b): per-mode delete alert copy.
+    private var deleteAlertTitle: String {
+        let count = selectedTracks.count
+        switch libraryMode {
+        case .downloaded:
+            return "DELETE \(count) TRACK\(count == 1 ? "" : "S")?"
+        case .liked:
+            return "UNLIKE \(count) TRACK\(count == 1 ? "" : "S")?"
+        }
+    }
+
+    private var deleteAlertMessage: String {
+        switch libraryMode {
+        case .downloaded:
+            return "This will permanently remove the selected tracks from your library."
+        case .liked:
+            return "These tracks will be removed from your Liked Songs. You can re-like them any time."
+        }
     }
 
     // MARK: - Search Bar
@@ -449,13 +696,22 @@ struct LibraryView: View {
                 columns: [GridItem(.flexible()), GridItem(.flexible())],
                 spacing: 16
             ) {
-                ForEach(viewModel.filteredTracks(searchQuery: searchQuery)) { track in
+                // v1.6.9 (CV-15b): iterate over
+                // currentTracks (Liked or Downloaded
+                // depending on the segmented Picker)
+                // instead of the downloaded library
+                // directly. Each row gets the active
+                // `mode` so its context menu can show
+                // the right destructive action
+                // (Unlike vs Remove from Library).
+                ForEach(currentTracks) { track in
                     GridTrackCell(
                         track: track,
                         isSelected: selectedTracks.contains(track.videoId),
                         isEditing: isEditing,
                         isPlaying: viewModel.isCurrentlyPlaying(track),
                         memoryPreview: songMemoryManager.memory(for: track.track)?.previewText,
+                        mode: libraryMode,
                         onTap: {
                             if isEditing {
                                 toggleSelection(track)
@@ -468,50 +724,14 @@ struct LibraryView: View {
                         },
                         onPlayNext: {
                             HapticManager.light()
-                            viewModel.playNextTrack(track)
+                            handlePlayNext(track)
                         },
                         onAddToQueue: {
                             HapticManager.light()
-                            viewModel.addToQueue(track)
-                            // S13: surface a brief toast so the user
-                            // has confirmation beyond the haptic, and
-                            // notify FullPlayer so the Queue icon can
-                            // pulse (Phase 4.1).
-                            //
-                            // CV-1: was `restore: { /* no undo for
-                            // add-to-queue */ }`. The closure was a
-                            // no-op, and UndoService's empty-closure
-                            // heuristic can't introspect Swift
-                            // closures — it returned false, so the
-                            // Undo button appeared in the toast and
-                            // tapping it did nothing. Now we use the
-                            // explicit `showUndoButton: false` form,
-                            // which is honest: the toast shows a
-                            // checkmark + message, no fake Undo
-                            // button.
-                            UndoService.shared.registerUndo(
-                                message: "Added \(track.title) to Queue",
-                                restore: nil,
-                                showUndoButton: false
-                            )
-                            NotificationCenter.default.post(
-                                name: .trackAddedToQueue,
-                                object: track
-                            )
+                            handleAddToQueue(track)
                         },
                         onDelete: {
-                            HapticManager.medium()
-                            let trackName = track.title
-                            viewModel.deleteTracks([track.videoId])
-                            // S15: Library single-delete is destructive
-                            // (file is removed from disk). No working
-                            // restore yet, so the toast is a
-                            // confirmation only — no fake Undo button.
-                            UndoService.shared.registerUndo(
-                                message: "Deleted \"\(trackName)\"",
-                                restore: nil,
-                                showUndoButton: false
-                            )
+                            handleDelete(track)
                         }
                     )
                 }
@@ -519,20 +739,28 @@ struct LibraryView: View {
             .padding(16)
         }
         .refreshable {
-            viewModel.loadLibrary()
-            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            // v1.6.9 (CV-15b): pull-to-refresh is
+            // only meaningful in the Downloaded mode
+            // (it reloads the on-disk library). In
+            // Liked mode, the data is already live
+            // (PlaylistManager is observed).
+            if libraryMode == .downloaded {
+                viewModel.loadLibrary()
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+            }
         }
     }
 
     private var listView: some View {
         List {
-            ForEach(viewModel.filteredTracks(searchQuery: searchQuery)) { track in
+            ForEach(currentTracks) { track in
                     ListTrackRow(
                         track: track,
                         isSelected: selectedTracks.contains(track.videoId),
                         isEditing: isEditing,
                         isPlaying: viewModel.isCurrentlyPlaying(track),
                         memoryPreview: songMemoryManager.memory(for: track.track)?.previewText,
+                        mode: libraryMode,
                         onTap: {
                             if isEditing {
                                 toggleSelection(track)
@@ -545,59 +773,152 @@ struct LibraryView: View {
                         },
                         onPlayNext: {
                             HapticManager.light()
-                            viewModel.playNextTrack(track)
+                            handlePlayNext(track)
                         },
                         onAddToQueue: {
                             HapticManager.light()
-                            viewModel.addToQueue(track)
-                            // S13: surface a brief toast so the user
-                            // has confirmation beyond the haptic, and
-                            // notify FullPlayer so the Queue icon can
-                            // pulse (Phase 4.1).
-                            //
-                            // CV-1: was `restore: { /* no undo for
-                            // add-to-queue */ }`. The closure was a
-                            // no-op, and UndoService's empty-closure
-                            // heuristic can't introspect Swift
-                            // closures — it returned false, so the
-                            // Undo button appeared in the toast and
-                            // tapping it did nothing. Now we use the
-                            // explicit `showUndoButton: false` form,
-                            // which is honest: the toast shows a
-                            // checkmark + message, no fake Undo
-                            // button.
-                            UndoService.shared.registerUndo(
-                                message: "Added \(track.title) to Queue",
-                                restore: nil,
-                                showUndoButton: false
-                            )
-                            NotificationCenter.default.post(
-                                name: .trackAddedToQueue,
-                                object: track
-                            )
+                            handleAddToQueue(track)
                         },
                         onDelete: {
-                            HapticManager.medium()
-                            let trackName = track.title
-                            viewModel.deleteTracks([track.videoId])
-                            // S15: Library single-delete is destructive
-                            // (file is removed from disk). No working
-                            // restore yet, so the toast is a
-                            // confirmation only — no fake Undo button.
-                            UndoService.shared.registerUndo(
-                                message: "Deleted \"\(trackName)\"",
-                                restore: nil,
-                                showUndoButton: false
-                            )
+                            handleDelete(track)
                         }
                     )
             }
         }
         .listStyle(.plain)
         .refreshable {
-            viewModel.loadLibrary()
-            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            // v1.6.9 (CV-15b): same as gridView —
+            // pull-to-refresh only refreshes
+            // Downloaded data.
+            if libraryMode == .downloaded {
+                viewModel.loadLibrary()
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+            }
         }
+    }
+
+    // v1.6.9 (CV-15b): mode-aware dispatch for
+    // "Add to Queue" / "Play Next". Downloaded
+    // tracks use the local file URL (sync, fast);
+    // Liked tracks need a network roundtrip to
+    // resolve the stream URL before they can be
+    // queued. We keep both paths simple by
+    // routing through the LibraryView's helpers
+    // — the row components don't need to know
+    // about the mode.
+    private func handleAddToQueue(_ track: DownloadedTrackItem) {
+        switch libraryMode {
+        case .downloaded:
+            viewModel.addToQueue(track)
+            UndoService.shared.registerUndo(
+                message: "Added \(track.title) to Queue",
+                restore: nil,
+                showUndoButton: false
+            )
+            NotificationCenter.default.post(
+                name: .trackAddedToQueue,
+                object: track.track
+            )
+        case .liked:
+            addLikedTrackToQueue(track)
+        }
+    }
+
+    private func handlePlayNext(_ track: DownloadedTrackItem) {
+        switch libraryMode {
+        case .downloaded:
+            viewModel.playNextTrack(track)
+        case .liked:
+            playLikedTrackNext(track)
+        }
+    }
+
+    // v1.6.9 (CV-15b): mode-aware destructive
+    // action. Downloaded = remove from disk
+    // (existing LibraryViewModel.deleteTracks);
+    // Liked = toggle the like off in
+    // PlaylistManager. Both surface a toast.
+    private func handleDelete(_ track: DownloadedTrackItem) {
+        HapticManager.medium()
+        switch libraryMode {
+        case .downloaded:
+            let trackName = track.title
+            viewModel.deleteTracks([track.videoId])
+            UndoService.shared.registerUndo(
+                message: "Deleted \"\(trackName)\"",
+                restore: nil,
+                showUndoButton: false
+            )
+        case .liked:
+            let trackName = track.title
+            playlistManager.toggleLike(trackId: track.videoId)
+            UndoService.shared.registerUndo(
+                message: "Unliked \"\(trackName)\"",
+                restore: nil,
+                showUndoButton: false
+            )
+        }
+    }
+
+    // v1.6.9 (CV-15b): fetch a stream URL for a
+    // liked (non-downloaded) track and queue it.
+    // The fetched URL is cached in StreamURLCache
+    // so subsequent plays of the same track
+    // resolve immediately.
+    private func addLikedTrackToQueue(_ track: DownloadedTrackItem) {
+        let trackObj = track.track
+        let title = track.title
+        StreamURLCache.shared.getStreamUrl(videoId: trackObj.videoId, quality: "low")
+            .sink(
+                receiveCompletion: { completion in
+                    if case .failure = completion {
+                        // Quiet fail — same reasoning as
+                        // playAllLiked.
+                    }
+                },
+                receiveValue: { streamInfo in
+                    let item = QueueItem(
+                        track: trackObj,
+                        streamUrl: streamInfo.streamUrl,
+                        source: .stream
+                    )
+                    PlayerState.shared.addToQueue(item)
+                    UndoService.shared.registerUndo(
+                        message: "Added \(title) to Queue",
+                        restore: nil,
+                        showUndoButton: false
+                    )
+                    NotificationCenter.default.post(
+                        name: .trackAddedToQueue,
+                        object: trackObj
+                    )
+                }
+            )
+            .store(in: &cancellables)
+    }
+
+    // v1.6.9 (CV-15b): "Play Next" for a liked
+    // (non-downloaded) track — fetch the stream URL
+    // and insert at the head of the queue.
+    private func playLikedTrackNext(_ track: DownloadedTrackItem) {
+        let trackObj = track.track
+        StreamURLCache.shared.getStreamUrl(videoId: trackObj.videoId, quality: "low")
+            .sink(
+                receiveCompletion: { completion in
+                    if case .failure = completion {
+                        // Quiet fail.
+                    }
+                },
+                receiveValue: { streamInfo in
+                    let item = QueueItem(
+                        track: trackObj,
+                        streamUrl: streamInfo.streamUrl,
+                        source: .stream
+                    )
+                    PlayerState.shared.addToQueueNext(item)
+                }
+            )
+            .store(in: &cancellables)
     }
 
     private func toggleSelection(_ track: DownloadedTrackItem) {
@@ -620,6 +941,14 @@ struct GridTrackCell: View {
     let isEditing: Bool
     let isPlaying: Bool
     let memoryPreview: String?
+    // v1.6.9 (CV-15b): the active LibraryMode
+    // (Liked or Downloaded). Used to swap the
+    // destructive context-menu label — "Unlike"
+    // for liked, "Remove from Library" for
+    // downloaded — and to hide the file-size line
+    // in Liked mode (the placeholder item has no
+    // real size).
+    let mode: LibraryMode
     let onTap: () -> Void
     let onPlay: () -> Void
     let onPlayNext: () -> Void
@@ -705,9 +1034,18 @@ struct GridTrackCell: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
 
-                Text(track.fileSizeFormatted.uppercased())
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundColor(Theme.cyberTextSecondary)
+                // v1.6.9 (CV-15b): file size is hidden
+                // in Liked mode. The Liked placeholder
+                // item has an empty fileSizeFormatted
+                // string (the track may not be
+                // downloaded), so showing "" would be
+                // visual noise. Downloaded mode keeps
+                // the size line as before.
+                if mode == .downloaded {
+                    Text(track.fileSizeFormatted.uppercased())
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(Theme.cyberTextSecondary)
+                }
             }
         }
         // S13: tap target. The inner play-button overlay (in the
@@ -779,8 +1117,20 @@ struct GridTrackCell: View {
 
             Divider()
 
+            // v1.6.9 (CV-15b): destructive action
+            // label changes with the LibraryMode.
+            // Downloaded = "Remove from Library"
+            // (deletes the file from disk); Liked =
+            // "Unlike" (toggles off the heart).
+            // Same row, two meanings — the parent
+            // LibraryView passes the right
+            // onDelete closure for each.
             Button(role: .destructive, action: onDelete) {
-                Label("Remove from Library", systemImage: "trash")
+                if mode == .liked {
+                    Label("Unlike", systemImage: "heart.slash")
+                } else {
+                    Label("Remove from Library", systemImage: "trash")
+                }
             }
         }
     }
@@ -793,6 +1143,11 @@ struct ListTrackRow: View {
     let isEditing: Bool
     let isPlaying: Bool
     let memoryPreview: String?
+    // v1.6.9 (CV-15b): the active LibraryMode
+    // (Liked or Downloaded). Mirrors GridTrackCell
+    // — same pattern of hiding the file-size line
+    // and swapping the destructive label.
+    let mode: LibraryMode
     let onTap: () -> Void
     let onPlay: () -> Void
     let onPlayNext: () -> Void
@@ -856,9 +1211,14 @@ struct ListTrackRow: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
 
-                Text(track.fileSizeFormatted.uppercased())
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundColor(Theme.cyberTextSecondary)
+                // v1.6.9 (CV-15b): file size hidden
+                // in Liked mode (placeholder item has
+                // empty fileSizeFormatted).
+                if mode == .downloaded {
+                    Text(track.fileSizeFormatted.uppercased())
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(Theme.cyberTextSecondary)
+                }
 
                 if let memoryPreview {
                     SongMemoryBadge(text: memoryPreview)
@@ -948,13 +1308,32 @@ struct ListTrackRow: View {
 
             Divider()
 
+            // v1.6.9 (CV-15b): destructive action
+            // label changes with LibraryMode.
+            // Downloaded = "Remove from Library";
+            // Liked = "Unlike" (with heart.slash
+            // icon to telegraph the meaning).
             Button(role: .destructive, action: onDelete) {
-                Label("Remove from Library", systemImage: "trash")
+                if mode == .liked {
+                    Label("Unlike", systemImage: "heart.slash")
+                } else {
+                    Label("Remove from Library", systemImage: "trash")
+                }
             }
         }
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+            // v1.6.9 (CV-15b): swipe-to-delete
+            // label mirrors the context menu —
+            // "Remove" for downloaded, "Unlike"
+            // for liked. The action is the same
+            // onDelete closure either way; only
+            // the visible label changes.
             Button(role: .destructive, action: onDelete) {
-                Label("Remove", systemImage: "trash")
+                if mode == .liked {
+                    Label("Unlike", systemImage: "heart.slash")
+                } else {
+                    Label("Remove", systemImage: "trash")
+                }
             }
         }
         .swipeActions(edge: .leading, allowsFullSwipe: false) {

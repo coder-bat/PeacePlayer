@@ -582,11 +582,17 @@ struct CyberpunkTabBar: View {
                 }
             }
         }
-        // v1.6.8 (CV-13 + CV-14): pill widened from 180pt
-        // to 220pt to fit 3 icons (Home, Library, Search)
-        // at the same 60pt-per-column size the previous
-        // 3-icon layout (Home, Liked, Library) used.
-        .frame(width: 220, height: 60)  // fixed-size floating pill (S7d: 56→60 to match mini player)
+        // v1.6.9 (CV-15a): pill narrowed from 220pt back to
+        // 180pt. With 3 icons (Home, Library, Search) at
+        // 180pt, each icon gets a 60pt column — the same
+        // per-icon size the previous 3-icon layout (Home,
+        // Liked, Library) used. The 40pt the pill gave
+        // back goes to the mini player: when a track is
+        // playing, the mini player is 40pt wider, which
+        // buys roughly 10 more characters of title text
+        // at 12pt. Mini player + tab pill still share
+        // the same 60pt height (see BottomBar).
+        .frame(width: 180, height: 60)  // fixed-size floating pill (S7d: 56→60 to match mini player)
         .background(
             ZStack {
                 // S15: respect accessibilityReduceTransparency.
