@@ -314,20 +314,45 @@ struct FullPlayer: View {
 
     // MARK: - Portrait Layout
     private var portraitContent: some View {
-        // 2026-06-28 (S7): even vertical distribution. Replace the
-        // ScrollView with a fixed VStack + Spacers so the full screen
-        // is covered evenly (artwork, track info, scrubber,
-        // playback controls, volume, more actions) instead of
-        // everything bunched at the top.
+        // v1.6.10 (CV-16a): hero now starts at the very
+        // top of the screen. The dismiss handle (centered
+        // capsule) and the chevron (top-left) float on
+        // top of the artwork via a ZStack overlay, instead
+        // of being a separate row above it. The artwork
+        // gets the full screen width (it was full width
+        // before, but the previous topBar was eating
+        // ~44pt of vertical space at the top — moving it
+        // onto the hero reclaims that area for the
+        // artwork and visually makes the player feel
+        // more "full screen"). A subtle dark gradient at
+        // the top of the hero keeps the handle and
+        // chevron readable over any poster color.
         VStack(spacing: 0) {
-            topBar
-
-            VStack(spacing: 0) {
-                Spacer(minLength: 8)
+            // Hero at the very top, full width.
+            // topBar floats on top via overlay.
+            ZStack(alignment: .top) {
                 artworkSection
                     .layoutPriority(1)
-                Spacer(minLength: 16)
+                topBar
+                    // Subtle dark gradient under the
+                    // topBar so the handle + chevron stay
+                    // readable on light posters.
+                    .background(
+                        VStack {
+                            LinearGradient(
+                                colors: [Color.black.opacity(0.55), Color.clear],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                            .frame(height: 64)
+                            Spacer()
+                        }
+                        .allowsHitTesting(false)
+                    )
+            }
 
+            VStack(spacing: 0) {
+                Spacer(minLength: 16)
                 trackInfoSection
                 Spacer(minLength: 16)
 
@@ -344,7 +369,7 @@ struct FullPlayer: View {
                 moreActionsRow
                 Spacer(minLength: 8)
             }
-            .padding(.horizontal, 24)
+            .padding(.horizontal, 20)
             .padding(.bottom, 32)
         }
     }
@@ -502,10 +527,25 @@ struct FullPlayer: View {
         // read the size of the actual container via GeometryReader
         // so the artwork adapts to whatever width the player
         // gets (sheet, half-sheet, full screen, iPad split).
+        //
+        // v1.6.10 (CV-16a): the artwork now lives at the
+        // very top of the portrait layout (no topBar
+        // above it). The previous `.padding(.horizontal,
+        // -24)` that pushed the artwork past the inner
+        // VStack's 24pt padding is no longer needed —
+        // the artwork is now in its own ZStack directly
+        // inside the outer VStack, so it naturally
+        // fills the full screen width. We also tightened
+        // the diagonal slash from 40pt to 24pt: the
+        // previous 40pt drop made the right side of the
+        // hero look "missing" (user reported the hero
+        // felt ~80% width), and a 24pt slash is enough
+        // to keep the cyberpunk diagonal aesthetic
+        // without making the hero feel narrow.
         GeometryReader { geo in
             let w = geo.size.width
             let h = w * 0.68          // ~3:2 panoramic — room for album art without going too flat
-            let slash: CGFloat = 40   // diagonal drop: right side is 40pt higher than left
+            let slash: CGFloat = 24   // diagonal drop: right side is 24pt higher than left (was 40pt)
 
             return ZStack {
                 // Artwork layer (poster — the static album art)
@@ -610,8 +650,11 @@ struct FullPlayer: View {
             .scaleEffect(likePulse ? 1.025 : 1.0)
             .animation(reduceMotion ? .none : .spring(response: 0.4, dampingFraction: 0.75), value: artworkMode)
             .animation(reduceMotion ? .none : .spring(response: 0.25, dampingFraction: 0.7), value: likePulse)
-            // Extend past the parent VStack's 24pt horizontal padding to go edge-to-edge
-            .padding(.horizontal, -24)
+            // v1.6.10 (CV-16a): no longer need to extend
+            // past parent padding — the artwork is now in
+            // its own ZStack directly inside the outer
+            // VStack, so it naturally fills the full
+            // screen width.
             .onTapGesture(count: 2) {
                 // S17-H / FORMAT-18-FAST: was
                 // `if !showingVisualizer` — only the poster
@@ -1548,7 +1591,14 @@ struct ArtworkBackground: View {
 
 /// Full clip shape: sharp edges, diagonal bottom slash (left low → right high, i.e. /)
 struct CyberpunkHeroShape: Shape {
-    var slashDrop: CGFloat = 40
+    // v1.6.10 (CV-16a): tightened from 40 to 24.
+    // The 40pt drop made the right side of the hero
+    // feel visually missing when the user saw the
+    // full-screen player; 24pt is enough to keep the
+    // cyberpunk diagonal aesthetic without making the
+    // hero feel narrow. See the comment in
+    // artworkSection for the reasoning.
+    var slashDrop: CGFloat = 24
 
     func path(in rect: CGRect) -> Path {
         var path = Path()
@@ -1563,7 +1613,9 @@ struct CyberpunkHeroShape: Shape {
 
 /// Just the bottom diagonal — used for the glowing cyan accent stroke
 struct CyberpunkDiagonalEdge: Shape {
-    var slashDrop: CGFloat = 40
+    // v1.6.10 (CV-16a): match CyberpunkHeroShape's
+    // tightened slash. See comment above.
+    var slashDrop: CGFloat = 24
 
     func path(in rect: CGRect) -> Path {
         var path = Path()

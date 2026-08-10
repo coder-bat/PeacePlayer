@@ -30,10 +30,29 @@ struct SearchView: View {
         // so the Search tab's chrome (custom search bar header +
         // toolbar) is consistent with the rest of the app's iOS 16+
         // patterns.
+        //
+        // v1.6.10 (CV-16b + CV-16c): the header
+        // (title + search input + chips) is now
+        // left/right-aligned at 16pt — the same as
+        // the rest of the content in the results
+        // list. Previously the filter chips had a
+        // 4pt horizontal padding (via the
+        // ScrollView's `.padding(.horizontal, 4)`)
+        // which made them visibly indented compared
+        // to the title and search input. Also: the
+        // chips no longer wrap in a `Section { }` —
+        // the Section added a default row separator
+        // (the divider the user saw under the chips).
+        // We now use the ScrollView directly as a
+        // List row with `.listRowSeparator(.hidden)`
+        // to kill the divider. Spacing between the
+        // input and the chips, and between the chips
+        // and the first song row, is unified at
+        // 16pt via `listRowInsets`.
         NavigationStack {
             VStack(spacing: 0) {
                 // Custom header + search bar
-                VStack(spacing: 12) {
+                VStack(spacing: 16) {
                     HStack {
                         Text("Search")
                             .font(.system(size: 24, weight: .bold, design: .monospaced))
@@ -41,7 +60,7 @@ struct SearchView: View {
                             .shadow(color: Color.cyberCyan.opacity(0.5), radius: 10, x: 0, y: 0)
                         Spacer()
                     }
-                    .padding(.horizontal)
+                    .padding(.horizontal, 16)
 
                     // Cyberpunk search input
                     HStack(spacing: 12) {
@@ -91,7 +110,7 @@ struct SearchView: View {
                             )
                     )
                     .cornerRadius(CornerRadius.md)
-                    .padding(.horizontal)
+                    .padding(.horizontal, 16)
                     .animation(.easeInOut(duration: 0.2), value: isSearchFocused)
                 }
                 .padding(.top, 8)
@@ -170,28 +189,41 @@ struct SearchView: View {
         // (so the default row separator doesn't visually touch the
         // chip capsules). 16pt top / 16pt bottom after a 10/10
         // first pass was still too tight.
+        // v1.6.10 (CV-16b + CV-16c): the chips are no longer
+        // wrapped in a Section { } — the Section added a
+        // default row separator (the divider the user saw
+        // under the chips). We use the ScrollView directly
+        // as a List row with `.listRowSeparator(.hidden)`
+        // to kill both the top and bottom separator. The
+        // chip strip's own padding is now 16pt (matching
+        // the title and search input), and the 16pt
+        // top/bottom via `listRowInsets` stays — so the
+        // gap above the chips (from the search input) and
+        // the gap below the chips (to the first song row)
+        // are both exactly 16pt.
         List {
-            // Filter Chips
-            Section {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 12) {
-                        ForEach(SearchFilter.allCases) { filter in
-                            FilterChip(
-                                title: filter.rawValue,
-                                count: resultCount(for: filter),
-                                isSelected: viewModel.activeFilter == filter
-                            ) {
-                                withAnimation(.spring()) {
-                                    viewModel.activeFilter = filter
-                                }
+            // Filter Chips (no Section wrapper — kills the
+            // default row separator that previously appeared
+            // as a divider under the chips).
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 12) {
+                    ForEach(SearchFilter.allCases) { filter in
+                        FilterChip(
+                            title: filter.rawValue,
+                            count: resultCount(for: filter),
+                            isSelected: viewModel.activeFilter == filter
+                        ) {
+                            withAnimation(.spring()) {
+                                viewModel.activeFilter = filter
                             }
                         }
                     }
-                    .padding(.horizontal, 4)
                 }
-                .listRowInsets(EdgeInsets(top: 16, leading: 0, bottom: 16, trailing: 0))
-                .listRowBackground(Color.clear)
+                .padding(.horizontal, 16)
             }
+            .listRowInsets(EdgeInsets(top: 16, leading: 0, bottom: 16, trailing: 0))
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
 
             // Songs Section
             if shouldShowSongs {
