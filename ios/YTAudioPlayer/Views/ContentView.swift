@@ -56,22 +56,17 @@ struct ContentView: View {
             TabView(selection: $selectedTab) {
                 HomeView()
                     .tag(0)
+                // v1.6.8 (CV-14): Search is now a real tab,
+                // reached via the magnifying-glass icon at the
+                // rightmost position in the bottom-bar pill.
+                // The Home header's search chip is removed.
                 SearchView(viewModel: searchViewModel)
                     .tag(1)
-                // S18 / v1.6.1: Liked Songs is now a real tab
-                // (tag 2), not a sheet. The heart icon in the
-                // bottom bar switches to this tab just like Home
-                // and Library — the user wanted consistent
-                // navigation chrome across all three. The view
-                // mirrors the pushed destination pattern (custom
-                // header + PlaylistDetailView) so the look is the
-                // same as the previous sheet, just presented as a
-                // tab. Tag 1 is still reserved for Search (the
-                // bottom bar only shows 3 of the 4 tabs, the Search
-                // tab is reached via the magnifying-glass chip on
-                // Home).
-                LikedSongsView()
-                    .tag(2)
+                // v1.6.8 (CV-13): Liked Songs is no longer a
+                // tab. It lives as a featured card at the top
+                // of Library (opens as a sheet). Tag 2 is
+                // intentionally skipped — kept available in
+                // case a future feature wants it.
                 LibraryView()
                     .tag(3)
             }
@@ -400,7 +395,17 @@ struct BottomBar: View {
     // than the mini player. With 58pt the shadow's effective
     // height is roughly 60pt (matches the mini player's
     // visible height) and the row reads as a single unit.
-    private let rowHeight: CGFloat = 58
+    //
+    // v1.6.8 (CV-12): bat-phone user reported the mini
+    // player reads ~2pt taller than the nav pill. The
+    // mismatch came from the BottomBar's outer frame at
+    // 58pt clipping MiniPlayer's inner 60pt frame to 58,
+    // so the tab bar (60pt) ended up 2pt taller than the
+    // mini player. Bumping rowHeight to 60 lets both
+    // pills be 60pt visible; the row outer (rowHeight+4
+    // = 64) gives 2pt of breathing room above and
+    // below, so the row still reads as a single unit.
+    private let rowHeight: CGFloat = 60
     private let collapsedWidth: CGFloat = 44
     @State private var isCollapsed: Bool = false
     @State private var dragOffset: CGFloat = 0
@@ -538,15 +543,22 @@ struct CyberpunkTabBar: View {
         let tag: Int
     }
 
-    // S18 / v1.6.1: Liked Songs is now a real tab (tag 2), not
-    // a sheet. The heart icon in the pill switches to the Liked
-    // Songs tab exactly like Home and Library — uniform bottom-
-    // bar navigation. Tag 1 is reserved for Search (reached via
-    // the magnifying-glass chip on Home, not the bottom bar).
+    // v1.6.8 (CV-13 + CV-14):
+    //   - Liked Songs is no longer a tab — it lives as a
+    //     featured card at the top of Library (opens as a
+    //     sheet). Removes the heart icon from the pill
+    //     so the bottom bar has one fewer item.
+    //   - Search is now a real tab (tag 1) at the
+    //     rightmost position in the pill. The Home
+    //     header used to host the magnifying glass;
+    //     that chip is gone. The pill grew from 2 → 3
+    //     icons; we widened the pill from 180pt to
+    //     200pt so each icon still has the same 60pt
+    //     column to live in.
     private let tabs: [TabDef] = [
-        TabDef(icon: "house.fill",            label: "Home",     tag: 0),
-        TabDef(icon: "heart.fill",            label: "Liked",    tag: 2),
-        TabDef(icon: "music.note.house.fill", label: "Library",  tag: 3),
+        TabDef(icon: "house.fill",            label: "Home",    tag: 0),
+        TabDef(icon: "music.note.house.fill", label: "Library", tag: 3),
+        TabDef(icon: "magnifyingglass",       label: "Search",  tag: 1),
     ]
 
     var body: some View {
@@ -570,7 +582,11 @@ struct CyberpunkTabBar: View {
                 }
             }
         }
-        .frame(width: 180, height: 60)  // fixed-size floating pill (S7d: 56→60 to match mini player)
+        // v1.6.8 (CV-13 + CV-14): pill widened from 180pt
+        // to 220pt to fit 3 icons (Home, Library, Search)
+        // at the same 60pt-per-column size the previous
+        // 3-icon layout (Home, Liked, Library) used.
+        .frame(width: 220, height: 60)  // fixed-size floating pill (S7d: 56→60 to match mini player)
         .background(
             ZStack {
                 // S15: respect accessibilityReduceTransparency.

@@ -2,72 +2,61 @@
 //  LikedSongsView.swift
 //  PeacePlayer
 //
-//  S18 / v1.6.1
+//  v1.6.8 (CV-13): Liked Songs is no longer its own tab —
+//  it lives as a featured card at the top of Library. The
+//  content of the Liked Songs screen (custom header +
+//  PlaylistDetailView) is extracted into `LikedSongsContent`
+//  so LibraryView can push it onto its own NavigationStack
+//  without a nested NavigationStack. `LikedSongsView` is
+//  kept as a thin wrapper that hosts the content in its own
+//  stack — used as a fallback if a future surface needs to
+//  present Liked Songs standalone (e.g. a search-result
+//  jump-to).
 //
-//  The Liked Songs tab. Shown when the user taps the heart icon
-//  in the bottom bar (CyberpunkTabBar's tag-2 entry). Wraps the
-//  Liked Songs smart playlist's PlaylistDetailView in a custom
-//  header so the tab feels consistent with the other pushed
-//  destinations (Radio, Anti-Algorithm) — same monospaced title
-//  font, same back-chevron / icon rhythm — while still being
-//  presented as a tab in the TabView.
-//
-//  The previous v1.6.0 design presented this as a sheet at the
-//  app root (via .openLikedSongs notification). The user
-//  preferred a real tab so the bottom-bar navigation is uniform:
-//  Home / Liked / Library all behave the same way.
+//  History:
+//  S18 / v1.6.1 — Liked Songs became a real tab (was a
+//  sheet at the app root).
+//  v1.6.8 — Liked Songs merged into Library.
 //
 
 import SwiftUI
 
-struct LikedSongsView: View {
+struct LikedSongsContent: View {
     @StateObject private var playlistManager = PlaylistManager.shared
 
     var body: some View {
-        // Same chrome as the other destination screens: a
-        // NavigationStack wrapping the custom header + the
-        // playlist detail. The NavigationStack here exists so
-        // tapping a track or the playlist's context menu can
-        // push a sub-screen (PlaylistDetailView's existing
-        // behavior) — not because the Liked Songs view itself
-        // is pushed onto a parent stack.
-        NavigationStack {
-            ZStack(alignment: .top) {
-                Theme.cyberBackground.ignoresSafeArea()
+        ZStack(alignment: .top) {
+            Theme.cyberBackground.ignoresSafeArea()
 
-                VStack(spacing: 0) {
-                    customHeader
+            VStack(spacing: 0) {
+                customHeader
 
-                    if let liked = playlistManager.playlists
-                        .first(where: { $0.isLikedSongsPlaylist }) {
-                        // S18 / v1.6.2: hide the chevron.down dismiss
-                        // button. The PlaylistDetailView's sticky nav
-                        // bar includes a dismiss chevron by default for
-                        // its sheet use case; in the Liked Songs tab
-                        // there's no parent sheet to dismiss, and the
-                        // user switches tabs via the bottom bar. The
-                        // title + edit menu (if any) still show.
-                        PlaylistDetailView(
-                            playlist: liked,
-                            showsDismissButton: false
-                        )
-                    } else {
-                        // Fallback if the smart playlist hasn't
-                        // seeded yet. Should be rare — see the
-                        // matching fallback in the previous sheet
-                        // presentation, same reasoning applies.
-                        LikedSongsEmptyState()
-                    }
+                if let liked = playlistManager.playlists
+                    .first(where: { $0.isLikedSongsPlaylist }) {
+                    // v1.6.2: hide the chevron.down dismiss
+                    // button. The PlaylistDetailView's sticky
+                    // nav bar includes a dismiss chevron by
+                    // default for its sheet use case; in the
+                    // Liked Songs flow (now pushed from
+                    // Library) there's no parent sheet to
+                    // dismiss, and the user navigates back
+                    // via the back button in Library's
+                    // NavigationStack.
+                    PlaylistDetailView(
+                        playlist: liked,
+                        showsDismissButton: false
+                    )
+                } else {
+                    LikedSongsEmptyState()
                 }
             }
-            .toolbar(.hidden, for: .navigationBar)
         }
     }
 
     // S18 / v1.6.1: matches the AntiAlgorithmScreen + RadioView
-    // headers — 22-24pt monospaced title, dim subtitle, no system
-    // nav bar. The heart icon in the bottom bar provides
-    // navigation back to other tabs.
+    // headers — 22-24pt monospaced title, dim subtitle, no
+    // system nav bar (the parent NavigationStack supplies the
+    // back button when Liked Songs is pushed from Library).
     private var customHeader: some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
@@ -83,6 +72,15 @@ struct LikedSongsView: View {
         .padding(.horizontal, 20)
         .padding(.top, 16)
         .padding(.bottom, 8)
+    }
+}
+
+struct LikedSongsView: View {
+    var body: some View {
+        NavigationStack {
+            LikedSongsContent()
+                .toolbar(.hidden, for: .navigationBar)
+        }
     }
 }
 

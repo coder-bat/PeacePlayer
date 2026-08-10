@@ -62,6 +62,13 @@ struct MiniPlayer: View {
         // height (60pt). Without this the CachedAsyncImage's
         // intrinsic content size + the .blur + .opacity modifiers
         // pushed the ZStack ~2pt taller than the tab pill.
+        //
+        // v1.6.8 (CV-12): BottomBar.rowHeight is now 60 (was
+        // 58) so the tab pill and mini player are both 60pt
+        // visible. The bottom bar's outer frame is 64pt
+        // (rowHeight + 4 breathing room) so the two pills are
+        // vertically centered with 2pt of padding above and
+        // below.
         ZStack {
             // S17-H / FORMAT-18-FAST (2026-08-07): when the
             // current AVPlayer has a video track (format 18

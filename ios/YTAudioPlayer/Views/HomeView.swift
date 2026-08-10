@@ -307,21 +307,22 @@ struct HomeView: View {
 
             Spacer()
 
-            // Top-right nav icons: Search, Radio, Playlists, Settings
-            // S14: each chip is wrapped in either a Button (Search, for
-            // a side-effect) or a NavigationLink (Radio / Playlists /
-            // Settings, to push into Home's stack). CyberIconChip is
-            // a pure visual so the outer wrapper's gesture handler
-            // fires reliably — previously the inner Button wrapper
+            // Top-right nav icons.
+            // v1.6.8 (CV-14): the Search chip is removed.
+            // Search is now the rightmost icon in the bottom
+            // navbar pill (CyberpunkTabBar tag 1) — having it
+            // in two places was redundant. The remaining
+            // chips (Time Capsule, Anti-Algorithm, Radio,
+            // Playlists, Settings) all push into Home's
+            // NavigationStack via NavigationLink(value:).
+            // S14: each chip is wrapped in either a Button
+            // (Search, for a side-effect) or a NavigationLink
+            // (Radio / Playlists / Settings, to push into
+            // Home's stack). CyberIconChip is a pure visual
+            // so the outer wrapper's gesture handler fires
+            // reliably — previously the inner Button wrapper
             // ate the tap and the NavigationLink never fired.
             HStack(spacing: 8) {
-                Button {
-                    NotificationCenter.default.post(name: .switchTab, object: 1)
-                } label: {
-                    CyberIconChip(icon: "magnifyingglass")
-                }
-                .buttonStyle(.plain)
-
                 // S18 / P1-1: distinctive features get their own
                 // chips with a subtle accent. Time Capsule was only
                 // reachable via a long-press in FullPlayer;

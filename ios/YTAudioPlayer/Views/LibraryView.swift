@@ -29,10 +29,25 @@ enum LibrarySortOption: String, CaseIterable, Identifiable {
     }
 }
 
+// v1.6.8 (CV-13): Library's NavigationStack kept around for
+// future "Albums" / "Recently Added" pushes, but Liked Songs
+// is presented as a sheet (same pattern as PlaylistsView) to
+// avoid nested NavigationStacks — PlaylistDetailView already
+// owns its own NavigationStack, and stacking a third one
+// inside Library's would produce 3 layers of nav chrome.
+enum LibraryDestination: Hashable {
+    case likedSongs
+}
+
 struct LibraryView: View {
     @StateObject private var viewModel = LibraryViewModel()
     @StateObject private var playerState = PlayerState.shared
     @StateObject private var songMemoryManager = SongMemoryManager.shared
+    // v1.6.8 (CV-13): Library now hosts the Liked Songs
+    // entry point. PlaylistManager is observed so the
+    // card's track count updates the moment a track is
+    // liked / unliked from anywhere in the app.
+    @StateObject private var playlistManager = PlaylistManager.shared
     @ObservedObject var undoService = UndoService.shared
     @State private var viewMode: LibraryViewMode = .grid
     @State private var showStorageInfo = false
@@ -40,11 +55,19 @@ struct LibraryView: View {
     @State private var selectedTracks: Set<String> = []
     @State private var isEditing = false
     @State private var searchQuery = ""
+    // v1.6.8 (CV-13): featured Liked Songs card opens
+    // this sheet. Same `.sheet` pattern PlaylistsView
+    // uses for PlaylistDetailView — one modal layer
+    // over the tab content, no nested NavigationStacks.
+    @State private var showLikedSongs = false
 
     var body: some View {
         // S14: NavigationStack replaces the deprecated NavigationView
         // so the Library tab's chrome (DONE/DELETE toolbar in edit
         // mode + standard nav bar) is consistent with iOS 16+ patterns.
+        // v1.6.8 (CV-13): Liked Songs opens as a .sheet (below) —
+        // not pushed onto this stack — to avoid nested
+        // NavigationStacks with PlaylistDetailView.
         NavigationStack {
             ZStack {
                 // Cyberpunk background
@@ -193,6 +216,16 @@ struct LibraryView: View {
             .sheet(isPresented: $showDownloadQueue) {
                 DownloadQueueView()
             }
+            // v1.6.8 (CV-13): Liked Songs sheet. Same
+            // pattern PlaylistsView uses to present
+            // PlaylistDetailView — modal over the tab
+            // content, no nested NavigationStack. The
+            // user swipes down to dismiss and they're
+            // back at Library with the Liked Songs
+            // card still at the top of the list.
+            .sheet(isPresented: $showLikedSongs) {
+                LikedSongsView()
+            }
             .alert("DELETE \(selectedTracks.count) TRACKS?", isPresented: $viewModel.showDeleteConfirmation) {
                 Button("CANCEL", role: .cancel) {
                     print("🗑️ Delete cancelled")
@@ -255,6 +288,18 @@ struct LibraryView: View {
             .padding(.top, 8)
             .padding(.bottom, 8)
 
+            // v1.6.8 (CV-13): featured Liked Songs card.
+            // Always shown at the top of Library — visible
+            // even when the downloaded library is empty
+            // (the user might have liked tracks from
+            // radio/discovery without downloading them yet).
+            // Tapping opens a sheet with the Liked Songs
+            // content (PlaylistDetailView for the Liked
+            // Songs smart playlist).
+            likedSongsCard
+                .padding(.horizontal)
+                .padding(.bottom, 12)
+
             // Search bar
             searchBar
                 .padding(.horizontal)
@@ -282,6 +327,84 @@ struct LibraryView: View {
                 listView
             }
         }
+    }
+
+    // v1.6.8 (CV-13): featured Liked Songs entry point.
+    // Magenta-tinted heart icon, track count, and a
+    // chevron to telegraph that it's tappable. Sits at
+    // the top of Library so the user always knows where
+    // their liked tracks are — no separate tab to hunt
+    // for. The count refreshes live because
+    // PlaylistManager is observed above.
+    private var likedSongsCard: some View {
+        Button {
+            HapticManager.light()
+            showLikedSongs = true
+        } label: {
+            HStack(spacing: 14) {
+                // Heart icon in a magenta gradient square
+                ZStack {
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(
+                            LinearGradient(
+                                colors: [Theme.cyberMagenta, Theme.cyberMagenta.opacity(0.6)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 56, height: 56)
+                    Image(systemName: "heart.fill")
+                        .font(.system(size: 26, weight: .bold))
+                        .foregroundColor(.white)
+                        .shadow(color: .black.opacity(0.3), radius: 2)
+                }
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Liked Songs")
+                        .font(.system(size: 17, weight: .bold, design: .monospaced))
+                        .foregroundColor(.white)
+                    Text("\(likedCount) TRACK\(likedCount == 1 ? "" : "S")")
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .foregroundColor(Theme.cyberDim)
+                }
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundColor(Theme.cyberDim)
+            }
+            .padding(12)
+            .background(
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(Theme.cyberSurface)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14)
+                            .stroke(
+                                LinearGradient(
+                                    colors: [
+                                        Theme.cyberMagenta.opacity(0.4),
+                                        Theme.cyberMagenta.opacity(0.1)
+                                    ],
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                ),
+                                lineWidth: 1
+                            )
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    // v1.6.8 (CV-13): count of tracks in the Liked Songs
+    // smart playlist. Read from PlaylistManager (observed
+    // above) so it updates the moment a track is liked or
+    // unliked from anywhere in the app.
+    private var likedCount: Int {
+        playlistManager.playlists
+            .first(where: { $0.isLikedSongsPlaylist })?
+            .trackIds.count ?? 0
     }
 
     // MARK: - Search Bar
