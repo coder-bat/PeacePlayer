@@ -8,121 +8,6 @@
 import SwiftUI
 import Combine
 
-// MARK: - All Recently Played View
-struct AllRecentlyPlayedView: View {
-    @Environment(\.dismiss) private var dismiss
-    @StateObject private var viewModel = HomeViewModel()
-
-    var body: some View {
-        NavigationStack {
-            ZStack {
-                Color.cyberBackground.ignoresSafeArea()
-
-                VStack(spacing: 0) {
-                    // Play / Shuffle action buttons
-                    if !viewModel.recentlyPlayed.isEmpty {
-                        HStack(spacing: Spacing.md) {
-                            Button(action: {
-                                HapticManager.medium()
-                                viewModel.playTrack(viewModel.recentlyPlayed[0])
-                            }) {
-                                HStack(spacing: Spacing.xxs) {
-                                    Image(systemName: "play.fill")
-                                        .font(.system(size: IconSize.sm, weight: .semibold))
-                                    Text("PLAY")
-                                        .font(.system(size: 14, weight: .bold, design: .monospaced))
-                                }
-                                .foregroundColor(Theme.cyberBackground)
-                                .frame(maxWidth: .infinity)
-                                .frame(height: 48)
-                                .background(Theme.cyberCyan)
-                                .cornerRadius(CornerRadius.sm)
-                                .shadow(color: Theme.cyberCyan.opacity(0.5), radius: 12, x: 0, y: 0)
-                            }
-
-                            Button(action: {
-                                HapticManager.medium()
-                                let shuffled = viewModel.recentlyPlayed.shuffled()
-                                viewModel.playTrack(shuffled[0])
-                            }) {
-                                HStack(spacing: Spacing.xxs) {
-                                    Image(systemName: "shuffle")
-                                        .font(.system(size: IconSize.sm, weight: .semibold))
-                                    Text("SHUFFLE")
-                                        .font(.system(size: 14, weight: .bold, design: .monospaced))
-                                }
-                                .foregroundColor(Theme.cyberCyan)
-                                .frame(maxWidth: .infinity)
-                                .frame(height: 48)
-                                .background(Theme.cyberSurface)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: CornerRadius.sm)
-                                        .stroke(Theme.cyberCyan.opacity(0.5), lineWidth: 1)
-                                )
-                                .cornerRadius(CornerRadius.sm)
-                            }
-                        }
-                        .padding(.horizontal, Spacing.md)
-                        .padding(.vertical, Spacing.sm)
-                        .background(Theme.cyberBackground)
-                    }
-
-                    List {
-                        ForEach(viewModel.recentlyPlayed) { track in
-                            Button {
-                                viewModel.playTrack(track)
-                            } label: {
-                                HStack(spacing: 12) {
-                                    CachedAsyncImage(url: track.artworkURL) {
-                                        RoundedRectangle(cornerRadius: 8)
-                                            .fill(Color.cyberDim.opacity(0.3))
-                                    }
-                                    .frame(width: 50, height: 50)
-                                    .clipShape(RoundedRectangle(cornerRadius: 8))
-
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text(track.title)
-                                            .font(.system(size: 16, weight: .medium))
-                                            .foregroundColor(.white)
-                                            .lineLimit(1)
-                                            .minimumScaleFactor(0.8)
-
-                                        Text(track.displayArtist)
-                                            .font(.system(size: 14))
-                                            .foregroundColor(.cyberDim)
-                                            .lineLimit(1)
-                                            .minimumScaleFactor(0.8)
-                                    }
-
-                                    Spacer()
-                                }
-                            }
-                            .buttonStyle(.plain)
-                            .listRowBackground(Color.cyberSurface)
-                        }
-                    }
-                    .listStyle(.plain)
-                    .background(Color.cyberBackground)
-                }
-            }
-            .navigationTitle("Recently Played")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Done") {
-                        dismiss()
-                    }
-                    .foregroundColor(.cyberCyan)
-                }
-            }
-            .onAppear {
-                viewModel.loadData()
-            }
-        }
-        .preferredColorScheme(.dark)
-    }
-}
-
 // S14: Navigation destinations accessible from the Home page header
 // chip cluster. The Home tab owns its own NavigationStack; tapping
 // Settings / Playlists / Radio chips pushes the destination into that
@@ -138,6 +23,12 @@ enum HomeDestination: Hashable {
     // find them, which most users don't.
     case timeCapsule
     case antiAlgorithm
+    // 2026-08-12: "View all" links from the Your Library
+    // section on Home. Pushed onto Home's NavigationStack so the
+    // swipe-from-edge back gesture works (vs. a tab switch,
+    // which loses context).
+    case likedSongs
+    case library
 }
 
 struct HomeView: View {
@@ -145,7 +36,20 @@ struct HomeView: View {
     @StateObject private var viewModel = HomeViewModel()
     @StateObject private var favoriteArtists = FavoriteArtistsManager.shared
     @StateObject private var profile = UserProfile.shared
-    @State private var showAllRecent = false
+    // 2026-08-12: observed here so the Your Library section on
+    // Home updates the moment the user likes / unlikes a track
+    // from FullPlayer, MiniPlayer, or any context menu. Same
+    // pattern as LibraryView (which observes PlaylistManager to
+    // keep its Liked segment in sync).
+    @StateObject private var playlistManager = PlaylistManager.shared
+    // 2026-08-12: separate LibraryViewModel instance so the Home
+    // "Downloaded" sub-section reads CoreData + DownloadManager
+    // changes. Both this and LibraryView's instance hit the same
+    // CoreData store (PersistenceController.shared is a
+    // singleton) so the data is consistent, but each view
+    // owns its own @Published state to avoid cross-view
+    // coupling.
+    @StateObject private var libraryVM = LibraryViewModel()
     @State private var showAddToPlaylistSheet = false
     @State private var showAvatarPicker = false
     @State private var selectedTrack: Track?
@@ -189,8 +93,13 @@ struct HomeView: View {
                                 .padding(.top, 24)
                         }
 
-                        // Recently played - horizontal scroll (with context menu per row)
-                        recentlyPlayedSection
+                        // 2026-08-12: replaced the broken nested-List
+                        // recently played section (which couldn't
+                        // scroll past the bottom) with a "Your
+                        // Library" section containing Liked Songs
+                        // (horizontal) + Downloaded (vertical
+                        // LazyVStack). See issue #1 + #2.
+                        yourLibrarySection
                             .padding(.top, 24)
                             .padding(.bottom, 100)
                     }
@@ -259,6 +168,23 @@ struct HomeView: View {
                     // a custom back button matching the rest of
                     // the S18 design language.
                     AntiAlgorithmScreen()
+                case .likedSongs:
+                    // 2026-08-12: push the content (no inner
+                    // NavigationStack) — nested NavigationStacks
+                    // crash iOS, per the S18 anti-algorithm
+                    // comment above. LikedSongsContent carries
+                    // the custom header + PlaylistDetailView
+                    // (with showsDismissButton: false since we
+                    // now have a back button in the nav stack).
+                    LikedSongsContent()
+                case .library:
+                    // 2026-08-12: LibraryView has its own
+                    // NavigationStack (same as Settings /
+                    // Playlists / Radio above). Accept the nested
+                    // stack here for consistency with the existing
+                    // pattern; the back button in Home's
+                    // NavigationStack works as expected.
+                    LibraryView()
                 }
             }
         }
@@ -266,9 +192,6 @@ struct HomeView: View {
             guard !hasLoaded else { return }
             hasLoaded = true
             viewModel.loadData()
-        }
-        .sheet(isPresented: $showAllRecent) {
-            AllRecentlyPlayedView()
         }
         .sheet(isPresented: $showAvatarPicker) {
             AvatarPickerSheet()
@@ -514,137 +437,266 @@ struct HomeView: View {
         }
     }
 
-    // MARK: - Recently Played
-    private var recentlyPlayedSection: some View {
-        // S13: Previously the entire Recently Played section silently
-        // disappeared when the user had no listening history. New users
-        // saw a wall of mostly-empty sections. Now we show a small
-        // "Get started" empty state instead, suggesting they tap a
-        // search tab to explore.
-        Group {
-            if viewModel.recentlyPlayed.isEmpty {
-                VStack(alignment: .leading, spacing: 16) {
-                    Text("Recently Played")
-                        .font(Typography.sectionHeader)
-                        .foregroundColor(.cyberDim)
-                        .padding(.horizontal, 20)
+    // MARK: - Your Library (replaces Recently Played, 2026-08-12)
+    //
+    // Two sub-sections:
+    //   1. Liked Songs    — horizontal scroll, up to 15 cards
+    //   2. Downloaded     — vertical LazyVStack, up to 15 compact rows
+    //
+    // Both use the same context menu + swipe actions as the old
+    // recently played list (Play / Play Next / Add to Queue / Start
+    // Radio / Add to Playlist / Like-Unlike / Download-Downloaded).
+    // Dedup: a track that's both liked AND downloaded shows only in
+    // the Liked section (Liked is the more "intentional" signal).
+    //
+    // Why a LazyVStack (and not a nested List) for Downloaded:
+    // the previous recently played list was a List inside the parent
+    // ScrollView with scrollDisabled(true) and a hardcoded 64pt per
+    // row. The List's intrinsic size didn't propagate to the parent
+    // scroll region reliably, and the hardcoded row height
+    // undercounted the actual rendered row (~68-72pt), so the bottom
+    // rows got clipped and the parent ScrollView couldn't scroll
+    // past them. LazyVStack sizes to its content correctly.
+    private var yourLibrarySection: some View {
+        // Compute the two arrays here — they're cheap (O(n) where n
+        // is the number of liked/downloaded tracks, typically <100)
+        // and computing in the view body keeps the @StateObject
+        // graph simple. The view re-renders on any change to
+        // playlistManager or libraryVM, which is the reactivity we
+        // want (like from anywhere → updates immediately).
+        let likedIds = Set(playlistManager.likedTracks)
+        let likedOrderedIds: [String] = {
+            if let likedPlaylist = playlistManager.playlists.first(where: { $0.isLikedSongsPlaylist }) {
+                return likedPlaylist.trackIds
+            }
+            return Array(playlistManager.likedTracks)
+        }()
+        // Liked: ordered by most-recently-liked-first (reverse the
+        // playlist's trackIds since the Liked playlist appends new
+        // likes at the end). Matches the LibraryView's Liked mode
+        // ordering (see LibraryView.swift:576-620 likedTracksAsItems).
+        let likedTracks = TrackStore.shared.getTracks(
+            videoIds: Array(likedOrderedIds.reversed())
+        )
+        // Downloaded: from LibraryViewModel (CoreData + file checks),
+        // excluding anything that's also in Liked Songs.
+        let downloadedTracks = libraryVM.tracks
+            .filter { !likedIds.contains($0.videoId) }
+            .map { $0.track }
 
-                    VStack(spacing: 12) {
-                        Image(systemName: "clock.arrow.circlepath")
-                            .font(.system(size: 36, weight: .light))
-                            .foregroundColor(.cyberDim.opacity(0.7))
-                        Text("Nothing here yet")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundColor(.white)
-                        Text("Tracks you play will show up here")
-                            .font(.system(size: 12))
-                            .foregroundColor(Theme.cyberTextSecondary)
-                            .multilineTextAlignment(.center)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 28)
-                    .padding(.horizontal, 20)
-                    .background(
-                        RoundedRectangle(cornerRadius: 12)
-                            .fill(Color.cyberSurface.opacity(0.4))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 12)
-                                    .stroke(Color.cyberDim.opacity(0.2), lineWidth: 1)
-                            )
-                    )
-                    .padding(.horizontal, 20)
-                }
-            } else {
-                let recentTracks = Array(viewModel.recentlyPlayed.prefix(20))
-                VStack(alignment: .leading, spacing: 16) {
-                    HStack {
-                        Text("Recently Played")
-                            .font(Typography.sectionHeader)
-                            .foregroundColor(.cyberDim)
+        return VStack(alignment: .leading, spacing: 24) {
+            // Section header
+            HStack {
+                Text("YOUR LIBRARY")
+                    .font(Typography.sectionHeader)
+                    .foregroundColor(.cyberDim)
 
-                        Spacer()
+                Spacer()
+            }
+            .padding(.horizontal, 20)
 
-                        if viewModel.recentlyPlayed.count > 20 {
-                            Button("View All") {
-                                showAllRecent = true
-                            }
+            // 1. Liked Songs — horizontal cards
+            likedSongsSubsection(likedTracks: likedTracks)
+
+            // 2. Downloaded — vertical compact rows
+            downloadedSubsection(downloadedTracks: downloadedTracks)
+        }
+        .task(id: likedOrderedIds) {
+            // Prefetch the first 5 liked so tapping is snappy.
+            // Same pattern as the old recently played list, but
+            // gated to the visible items (cap of 5 keeps it cheap).
+            StreamURLCache.shared.prefetchBatch(
+                videoIds: likedTracks.prefix(5).map(\.videoId)
+            )
+            StreamURLCache.shared.prefetchBatch(
+                videoIds: downloadedTracks.prefix(5).map(\.videoId)
+            )
+        }
+    }
+
+    // MARK: Liked Songs sub-section
+    @ViewBuilder
+    private func likedSongsSubsection(likedTracks: [Track]) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Liked Songs")
+                    .font(.system(size: 16, weight: .bold, design: .monospaced))
+                    .foregroundColor(.white)
+                Spacer()
+                if !likedTracks.isEmpty {
+                    NavigationLink(value: HomeDestination.likedSongs) {
+                        Text("View All")
                             .font(Typography.eyebrow)
                             .foregroundColor(.cyberCyan)
+                    }
+                }
+            }
+            .padding(.horizontal, 20)
+
+            if likedTracks.isEmpty {
+                // Inline empty state — only the "Liked Songs" header
+                // is hidden visually if the rest of the section is
+                // also empty, but a one-liner nudge stays.
+                HStack(spacing: 10) {
+                    Image(systemName: "heart.slash")
+                        .foregroundColor(.cyberDim)
+                    Text("Tap the heart on any track to add it here")
+                        .font(.system(size: 12))
+                        .foregroundColor(Theme.cyberTextSecondary)
+                    Spacer()
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 12)
+                .background(
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(Color.cyberSurface.opacity(0.4))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10)
+                                .stroke(Color.cyberDim.opacity(0.2), lineWidth: 1)
+                        )
+                )
+                .padding(.horizontal, 20)
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 12) {
+                        ForEach(likedTracks.prefix(15)) { track in
+                            LikedSongCard(
+                                track: track,
+                                isPlaying: playerState.currentItem?.track.videoId == track.videoId
+                                    && playerState.playbackState == .playing,
+                                onPlay: { viewModel.playTrack(track) },
+                                onPlayNext: {
+                                    HapticManager.light()
+                                    viewModel.addToQueue(track)
+                                },
+                                onAddToQueue: {
+                                    HapticManager.light()
+                                    viewModel.addToQueue(track)
+                                },
+                                onAddToPlaylist: {
+                                    HapticManager.light()
+                                    selectedTrack = track
+                                    showAddToPlaylistSheet = true
+                                },
+                                onStartRadio: {
+                                    HapticManager.light()
+                                    NotificationCenter.default.post(
+                                        name: .startSongRadio,
+                                        object: track
+                                    )
+                                }
+                            )
                         }
                     }
                     .padding(.horizontal, 20)
-
-                    recentlyPlayedList(tracks: recentTracks)
                 }
             }
         }
     }
 
+    // MARK: Downloaded sub-section
     @ViewBuilder
-    private func recentlyPlayedList(tracks: [Track]) -> some View {
-        let rowHeight: CGFloat = 64
-        let contentHeight = CGFloat(tracks.count) * rowHeight
-
-        let baseList = List {
-            ForEach(tracks) { track in
-                let isCurrentTrack = playerState.currentItem?.track.videoId == track.videoId
-                let isPlaying = isCurrentTrack && playerState.playbackState == .playing
-                let isLoading = isCurrentTrack && (playerState.playbackState == .loading || playerState.playbackState == .buffering)
-
-                HomeRecentTrackRow(
-                    track: track,
-                    isDownloaded: viewModel.isDownloaded(track),
-                    isPlaying: isPlaying,
-                    isLoading: isLoading,
-                    onPlay: {
-                        viewModel.playTrack(track)
-                    },
-                    onPlayNext: {
-                        HapticManager.light()
-                        viewModel.addToQueue(track)
-                    },
-                    onDownload: {
-                        HapticManager.light()
-                        viewModel.downloadTrack(track)
-                    },
-                    onAddToQueue: {
-                        HapticManager.light()
-                        viewModel.addToQueue(track)
-                    },
-                    onAddToPlaylist: {
-                        HapticManager.light()
-                        selectedTrack = track
-                        showAddToPlaylistSheet = true
-                    },
-                    onStartRadio: {
-                        HapticManager.light()
-                        NotificationCenter.default.post(
-                            name: .startSongRadio,
-                            object: track
-                        )
+    private func downloadedSubsection(downloadedTracks: [Track]) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Downloaded")
+                    .font(.system(size: 16, weight: .bold, design: .monospaced))
+                    .foregroundColor(.white)
+                Spacer()
+                if !downloadedTracks.isEmpty {
+                    NavigationLink(value: HomeDestination.library) {
+                        Text("View All")
+                            .font(Typography.eyebrow)
+                            .foregroundColor(.cyberCyan)
                     }
-                )
-                .listRowInsets(EdgeInsets(top: 4, leading: 20, bottom: 4, trailing: 20))
-                .listRowSeparator(.hidden)
-                .listRowBackground(Color.clear)
+                }
             }
-        }
-        .listStyle(.plain)
-        .environment(\.defaultMinListRowHeight, 1)
-        .frame(height: contentHeight)
+            .padding(.horizontal, 20)
 
-        if #available(iOS 16.0, *) {
-            baseList
-                .scrollContentBackground(.hidden)
-                .scrollDisabled(true)
-                .task(id: tracks.map(\.videoId)) {
-                    StreamURLCache.shared.prefetchBatch(videoIds: tracks.prefix(5).map(\.videoId))
+            if downloadedTracks.isEmpty {
+                HStack(spacing: 10) {
+                    Image(systemName: "arrow.down.circle")
+                        .foregroundColor(.cyberDim)
+                    Text("Download tracks from Search to listen offline")
+                        .font(.system(size: 12))
+                        .foregroundColor(Theme.cyberTextSecondary)
+                    Spacer()
                 }
-        } else {
-            baseList
-                .task(id: tracks.map(\.videoId)) {
-                    StreamURLCache.shared.prefetchBatch(videoIds: tracks.prefix(5).map(\.videoId))
+                .padding(.horizontal, 20)
+                .padding(.vertical, 12)
+                .background(
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(Color.cyberSurface.opacity(0.4))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10)
+                                .stroke(Color.cyberDim.opacity(0.2), lineWidth: 1)
+                        )
+                )
+                .padding(.horizontal, 20)
+            } else {
+                // LazyVStack (NOT a nested List) — the inner List
+                // inside the parent ScrollView was the root cause
+                // of the "cut at the bottom, can't scroll"
+                // bug. LazyVStack sizes to its content correctly
+                // and the parent ScrollView handles all scrolling.
+                LazyVStack(spacing: 0) {
+                    ForEach(downloadedTracks.prefix(15)) { track in
+                        let isCurrentTrack = playerState.currentItem?.track.videoId == track.videoId
+                        let isPlaying = isCurrentTrack && playerState.playbackState == .playing
+                        let isLoading = isCurrentTrack && (playerState.playbackState == .loading || playerState.playbackState == .buffering)
+
+                        HomeRecentTrackRow(
+                            track: track,
+                            isDownloaded: true,  // by construction
+                            isPlaying: isPlaying,
+                            isLoading: isLoading,
+                            onPlay: { viewModel.playTrack(track) },
+                            onPlayNext: {
+                                HapticManager.light()
+                                viewModel.addToQueue(track)
+                            },
+                            onDownload: {
+                                // For downloaded tracks, "Download" in
+                                // the context menu becomes "Remove
+                                // from Library" — but the swipe action
+                                // still calls this. The row UI shows
+                                // the right label based on
+                                // isDownloaded, and the destructive
+                                // action is gated by the LibraryView's
+                                // own delete flow. For now, calling
+                                // downloadTrack on a downloaded track
+                                // is a no-op (DownloadManager
+                                // short-circuits isAlreadyDownloaded).
+                                HapticManager.light()
+                                viewModel.downloadTrack(track)
+                            },
+                            onAddToQueue: {
+                                HapticManager.light()
+                                viewModel.addToQueue(track)
+                            },
+                            onAddToPlaylist: {
+                                HapticManager.light()
+                                selectedTrack = track
+                                showAddToPlaylistSheet = true
+                            },
+                            onStartRadio: {
+                                HapticManager.light()
+                                NotificationCenter.default.post(
+                                    name: .startSongRadio,
+                                    object: track
+                                )
+                            }
+                        )
+                        .padding(.vertical, 4)
+
+                        if track.videoId != downloadedTracks.prefix(15).last?.videoId {
+                            Divider()
+                                .background(Color.cyberDim.opacity(0.15))
+                                .padding(.horizontal, 20)
+                        }
+                    }
                 }
+            }
         }
     }
 
@@ -1280,6 +1332,145 @@ struct CyberButton: View {
     }
 }
 
+// MARK: - Liked Song Card (2026-08-12)
+//
+// Horizontal card for the Liked Songs sub-section on Home. Styled
+// after ArtistSuggestionCard (130x130 artwork + title + artist
+// underneath) but with a magenta heart badge top-right to make
+// the "this is a Liked track" signal visible at a glance. Tap plays;
+// long-press opens the same context menu as the vertical row.
+struct LikedSongCard: View {
+    let track: Track
+    let isPlaying: Bool
+    let onPlay: () -> Void
+    let onPlayNext: () -> Void
+    let onAddToQueue: () -> Void
+    let onAddToPlaylist: () -> Void
+    let onStartRadio: () -> Void
+
+    @StateObject private var playlistManager = PlaylistManager.shared
+
+    private var isLiked: Bool {
+        playlistManager.isLiked(trackId: track.videoId)
+    }
+
+    private var isDownloaded: Bool {
+        DownloadManager.shared.isAlreadyDownloaded(track)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            CachedAsyncImage(url: track.artworkURL) {
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Color.cyberDim.opacity(0.2))
+            }
+            .frame(width: 130, height: 130)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(
+                        LinearGradient(
+                            colors: [Theme.cyberMagenta.opacity(0.7), Theme.cyberCyan.opacity(0.5)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 1.5
+                    )
+            )
+            .shadow(color: Theme.cyberMagenta.opacity(0.25), radius: 8, x: 0, y: 0)
+            .overlay(alignment: .topTrailing) {
+                // Liked indicator — small magenta heart in the
+                // top-right corner. Mirrors the "this is liked"
+                // signal from the heart-filled Liked button, so the
+                // user can see at a glance which section they're
+                // looking at without tapping.
+                Image(systemName: isLiked ? "heart.fill" : "play.fill")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundColor(isLiked ? Theme.cyberMagenta : .white)
+                    .frame(width: 26, height: 26)
+                    .background(
+                        Circle().fill(Color.black.opacity(0.55))
+                    )
+                    .padding(6)
+            }
+            .overlay(alignment: .bottomLeading) {
+                // Playing indicator — equalizer bars when the
+                // track is currently playing in the player.
+                if isPlaying {
+                    CyberPlayingBars()
+                        .frame(width: 22, height: 16)
+                        .padding(8)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6)
+                                .fill(Color.black.opacity(0.55))
+                        )
+                        .padding(6)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(track.title)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.white)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.8)
+
+                Text(track.displayArtist)
+                    .font(.system(size: 11))
+                    .foregroundColor(.cyberDim)
+                    .lineLimit(1)
+            }
+            .frame(width: 130, alignment: .leading)
+        }
+        .onTapGesture {
+            HapticManager.medium()
+            onPlay()
+        }
+        .contextMenu {
+            Button(action: onPlay) {
+                Label("Play", systemImage: "play.fill")
+            }
+            Button(action: onPlayNext) {
+                Label("Play Next", systemImage: "text.badge.plus")
+            }
+            Button(action: onAddToQueue) {
+                Label("Add to Queue", systemImage: "plus")
+            }
+            Button(action: onStartRadio) {
+                Label("Start Radio", systemImage: "antenna.radiowaves.left.and.right")
+            }
+            Divider()
+            Button(action: onAddToPlaylist) {
+                Label("Add to Playlist", systemImage: "music.note.list")
+            }
+            // By construction this card is in the Liked Songs
+            // sub-section, so the heart is always filled — show
+            // "Unlike" only. (Defensive: if a user taps from
+            // another surface and the heart is somehow not filled
+            // by the time the menu opens, show "Like" instead.)
+            Button {
+                playlistManager.toggleLike(trackId: track.videoId)
+                HapticManager.medium()
+            } label: {
+                Label(isLiked ? "Unlike" : "Like",
+                      systemImage: isLiked ? "heart.fill" : "heart")
+            }
+            Button {
+                // Toggle the local download state — the
+                // DownloadManager's `download(...)` method is a
+                // no-op if the track is already downloaded
+                // (matched by videoId in its existing check).
+                if !isDownloaded {
+                    DownloadManager.shared.download(track)
+                }
+            } label: {
+                Label(isDownloaded ? "Downloaded" : "Download",
+                      systemImage: isDownloaded ? "checkmark.circle.fill" : "arrow.down.circle")
+            }
+        }
+    }
+}
+
 // MARK: - Cyber Icon Chip (compact header icon)
 struct CyberIconChip: View {
     let icon: String
@@ -1367,11 +1558,21 @@ extension View {
 class HomeViewModel: ObservableObject {
     @Published var greeting = " SYNC "
     @Published var lastPlayedTrack: Track?
-    @Published var recentlyPlayed: [Track] = []
     @Published var downloadCount = 0
     @Published var totalListeningTime: TimeInterval = 0
     @Published var isLoading = true
     @Published var artistSuggestions: [String: [Track]] = [:]
+
+    // 2026-08-12: removed `recentlyPlayed: [Track]` and the
+    // dataManager.$recentlyPlayed subscription. The old
+    // recently played section is gone (replaced by Your
+    // Library's Liked + Downloaded sub-sections, which read
+    // directly from playlistManager + libraryVM as @StateObject
+    // on HomeView). The viewModel now only owns the hero /
+    // greeting / favorite-artist data, which doesn't need a
+    // reactive subscription to recently played (greeting is
+    // computed on load, lastPlayedTrack is read once on load,
+    // totalListeningTime is a count).
 
     private let dataManager = DataManager.shared
     private let favoriteArtists = FavoriteArtistsManager.shared
@@ -1380,13 +1581,6 @@ class HomeViewModel: ObservableObject {
     private var suggestionCancellables = Set<AnyCancellable>()
 
     init() {
-        dataManager.$recentlyPlayed
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in
-                self?.loadData()
-            }
-            .store(in: &cancellables)
-
         favoriteArtists.$artists
             .receive(on: DispatchQueue.main)
             .sink { [weak self] artists in
@@ -1397,7 +1591,6 @@ class HomeViewModel: ObservableObject {
 
     func loadData() {
         updateGreeting()
-        recentlyPlayed = dataManager.recentlyPlayed.map { $0.toTrack }
         lastPlayedTrack = dataManager.recentlyPlayed.first?.toTrack
         totalListeningTime = dataManager.totalListeningSeconds
 

@@ -67,8 +67,8 @@ targets:
       properties:
         CFBundleDisplayName: PeacePlayer
         CFBundleName: PeacePlayer
-        CFBundleShortVersionString: "1.0"
-        CFBundleVersion: "1"
+        CFBundleShortVersionString: "1.7.0"
+        CFBundleVersion: "11"
         UILaunchStoryboardName: LaunchScreen
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
