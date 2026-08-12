@@ -357,6 +357,14 @@ class NowPlayingService {
         let progress = duration > 0 ? currentTime / duration : 0
         let nextIdx = PlayerState.shared.currentIndex + 1
         let nextTrack = nextIdx < PlayerState.shared.queue.count ? PlayerState.shared.queue[nextIdx].track : nil
+        // 2026-08-12: read the current download state so the
+        // widget can show "↓ Downloading X" in the same write
+        // (no second pass needed). syncDownloadingState() is
+        // called separately on download lifecycle events
+        // (DownloadManager publishes), so this is the playback-
+        // side mirror — together they keep the widget in sync
+        // whether the user is playing or just downloading.
+        let downloading = WidgetSyncService.shared.snapshotDownloadingSummary()
         SharedNowPlayingState.update(snapshot: NowPlayingSnapshot(
             title: track.title,
             artist: track.displayArtist,
@@ -368,7 +376,8 @@ class NowPlayingService {
             currentVolume: Float(PlayerState.shared.volume),
             // S18 / P1-6: surface unread-capsule count to the widget.
             // The widget renders a 💌 pill when this is true.
-            hasUnlockedCapsule: TimeCapsuleManager.shared.readyToOpen.count > 0
+            hasUnlockedCapsule: TimeCapsuleManager.shared.readyToOpen.count > 0,
+            downloadingTitle: downloading
         ))
         // C-2026-06-28: widget timeline reloads are documented as
         // asynchronous (they schedule work in the widget extension's

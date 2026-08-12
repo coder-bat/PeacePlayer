@@ -49,10 +49,30 @@ struct NowPlayingSnapshot: Codable {
     // ready to open. The widget renders a small 💌 pill and
     // tapping it deep-links to the vault.
     let hasUnlockedCapsule: Bool
+    // 2026-08-12: "currently downloading" indicator. When
+    // DownloadManager has at least one active or queued
+    // download, the NowPlayingFull widget shows a small
+    // "↓ Downloading X" line so the user can see that a
+    // background download is in progress without opening
+    // the app. Nil = nothing downloading.
+    //
+    // The value is the display title of the FIRST active
+    // download, plus a "+N more" suffix when the queue has
+    // more. The widget renders a single short line either
+    // way. Computed in WidgetSyncService from
+    // DownloadManager.shared.{activeDownloads,downloadQueue}
+    // — the snapshot is read-only here.
+    //
+    // `var` (not `let`) so syncDownloadingState() can
+    // mutate in place after decoding the existing snapshot
+    // from App Group UserDefaults. Codable synthesis works
+    // for `var` too — only mutability differs.
+    var downloadingTitle: String?
 
-    var hasContent: Bool    { !title.isEmpty }
-    var hasNextTrack: Bool  { !nextTitle.isEmpty }
-    var artworkURL: URL?    { URL(string: artworkURLString) }
+    var hasContent: Bool       { !title.isEmpty }
+    var hasNextTrack: Bool     { !nextTitle.isEmpty }
+    var artworkURL: URL?       { URL(string: artworkURLString) }
+    var hasDownloading: Bool   { downloadingTitle != nil }
 
     // Memberwise init with defaults for new fields (backwards-compatible callers)
     init(
@@ -64,7 +84,8 @@ struct NowPlayingSnapshot: Codable {
         nextTitle: String = "",
         nextArtist: String = "",
         currentVolume: Float = 1.0,
-        hasUnlockedCapsule: Bool = false
+        hasUnlockedCapsule: Bool = false,
+        downloadingTitle: String? = nil
     ) {
         self.title = title
         self.artist = artist
@@ -75,6 +96,7 @@ struct NowPlayingSnapshot: Codable {
         self.nextArtist = nextArtist
         self.currentVolume = currentVolume
         self.hasUnlockedCapsule = hasUnlockedCapsule
+        self.downloadingTitle = downloadingTitle
     }
 
     // Backwards-compatible decoder: old snapshots won't have the new keys
@@ -89,6 +111,12 @@ struct NowPlayingSnapshot: Codable {
         nextArtist       = (try? c.decodeIfPresent(String.self, forKey: .nextArtist)) ?? ""
         currentVolume    = (try? c.decodeIfPresent(Float.self,  forKey: .currentVolume)) ?? 1.0
         hasUnlockedCapsule = (try? c.decodeIfPresent(Bool.self, forKey: .hasUnlockedCapsule)) ?? false
+        // 2026-08-12: same backwards-compat pattern as the
+        // other optional fields. Pre-downloading-line
+        // snapshots decode as nil ("not downloading" — the
+        // user will see the widget in its old state until
+        // the next snapshot write carries a title).
+        downloadingTitle = (try? c.decodeIfPresent(String.self, forKey: .downloadingTitle))
     }
 
     static let empty = NowPlayingSnapshot(

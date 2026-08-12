@@ -64,6 +64,7 @@ final class WidgetSyncService {
     private init() {
         setupDarwinObservers()
         observeLibraryChanges()
+        observeDownloadChanges()
     }
 
     // MARK: Darwin Observers
@@ -119,6 +120,87 @@ final class WidgetSyncService {
         SharedNowPlayingState.updateLibrary(snapshot)
         WidgetCenter.shared.reloadTimelines(ofKind: WidgetKind.shuffleFavorites)
         WidgetCenter.shared.reloadTimelines(ofKind: WidgetKind.playlists)
+    }
+
+    // MARK: Download State Observation
+    // 2026-08-12: observe DownloadManager's activeDownloads
+    // + downloadQueue + isDownloading, build a one-line summary
+    // ("Track Name" or "Track Name +2 more"), and write it into
+    // the NowPlayingSnapshot. Reloads the nowPlayingFull widget
+    // so the user can see "↓ Downloading X" on the home screen
+    // without opening the app.
+    //
+    // Debounced lightly (200ms) so a rapid burst of download
+    // start events (e.g. user taps download on 3 tracks in a row)
+    // doesn't hammer App Group writes. The widget's natural
+    // refresh cadence is ~15min anyway, so the 200ms debounce
+    // is invisible to the user.
+    private func observeDownloadChanges() {
+        let active = DownloadManager.shared.$activeDownloads
+        let pending = DownloadManager.shared.$downloadQueue
+        let inFlight = DownloadManager.shared.$isDownloading
+        Publishers.CombineLatest3(active, pending, inFlight)
+            .debounce(for: .milliseconds(200), scheduler: RunLoop.main)
+            .sink { [weak self] _ in self?.syncDownloadingState() }
+            .store(in: &cancellables)
+    }
+
+    /// Build the one-line "downloading" string and rewrite the
+    /// snapshot. Idempotent. Called on every download state
+    /// change (debounced to 200ms) and on demand from callers
+    /// that want to force a sync (e.g. right after a download
+    /// starts via the UI).
+    func syncDownloadingState() {
+        let summary = buildDownloadingSummary()
+        var current = SharedNowPlayingState.read()
+        // Don't churn App Group writes if the title hasn't
+        // changed. The decode → mutate → encode round-trip is
+        // cheap but observable in profiling.
+        guard current.downloadingTitle != summary else { return }
+        current.downloadingTitle = summary
+        SharedNowPlayingState.update(snapshot: current)
+        WidgetCenter.shared.reloadTimelines(ofKind: WidgetKind.nowPlayingFull)
+    }
+
+    /// Public read-only entry point. Returns the same string
+    /// the widget would show, without writing the snapshot.
+    /// NowPlayingService calls this on every playback snapshot
+    /// write so the widget stays in sync with playback-side
+    /// updates. syncDownloadingState() is the WRITE path
+    /// (called on DownloadManager publishes); this is the
+    /// READ path (called on every snapshot write).
+    func snapshotDownloadingSummary() -> String? {
+        buildDownloadingSummary()
+    }
+
+    /// Build the user-visible "downloading" string from
+    /// DownloadManager's state. Returns nil if there's nothing
+    /// downloading. Format: first active or queued track title,
+    /// with a "+N more" suffix when the queue is longer.
+    private func buildDownloadingSummary() -> String? {
+        let active = DownloadManager.shared.activeDownloads
+        let pending = DownloadManager.shared.downloadQueue
+        let total = active.count + pending.count
+        guard total > 0 else { return nil }
+
+        // Prefer the currently-downloading track (in active) so
+        // the user sees what's actually making progress. Fall
+        // back to the first pending if active is empty (the
+        // active slot was freed and the next one hasn't been
+        // promoted yet — a 1-frame edge case but worth handling).
+        let firstTitle: String
+        if let first = active.first?.track {
+            firstTitle = first.title
+        } else if let first = pending.first?.track {
+            firstTitle = first.title
+        } else {
+            return nil
+        }
+
+        if total > 1 {
+            return "\(firstTitle) +\(total - 1) more"
+        }
+        return firstTitle
     }
 
     // MARK: Reload All

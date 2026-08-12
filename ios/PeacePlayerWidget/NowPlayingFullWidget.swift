@@ -92,6 +92,20 @@ private struct PlayingContent: View {
             progressBar
             Spacer(minLength: 6)
             controlsRow
+            // 2026-08-12: "↓ Downloading X" line at the bottom of
+            // the widget. Rendered ONLY when there's an active
+            // or queued download — if nothing's downloading
+            // (the common case), no row, no extra vertical
+            // space consumed. The title is the FIRST active or
+            // queued track's display name, with a "+N more"
+            // suffix when the queue is longer. Built in
+            // WidgetSyncService.syncDownloadingState() and
+            // passed in via the snapshot's `downloadingTitle`
+            // field. The widget just reads it and renders.
+            if let downloadingTitle = entry.snapshot.downloadingTitle {
+                Spacer(minLength: 6)
+                downloadingRow(downloadingTitle)
+            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
@@ -99,6 +113,38 @@ private struct PlayingContent: View {
         // Because the view has no background, the system's content-margin
         // geometry is the true size — Spacers distribute the remainder.
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+    }
+
+    // MARK: Downloading line (2026-08-12)
+    //
+    // Subtle 8pt monospaced line. Cyan tint matches the rest
+    // of the widget's accent. Tapping it opens the app's
+    // Library → Downloaded tab via the existing
+    // `peaceplayer://library` deep link (handled by the app
+    // — ContentView's onOpenURL routes to the Library tab).
+    // If the deep link fails (e.g. app not installed? it is,
+    // but defensive), the user can still tap the widget to
+    // open the app via system default behavior.
+    private func downloadingRow(_ title: String) -> some View {
+        Link(destination: URL(string: "peaceplayer://library")!) {
+            HStack(spacing: 5) {
+                Image(systemName: "arrow.down.circle.fill")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundColor(WidgetTheme.cyberCyan)
+                Text("DOWNLOADING")
+                    .font(.system(size: 8, weight: .bold, design: .monospaced))
+                    .foregroundColor(WidgetTheme.cyberCyan.opacity(0.7))
+                Text("·")
+                    .font(.system(size: 8))
+                    .foregroundColor(.white.opacity(0.3))
+                Text(title)
+                    .font(.system(size: 10))
+                    .foregroundColor(.white.opacity(0.7))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Spacer(minLength: 0)
+            }
+        }
     }
 
     // ── Track info ────────────────────────────────────────────

@@ -75,7 +75,13 @@ class DownloadManager: ObservableObject {
     @Published var isDownloading = false
     @Published var showDownloadQueue = false
 
-    private var downloadQueue: [DownloadTask] = []
+    // 2026-08-12: was `private var downloadQueue` — exposed
+    // as @Published so WidgetSyncService can observe the
+    // pending count and show "X +N more" in the widget when
+    // tracks are queued. The internal API is unchanged
+    // (append/removeFirst/removeAll); only the visibility
+    // and publisher semantics changed.
+    @Published private(set) var downloadQueue: [DownloadTask] = []
     private var currentTask: AnyCancellable?
     private var cancellables = Set<AnyCancellable>()
     private let maxConcurrentDownloads = 1
