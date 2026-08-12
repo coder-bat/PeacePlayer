@@ -67,8 +67,8 @@ targets:
       properties:
         CFBundleDisplayName: PeacePlayer
         CFBundleName: PeacePlayer
-        CFBundleShortVersionString: "1.8.1"
-        CFBundleVersion: "14"
+        CFBundleShortVersionString: "1.8.2"
+        CFBundleVersion: "15"
         UILaunchStoryboardName: LaunchScreen
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
@@ -128,8 +128,8 @@ targets:
         # Pin them here so future regens preserve the matching app
         # version (the widget and main app share the same release
         # tag per the project's versioning convention).
-        CFBundleShortVersionString: "1.8.1"
-        CFBundleVersion: "14"
+        CFBundleShortVersionString: "1.8.2"
+        CFBundleVersion: "15"
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
 

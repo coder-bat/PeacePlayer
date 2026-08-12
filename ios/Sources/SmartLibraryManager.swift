@@ -70,6 +70,20 @@ final class SmartLibraryManager: ObservableObject {
     /// case they want to be more or less aggressive.
     @AppStorage("smartLibrary.autoDownloadMaxPerCycle") var autoDownloadMaxPerCycle: Int = 20
 
+    /// 2026-08-12: max number of tracks the user is willing
+    /// to keep downloaded at once. The auto-download cycle
+    /// SKIPS when the library is at or above this count,
+    /// regardless of trigger — so the user always has
+    /// "library ready" but never blows past their budget.
+    /// Default 50 tracks; user-configurable via a Picker
+    /// in Settings → Smart Library.
+    ///
+    /// The refresh button (runRefreshNow) bypasses this
+    /// check (it clears the library first, so the new
+    /// downloads always fit), but the per-cycle download
+    /// count is still capped by autoDownloadMaxPerCycle.
+    @AppStorage("smartLibrary.maxLibraryTracks") var maxLibraryTracks: Int = 50
+
     /// Min free disk space (bytes) required to start an
     /// auto-download cycle. Below this, skip the cycle entirely
     /// — better to have nothing new than to fill the device
@@ -90,11 +104,20 @@ final class SmartLibraryManager: ObservableObject {
     @Published private(set) var lastAutoDownloadAt: Date?
     @Published private(set) var lastAutoDownloadCount: Int = 0
     @Published private(set) var lastAutoDownloadBytesEstimated: Int64 = 0
+    // 2026-08-12: track when the cycle was skipped due to
+    // the library being at the max-library-tracks limit.
+    // Drives the "X of N (at limit)" status line in Settings.
+    @Published private(set) var lastAutoDownloadSkippedReason: String?
     @Published private(set) var lastCleanupAt: Date?
     @Published private(set) var lastCleanupCount: Int = 0
     @Published private(set) var lastCleanupBytesFreed: Int64 = 0
     @Published private(set) var isAutoDownloading: Bool = false
     @Published private(set) var isCleaningUp: Bool = false
+    // 2026-08-12: separate flag for the Refresh Downloads
+    // flow (vs the normal auto-download cycle). The Settings
+    // button reads this to show a spinner on the right
+    // control, not on the auto-download status line.
+    @Published private(set) var isRefreshing: Bool = false
 
     // MARK: - Tier marker (UserDefaults)
 
@@ -270,31 +293,37 @@ final class SmartLibraryManager: ObservableObject {
 
     // MARK: - Public API: orchestration entry points
 
-    /// Run the auto-download cycle if it's due. Debounced
-    /// to once per 24h (lastAutoDownloadAt). All other
-    /// preconditions are checked inside runAutoDownloadCycle.
+    /// Run the auto-download cycle. v1.8.2: dropped the
+    /// 24h debounce. The product intent is "always have
+    /// library ready" — every WiFi connect + every
+    /// foreground is a chance to top up. The hard
+    /// limiter is now maxLibraryTracks: if the library is
+    /// already at the cap, we skip (so a user with a
+    /// 200-track manual library doesn't get spammed with
+    /// auto-downloads they don't need). The 30s debounce
+    /// on the WiFi trigger (in setupHooks) is the only
+    /// rate limiting — it's the standard "don't fire
+    /// multiple times during a WiFi reconnect handshake"
+    /// throttle.
+    ///
+    /// All other preconditions (toggle, WiFi, metered,
+    /// backend, free space) are checked inside
+    /// runAutoDownloadCycle.
     func runAutoDownloadIfDue() {
         guard autoDownloadEnabled else { return }
-        if let last = lastAutoDownloadAt, Date().timeIntervalSince(last) < 24 * 3600 {
-            return
-        }
         Task { await runAutoDownloadCycle() }
     }
 
-    /// Run the auto-cleanup cycle if it's due. Debounced
-    /// to once per 7d (lastCleanupAt). Storage-emergency
-    /// path (free space < emergencyThresholdBytes) bypasses
-    /// the debounce and is triggered automatically inside.
-    /// If `emergency` is true, bypasses the debounce and
-    /// prioritises auto-downloaded removals.
+    /// v1.8.2: drop the 24h debounce on the auto-cleanup
+    /// too. Cleanup is read-only and cheap; running it on
+    /// every foreground (instead of once per 7d) means
+    /// stale tracks are caught sooner. Storage emergency
+    /// still bypasses any internal checks. The 7d
+    /// debounce in v1.8.0/v1.8.1 was over-engineered —
+    /// nothing about the cleanup logic is expensive enough
+    /// to need that throttle.
     func runCleanupIfDue(emergency: Bool) {
         guard cleanupEnabled else { return }
-        if !emergency, let last = lastCleanupAt, Date().timeIntervalSince(last) < 7 * 24 * 3600 {
-            return
-        }
-        // Storage emergency check: if free space is below
-        // threshold AND we're not already in an emergency
-        // pass, run emergency cleanup.
         if !emergency, freeDiskSpace() < emergencyThresholdBytes {
             Task { await runCleanupCycle(emergency: true) }
             return
@@ -302,11 +331,53 @@ final class SmartLibraryManager: ObservableObject {
         Task { await runCleanupCycle(emergency: emergency) }
     }
 
-    /// Manual trigger from Settings → "Clean up now". Bypasses
-    /// the debounce and the storage-emergency check.
+    /// Manual trigger from Settings → "Clean up now".
+    /// Bypasses the storage-emergency check.
     func runCleanupNow() {
         guard cleanupEnabled else { return }
         Task { await runCleanupCycle(emergency: false) }
+    }
+
+    // MARK: - Public API: refresh (v1.8.2)
+
+    /// 2026-08-12: "Refresh downloads" button in Settings.
+    /// User-initiated full library refresh: delete ALL
+    /// current downloads, then re-download based on the
+    /// same candidate selection as the auto-download
+    /// cycle (liked artists' top tracks + recently played
+    /// not yet downloaded). Bypasses the maxLibraryTracks
+    /// check (the user explicitly asked for a full refresh,
+    /// so the library will fit after the clear).
+    ///
+    /// The downloaded tracks are marked as "auto" in
+    /// the tier set so the cleanup grace period (14d
+    /// unplayed) applies. If the user wants to keep them
+    /// long-term, they can heart them; liked tracks
+    /// graduate to the "never removed" tier.
+    ///
+    /// The fresh deletion of the old library means
+    /// protected-state checks (currently playing, in
+    /// queue, time capsule) need to bypass. The current
+    /// `fetchDownloadedTracksFromCoreData` returns all
+    /// rows, including protected ones — but `deleteDownload`
+    /// is async and the AVPlayer won't crash if the
+    /// underlying file disappears mid-play (it'll just
+    /// error out and stop). Acceptable trade-off for
+    /// an explicit user action.
+    func runRefreshNow() {
+        guard !isRefreshing else { return }
+        Task { await runRefreshCycle() }
+    }
+
+    /// Number of tracks currently downloaded. Used by
+    /// the auto-download cycle to check maxLibraryTracks
+    /// and by the Settings UI to show "X of N" status.
+    /// Single CoreData fetch — O(n) in downloaded count,
+    /// typically <100ms.
+    func currentDownloadedTrackCount() -> Int {
+        let context = PersistenceController.shared.viewContext
+        let request: NSFetchRequest<CDDownloadedTrack> = CDDownloadedTrack.fetchRequest()
+        return (try? context.count(for: request)) ?? 0
     }
 
     // MARK: - Public API: free disk space
@@ -441,6 +512,23 @@ final class SmartLibraryManager: ObservableObject {
         guard !NetworkMonitor.shared.isMetered else { return }
         guard NetworkMonitor.shared.isBackendReachable else { return }
         guard freeDiskSpace() > minFreeBytes else { return }
+        // v1.8.2: library-size check. If the user already
+        // has maxLibraryTracks or more downloaded, skip
+        // the cycle (don't top up a full library). The
+        // status line in Settings will show "X of N
+        // (at limit)" so the user can see why nothing
+        // happened. Empty tracks are NOT counted — only
+        // CDDownloadedTrack rows that survive
+        // isPlayable's reconciliation.
+        let currentCount = currentDownloadedTrackCount()
+        if currentCount >= maxLibraryTracks {
+            // Don't update lastAutoDownloadAt / count — we
+            // didn't actually do anything. Just record the
+            // skip reason so the status line can show it.
+            lastAutoDownloadSkippedReason = "Library full (\(currentCount)/\(maxLibraryTracks))"
+            return
+        }
+        lastAutoDownloadSkippedReason = nil
 
         isAutoDownloading = true
         defer { isAutoDownloading = false }
@@ -450,6 +538,16 @@ final class SmartLibraryManager: ObservableObject {
         var downloadedCount = 0
         var bytesEstimated: Int64 = 0
         for track in candidates {
+            // v1.8.2: per-iteration library-count check.
+            // The count above might have changed between the
+            // start of the cycle and now (user manually
+            // downloaded a track, a previous cycle is
+            // still finishing). Stop the moment we hit the
+            // cap, even mid-cycle.
+            let nowCount = currentDownloadedTrackCount()
+            if nowCount >= maxLibraryTracks {
+                break
+            }
             // Re-check isAlreadyDownloaded at kick-off time —
             // a track may have been downloaded between candidate
             // selection and now (e.g., user manually downloaded
@@ -479,6 +577,83 @@ final class SmartLibraryManager: ObservableObject {
         defaults.set(lastAutoDownloadAt, forKey: Keys.lastAutoDownloadAt)
         defaults.set(downloadedCount, forKey: Keys.lastAutoDownloadCount)
         defaults.set(Int(bytesEstimated), forKey: Keys.lastAutoDownloadBytesEstimated)
+    }
+
+    // MARK: - Private: refresh cycle (v1.8.2)
+    //
+    // User-initiated from Settings → "Refresh Downloads"
+    // button. Clears the entire library, then runs the
+    // same candidate selection as the auto-download cycle
+    // and downloads. The new tracks are marked as "auto"
+    // (tier) so the 14d cleanup grace period applies; the
+    // user can heart them for "never removed" protection.
+    //
+    // Why we delete first (not just "replace what we can"):
+    // The user pressed Refresh because they want a fresh
+    // library based on current listening. Keeping the old
+    // tracks would defeat the point. The current "play
+    // history" candidates reflect what the user is
+    // listening to NOW, not what they listened to last
+    // week — so deleting and re-deriving gives them a
+    // library that matches their current taste.
+    private func runRefreshCycle() async {
+        isRefreshing = true
+        defer { isRefreshing = false }
+
+        // 1. Delete all current downloads. Includes liked
+        // tracks (the user explicitly asked for a full
+        // reset) and time-capsule tracks (acceptable —
+        // the user can re-seal them). The cleanup's
+        // "skip if in queue" check doesn't apply because
+        // the queue is independent of CoreData; the
+        // AVPlayer will gracefully fail on a missing file
+        // if the user is mid-play.
+        let context = PersistenceController.shared.viewContext
+        let request: NSFetchRequest<CDDownloadedTrack> = CDDownloadedTrack.fetchRequest()
+        guard let rows = try? context.fetch(request) else {
+            ErrorHandler.shared.showInfo("Refresh failed: couldn't read library")
+            return
+        }
+        let deletedCount = rows.count
+        for row in rows {
+            if let videoId = row.track?.videoId {
+                DownloadManager.shared.deleteDownload(videoId: videoId)
+            }
+        }
+        ErrorHandler.shared.showInfo("Cleared \(deletedCount) tracks, re-downloading…")
+
+        // 2. Wait briefly for CoreData writes to settle.
+        // deleteDownload is synchronous in iOS (it hits
+        // both CoreData and the filesystem on the calling
+        // thread), but the FRC notifications fire async
+        // and we want CDDownloadedTrack.count to be 0
+        // before we start downloading. 200ms is plenty
+        // for a CoreData write + FRC notification.
+        try? await Task.sleep(nanoseconds: 200_000_000)
+
+        // 3. Re-download. Same candidate selection as the
+        // auto-download cycle, capped at autoDownloadMaxPerCycle.
+        // No library-count check — we just cleared it, so
+        // the new downloads always fit.
+        let candidates = await computeAutoDownloadCandidates()
+        var downloadedCount = 0
+        for track in candidates.prefix(autoDownloadMaxPerCycle) {
+            if DownloadManager.shared.isAlreadyDownloaded(track) { continue }
+            DownloadManager.shared.download(track)
+            markAsAutoDownloaded(track.videoId)
+            downloadedCount += 1
+        }
+
+        // 4. Update the "last auto-download" timestamp +
+        // count so the Settings status line reflects the
+        // refresh. The skip reason is cleared.
+        lastAutoDownloadAt = Date()
+        lastAutoDownloadCount = downloadedCount
+        lastAutoDownloadSkippedReason = nil
+        defaults.set(lastAutoDownloadAt, forKey: Keys.lastAutoDownloadAt)
+        defaults.set(downloadedCount, forKey: Keys.lastAutoDownloadCount)
+
+        ErrorHandler.shared.showInfo("Refreshed: \(downloadedCount) new tracks downloading")
     }
 
     // MARK: - Private: cleanup cycle

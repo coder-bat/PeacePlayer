@@ -14,6 +14,11 @@ struct SettingsView: View {
     @State private var showSignOutConfirmation = false
     @State private var showAudioSettings = false  // S13
     @State private var showEqualizer = false  // S15: real 10-band EQ
+    // 2026-08-12: v1.8.2 — confirmation modal for the
+    // "Refresh downloads" button. The refresh is
+    // destructive (deletes ALL downloads, then re-downloads),
+    // so we want a clear confirmation before kicking it off.
+    @State private var showRefreshConfirm = false
     @State private var isSigningOut = false
     @State private var cacheSize: String = "Calculating..."
 
@@ -87,11 +92,30 @@ struct SettingsView: View {
     /// "Off" (toggle disabled) or "Ready" (first run
     /// pending). Mirrors the concise style of the other
     /// Settings status lines.
+    ///
+    /// v1.8.2: if the last run was SKIPPED (e.g. library
+    /// full), show the skip reason in orange instead of
+    /// the normal "Last: ..." line. This is the
+    /// user-visible answer to "why didn't anything
+    /// download when I opened the app?".
     private var autoDownloadStatusLine: String {
         if !smartLibrary.autoDownloadEnabled { return "Off" }
         if smartLibrary.isAutoDownloading { return "Auto-downloading…" }
+        if let skip = smartLibrary.lastAutoDownloadSkippedReason {
+            return "Skipped: \(skip)"
+        }
         guard let last = smartLibrary.lastAutoDownloadAt else { return "Ready" }
         return "Last: \(formatRelative(last)) · \(smartLibrary.lastAutoDownloadCount) track\(smartLibrary.lastAutoDownloadCount == 1 ? "" : "s")"
+    }
+
+    /// 2026-08-12 v1.8.2: live library count. Used in the
+    /// section header ("X / N") and the Refresh alert
+    /// ("This will remove all X downloaded tracks…").
+    /// Reads from CoreData each time the view renders —
+    /// cheap (one count(for:) call, ~ms) and avoids
+    /// any cross-component state-sync concerns.
+    private var libraryCount: Int {
+        smartLibrary.currentDownloadedTrackCount()
     }
 
     /// 2026-08-12: Smart Library status line for the
@@ -631,6 +655,9 @@ struct SettingsView: View {
                 // show the last run + result, plus a manual
                 // "Clean up now" button for users who don't
                 // want to wait for the weekly debounce.
+                // 2026-08-12: v1.8.2 — added library limit
+                // picker, library-count status, and the
+                // "Refresh downloads" button with confirmation.
                 Section {
                     // Auto-download on WiFi
                     Toggle(isOn: $smartLibrary.autoDownloadEnabled) {
@@ -648,19 +675,31 @@ struct SettingsView: View {
                     }
                     .listRowBackground(Theme.cyberSurface)
 
-                    // Auto-cleanup
-                    Toggle(isOn: $smartLibrary.cleanupEnabled) {
+                    // v1.8.2: Library limit picker. Pinned
+                    // options (25/50/100/200/500) instead of a
+                    // free-form Stepper — gives clean breakpoints
+                    // and predictable behavior. Default 50 is the
+                    // v1.8.2 ship default.
+                    HStack {
+                        Image(systemName: "gauge.with.dots.needle.bottom.50percent")
+                            .foregroundColor(Theme.cyberCyan)
+                            .frame(width: 24)
                         VStack(alignment: .leading, spacing: 2) {
-                            HStack(spacing: 6) {
-                                Image(systemName: "trash.slash")
-                                    .foregroundColor(Theme.cyberMagenta)
-                                Text("Auto-cleanup unused downloads")
-                                    .foregroundColor(.white)
-                            }
-                            Text(cleanupStatusLine)
+                            Text("Library limit")
+                                .foregroundColor(.white)
+                            Text("\(smartLibrary.maxLibraryTracks) tracks")
                                 .font(.system(size: 12, design: .monospaced))
                                 .foregroundColor(Theme.cyberTextSecondary)
                         }
+                        Spacer()
+                        Picker("", selection: $smartLibrary.maxLibraryTracks) {
+                            ForEach([25, 50, 100, 200, 500], id: \.self) { limit in
+                                Text("\(limit)").tag(limit)
+                            }
+                        }
+                        .labelsHidden()
+                        .pickerStyle(.menu)
+                        .tint(Theme.cyberCyan)
                     }
                     .listRowBackground(Theme.cyberSurface)
 
@@ -683,15 +722,67 @@ struct SettingsView: View {
                     }
                     .disabled(smartLibrary.isCleaningUp)
                     .listRowBackground(Theme.cyberSurface)
+
+                    // v1.8.2: Refresh downloads. Destructive
+                    // action (deletes ALL current downloads,
+                    // then re-derives from history). Gated by
+                    // a confirmation alert — we don't want
+                    // accidental taps nuking someone's library.
+                    Button(role: .destructive) {
+                        showRefreshConfirm = true
+                    } label: {
+                        HStack {
+                            Image(systemName: "arrow.triangle.2.circlepath")
+                                .foregroundColor(Theme.cyberMagenta)
+                            Text("Refresh downloads")
+                                .foregroundColor(.white)
+                            Spacer()
+                            if smartLibrary.isRefreshing {
+                                ProgressView()
+                                    .tint(Theme.cyberMagenta)
+                                    .scaleEffect(0.8)
+                            }
+                        }
+                    }
+                    .disabled(smartLibrary.isRefreshing)
+                    .listRowBackground(Theme.cyberSurface)
                 } header: {
-                    Text("Smart Library")
-                        .font(Typography.sectionHeader)
-                        .foregroundColor(Theme.cyberCyan)
-                        .textCase(.uppercase)
+                    HStack {
+                        Text("Smart Library")
+                            .font(Typography.sectionHeader)
+                            .foregroundColor(Theme.cyberCyan)
+                            .textCase(.uppercase)
+                        Spacer()
+                        // v1.8.2: live library count in the
+                        // section header. Shows "X / N" so the
+                        // user always sees their current fill
+                        // level vs the configured limit. Updates
+                        // on every render (the SmartLibraryManager
+                        // is @StateObject so the section re-renders
+                        // on any @Published change).
+                        Text("\(libraryCount) / \(smartLibrary.maxLibraryTracks)")
+                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                            .foregroundColor(
+                                libraryCount >= smartLibrary.maxLibraryTracks
+                                    ? Theme.cyberMagenta
+                                    : Theme.cyberTextSecondary
+                            )
+                    }
                 } footer: {
-                    Text("Auto-downloads: new releases from your favorite artists + recently-played tracks. Auto-cleanup: removes liked-never, auto-downloads after \(smartLibrary.cleanupDaysAuto)d unplayed, manual downloads after \(smartLibrary.cleanupDaysManual)d. Liked tracks are never auto-removed.")
+                    Text("Auto-downloads: new releases from your favorite artists + recently-played tracks. The library is capped at the chosen limit — auto-downloads skip when full, and the Refresh button clears and re-derives from your current history. Auto-cleanup: removes liked-never, auto-downloads after \(smartLibrary.cleanupDaysAuto)d unplayed, manual downloads after \(smartLibrary.cleanupDaysManual)d.")
                         .font(.system(size: 11))
                         .foregroundColor(Theme.cyberTextSecondary)
+                }
+                // v1.8.2: confirmation alert for Refresh.
+                // Destructive button role above + the alert
+                // here = double guard against accidental taps.
+                .alert("Refresh downloads?", isPresented: $showRefreshConfirm) {
+                    Button("Refresh", role: .destructive) {
+                        smartLibrary.runRefreshNow()
+                    }
+                    Button("Cancel", role: .cancel) {}
+                } message: {
+                    Text("This will remove all \(libraryCount) downloaded tracks and re-download based on your recent history. Liked tracks will need to be re-liked after the refresh if you want them kept long-term.")
                 }
 
                 // MARK: - Backend Section (S15)
