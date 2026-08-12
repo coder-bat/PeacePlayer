@@ -15,6 +15,13 @@ struct YTAudioPlayerApp: App {
     // Initialise singletons that must start with the app
     private let widgetSync = WidgetSyncService.shared
     private let adaptiveWalkDJ = AdaptiveWalkDJManager.shared
+    // 2026-08-12: v1.8.0 — Smart Library (auto-download on
+    // WiFi + auto-cleanup). Initialising here wires the
+    // manager's NetworkMonitor + foreground observers
+    // before the first view appears, so a cold launch on
+    // WiFi gets an auto-download cycle within ~1s of the
+    // UI rendering (subject to the 24h debounce).
+    private let smartLibrary = SmartLibraryManager.shared
 
     init() {
         DataMigrationService.shared.performMigrationIfNeeded()
@@ -94,6 +101,17 @@ struct YTAudioPlayerApp: App {
             // for the 60s timer.
             if phase == .active {
                 NetworkMonitor.shared.checkBackendHealth()
+            }
+
+            // 2026-08-12: v1.8.0 Smart Library — also trigger the
+            // auto-download and auto-cleanup cycles on every
+            // foreground. SmartLibraryManager has its own
+            // debouncing (24h for auto-download, 7d for cleanup,
+            // bypassed on storage emergency) so this is safe to
+            // fire every time the user reopens the app.
+            if phase == .active {
+                SmartLibraryManager.shared.runAutoDownloadIfDue()
+                SmartLibraryManager.shared.runCleanupIfDue(emergency: false)
             }
 
             // S17-H / S17-LOCK: re-activate the audio session on

@@ -6,6 +6,10 @@ import UIKit  // S17-H (round 7): UIPasteboard for tap-to-copy on connection tes
 struct SettingsView: View {
     @StateObject private var favoriteArtists = FavoriteArtistsManager.shared
     @StateObject private var auth = AuthService.shared
+    // 2026-08-12: Smart Library (auto-download on WiFi + auto-
+    // cleanup). Observed here so the status row re-renders
+    // when the manager updates its last-run timestamps.
+    @StateObject private var smartLibrary = SmartLibraryManager.shared
     @State private var showClearCacheConfirmation = false
     @State private var showSignOutConfirmation = false
     @State private var showAudioSettings = false  // S13
@@ -75,6 +79,46 @@ struct SettingsView: View {
         let preset = eq.preset.rawValue
         if preset == "Custom" { return "On · Custom" }
         return "On · \(preset)"
+    }
+
+    /// 2026-08-12: Smart Library status line for the
+    /// "Auto-download on WiFi" toggle. Shows the last-run
+    /// time + track count if we've ever run. Otherwise
+    /// "Off" (toggle disabled) or "Ready" (first run
+    /// pending). Mirrors the concise style of the other
+    /// Settings status lines.
+    private var autoDownloadStatusLine: String {
+        if !smartLibrary.autoDownloadEnabled { return "Off" }
+        if smartLibrary.isAutoDownloading { return "Auto-downloading…" }
+        guard let last = smartLibrary.lastAutoDownloadAt else { return "Ready" }
+        return "Last: \(formatRelative(last)) · \(smartLibrary.lastAutoDownloadCount) track\(smartLibrary.lastAutoDownloadCount == 1 ? "" : "s")"
+    }
+
+    /// 2026-08-12: Smart Library status line for the
+    /// "Auto-cleanup" toggle. Shows the last cleanup time
+    /// + count + bytes freed. Mirrors autoDownloadStatusLine.
+    private var cleanupStatusLine: String {
+        if !smartLibrary.cleanupEnabled { return "Off" }
+        if smartLibrary.isCleaningUp { return "Cleaning up…" }
+        guard let last = smartLibrary.lastCleanupAt else {
+            return "Ready · auto \(smartLibrary.cleanupDaysAuto)d · manual \(smartLibrary.cleanupDaysManual)d"
+        }
+        let mb = ByteCountFormatter.string(fromByteCount: smartLibrary.lastCleanupBytesFreed, countStyle: .file)
+        return "Last: \(formatRelative(last)) · \(smartLibrary.lastCleanupCount) · \(mb)"
+    }
+
+    /// "5m ago" / "2h ago" / "3d ago" — used by both Smart
+    /// Library status lines. Caps at "1y+" for ancient
+    /// timestamps (which shouldn't happen in practice but
+    /// defensive is cheap).
+    private func formatRelative(_ date: Date) -> String {
+        let elapsed = Date().timeIntervalSince(date)
+        if elapsed < 60 { return "just now" }
+        if elapsed < 3600 { return "\(Int(elapsed / 60))m ago" }
+        if elapsed < 86400 { return "\(Int(elapsed / 3600))h ago" }
+        if elapsed < 86400 * 7 { return "\(Int(elapsed / 86400))d ago" }
+        if elapsed < 86400 * 30 { return "\(Int(elapsed / (86400 * 7)))w ago" }
+        return "1y+ ago"
     }
 
     /// S17 (CV-4): title for the "Test connection" button
@@ -578,6 +622,76 @@ struct SettingsView: View {
                         .font(Typography.sectionHeader)
                         .foregroundColor(Theme.cyberCyan)
                         .textCase(.uppercase)
+                }
+
+                // MARK: - Smart Library Section
+                // 2026-08-12: v1.8.0 — auto-download on WiFi +
+                // auto-cleanup of unused downloads. Two
+                // independent toggles with status lines that
+                // show the last run + result, plus a manual
+                // "Clean up now" button for users who don't
+                // want to wait for the weekly debounce.
+                Section {
+                    // Auto-download on WiFi
+                    Toggle(isOn: $smartLibrary.autoDownloadEnabled) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack(spacing: 6) {
+                                Image(systemName: "wifi")
+                                    .foregroundColor(Theme.cyberCyan)
+                                Text("Auto-download on WiFi")
+                                    .foregroundColor(.white)
+                            }
+                            Text(autoDownloadStatusLine)
+                                .font(.system(size: 12, design: .monospaced))
+                                .foregroundColor(Theme.cyberTextSecondary)
+                        }
+                    }
+                    .listRowBackground(Theme.cyberSurface)
+
+                    // Auto-cleanup
+                    Toggle(isOn: $smartLibrary.cleanupEnabled) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack(spacing: 6) {
+                                Image(systemName: "trash.slash")
+                                    .foregroundColor(Theme.cyberMagenta)
+                                Text("Auto-cleanup unused downloads")
+                                    .foregroundColor(.white)
+                            }
+                            Text(cleanupStatusLine)
+                                .font(.system(size: 12, design: .monospaced))
+                                .foregroundColor(Theme.cyberTextSecondary)
+                        }
+                    }
+                    .listRowBackground(Theme.cyberSurface)
+
+                    // Manual cleanup trigger
+                    Button {
+                        smartLibrary.runCleanupNow()
+                    } label: {
+                        HStack {
+                            Image(systemName: "sparkles")
+                                .foregroundColor(Theme.cyberCyan)
+                            Text("Clean up now")
+                                .foregroundColor(.white)
+                            Spacer()
+                            if smartLibrary.isCleaningUp {
+                                ProgressView()
+                                    .tint(Theme.cyberCyan)
+                                    .scaleEffect(0.8)
+                            }
+                        }
+                    }
+                    .disabled(smartLibrary.isCleaningUp)
+                    .listRowBackground(Theme.cyberSurface)
+                } header: {
+                    Text("Smart Library")
+                        .font(Typography.sectionHeader)
+                        .foregroundColor(Theme.cyberCyan)
+                        .textCase(.uppercase)
+                } footer: {
+                    Text("Auto-downloads: new releases from your favorite artists + recently-played tracks. Auto-cleanup: removes liked-never, auto-downloads after \(smartLibrary.cleanupDaysAuto)d unplayed, manual downloads after \(smartLibrary.cleanupDaysManual)d. Liked tracks are never auto-removed.")
+                        .font(.system(size: 11))
+                        .foregroundColor(Theme.cyberTextSecondary)
                 }
 
                 // MARK: - Backend Section (S15)

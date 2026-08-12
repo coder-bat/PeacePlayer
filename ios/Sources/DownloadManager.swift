@@ -219,6 +219,19 @@ class DownloadManager: ObservableObject {
 
         // Remove from completed downloads if present
         completedDownloads.removeAll { $0.track.videoId == videoId }
+
+        // 2026-08-12: post .downloadDeleted so SmartLibraryManager
+        // can drop the videoId from its autoDownloadedVideoIds
+        // set. Without this, the set would grow unboundedly with
+        // stale entries pointing at videoIds that no longer have
+        // an on-disk file. The set is only used for tier lookup
+        // (auto vs manual), so a stale entry would at worst
+        // mis-classify a re-downloaded track — but it's tidier
+        // to keep it accurate.
+        NotificationCenter.default.post(
+            name: .downloadDeleted,
+            object: videoId
+        )
     }
 
     // MARK: - Private Methods

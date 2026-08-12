@@ -21,6 +21,12 @@ final class NetworkMonitor: ObservableObject {
     @Published private(set) var connectionType: NWInterface.InterfaceType?
     @Published private(set) var isBackendReachable = true
     @Published private(set) var lastBackendCheck: Date?
+    // 2026-08-12: published `isExpensive` from NWPath so
+    // SmartLibraryManager can skip auto-download on metered
+    // WiFi (hotspots, Low Data Mode). iOS sets isExpensive when
+    // the OS thinks the user wouldn't want background data on
+    // this connection. Updated on every path change.
+    @Published private(set) var isMetered: Bool = false
 
     private let monitor = NWPathMonitor()
     private let queue = DispatchQueue(label: "NetworkMonitor")
@@ -62,6 +68,7 @@ final class NetworkMonitor: ObservableObject {
             DispatchQueue.main.async {
                 self?.isConnected = path.status == .satisfied
                 self?.connectionType = path.availableInterfaces.first?.type
+                self?.isMetered = path.isExpensive
                 if path.status == .satisfied {
                     // v1.6.8 (CV-10.5): when the OS path comes
                     // back up, optimistically assume the
