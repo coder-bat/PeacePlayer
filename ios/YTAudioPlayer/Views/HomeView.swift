@@ -1626,55 +1626,37 @@ class HomeViewModel: ObservableObject {
 
     @MainActor
     func playTrack(_ track: Track, seekToProgress progress: Double? = nil) {
-        // 2026-06-29 (S9d): log so we can see the play flow in the
-        // console when the user reports "tap does nothing".
+        // 2026-08-12: delegate to PlayerState.shared.play(track:),
+        // which has the local-first logic (C-5 fix in PlayerState
+        // .play(track:) at line 1098 — checks AudioFileManager.isPlayable
+        // and plays the local M4A if it exists, falls back to a
+        // /stream roundtrip otherwise). The previous inline implementation
+        // here always went through StreamURLCache.getStreamUrl, which
+        // meant tapping a downloaded track from Home's Downloaded /
+        // Liked sub-sections silently streamed the track from the
+        // backend instead of playing the local file. User-visible bug:
+        // downloaded tracks wouldn't play in airplane mode + the
+        // /stream roundtrip was wasted on every tap.
+        //
+        // LibraryViewModel.playTrack already used the correct delegate
+        // (LibraryViewModel.swift:373) — this brings HomeViewModel in
+        // line. The optional seek-to-progress is the only piece of
+        // the old body we still need (used by the Resume block on
+        // Home to resume the last-played track at its saved position).
         print("▶️ [S9d] playTrack ENTRY track=\(track.title) videoId=\(track.videoId) seekToProgress=\(progress ?? -1)")
 
-        // Show loading indicator immediately before fetching stream URL
-        let loadingItem = QueueItem(
-            track: track,
-            streamUrl: "",
-            source: .stream
-        )
-        PlayerState.shared.currentItem = loadingItem
-        PlayerState.shared.playbackState = .loading
+        PlayerState.shared.play(track: track)
 
-        StreamURLCache.shared.getStreamUrl(videoId: track.videoId)
-            .handleErrors(with: .shared, retry: { [weak self] in
-                print("▶️ [S9e] playTrack: getStreamUrl failed, retrying")
-                self?.playTrack(track, seekToProgress: progress)
-            })
-            .sink(receiveCompletion: { completion in
-                if case .failure(let error) = completion {
-                    print("▶️ [S9e] playTrack: stream URL FAILED for \(track.title): \(error)")
-                }
-            },
-                  receiveValue: { streamInfo in
-                print("▶️ [S9e] playTrack: stream URL received for \(track.title), calling play()")
-                let item = QueueItem(
-                    track: track,
-                    streamUrl: streamInfo.streamUrl,
-                    source: .stream
-                )
-                PlayerState.shared.play(item: item)
-                // S17-H / S17-PLAY (Fix 3A): prefetch the next 3 likely
-                // plays so the cold-path transcode rarely runs. Wi-Fi
-                // gate is inside prefetchUpNext.
-                StreamURLCache.shared.prefetchUpNext(
-                    queue: PlayerState.shared.queue,
-                    currentIndex: PlayerState.shared.currentIndex
-                )
-                // S11 fix (Bug 8): seek to saved progress if the caller
-                // passed one (e.g., resume block tapping the most-
-                // recently-played track at its last-known position).
-                if let p = progress, p > 0.02, p < 0.98 {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-                        print("▶️ [S11] playTrack: seeking to progress \(p)")
-                        PlayerState.shared.seek(to: p)
-                    }
-                }
-            })
-            .store(in: &cancellables)
+        // S11 fix (Bug 8): seek to saved progress if the caller
+        // passed one. Same asyncAfter pattern as before — the seek
+        // happens after the player has had a moment to start decoding
+        // the audio (works for both local and stream sources).
+        if let p = progress, p > 0.02, p < 0.98 {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                print("▶️ [S11] playTrack: seeking to progress \(p)")
+                PlayerState.shared.seek(to: p)
+            }
+        }
     }
 
     func addToQueue(_ track: Track) {

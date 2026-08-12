@@ -1105,59 +1105,43 @@ class SearchViewModel: ObservableObject {
     
     @MainActor
     private func performPlayTrack(_ track: Track) {
-        // Show loading indicator immediately before fetching stream URL
-        let loadingItem = QueueItem(
-            track: track,
-            streamUrl: "",
-            source: .stream,
-            contentSource: .youtube
-        )
-        PlayerState.shared.currentItem = loadingItem
-        PlayerState.shared.playbackState = .loading
-
-        StreamURLCache.shared.getStreamUrl(videoId: track.videoId)
-            .handleErrors(with: .shared, retry: { [weak self] in
-                self?.performPlayTrack(track)
-            })
-            .sink(receiveCompletion: { completion in
-                if case .failure(let error) = completion {
-                    print("⚠️ [SearchView] Request failed: \(error.localizedDescription)")
-                }
-            },
-                  receiveValue: { streamInfo in
-                let item = QueueItem(
-                    track: track,
-                    streamUrl: streamInfo.streamUrl,
-                    source: .stream,
-                    contentSource: .youtube
-                )
-                PlayerState.shared.play(item: item)
-                // S17-H / S17-PLAY (Fix 3A): prefetch the next 3 likely
-                // plays so the cold-path transcode rarely runs. Wi-Fi
-                // gate is inside prefetchUpNext.
-                StreamURLCache.shared.prefetchUpNext(
-                    queue: PlayerState.shared.queue,
-                    currentIndex: PlayerState.shared.currentIndex
-                )
-            })
-            .store(in: &cancellables)
+        // 2026-08-12: delegate to PlayerState.shared.play(track:),
+        // which has the local-first logic (C-5 fix in PlayerState
+        // .play(track:) at line 1098). Previously this always fetched
+        // a /stream roundtrip, which meant tapping a downloaded track
+        // from Search results silently streamed instead of playing
+        // the local M4A. Same bug pattern as HomeViewModel.playTrack
+        // (fixed in the same commit) — both views had inline copies
+        // of the always-stream path that bypassed PlayerState's
+        // local-first smart play.
+        PlayerState.shared.play(track: track)
     }
-    
+
     func downloadTrack(_ track: Track) {
         if DownloadManager.shared.isDownloading(track) {
             DownloadManager.shared.cancelDownload(for: track)
             return
         }
-        
+
         guard !isDownloaded(track) else {
             ErrorHandler.shared.show(.downloadFailed("This track is already in your library"))
             return
         }
-        
+
         DownloadManager.shared.download(track)
     }
-    
+
     func addToQueue(_ track: Track) {
+        // 2026-08-12: same local-first fix as performPlayTrack —
+        // if the track is downloaded, build a .local QueueItem and
+        // skip the /stream roundtrip entirely. Otherwise fall
+        // through to the stream-URL path. Same pattern as
+        // LibraryViewModel.addToQueue (Sources/LibraryViewModel.swift:413).
+        if let localItem = localFirstQueueItem(for: track) {
+            PlayerState.shared.addToQueue(localItem)
+            HapticManager.success()
+            return
+        }
         StreamURLCache.shared.getStreamUrl(videoId: track.videoId)
             .handleErrors(with: .shared)
             .sink(receiveValue: { streamInfo in
@@ -1172,8 +1156,15 @@ class SearchViewModel: ObservableObject {
             })
             .store(in: &cancellables)
     }
-    
+
     func playNext(_ track: Track) {
+        // 2026-08-12: same local-first fix as addToQueue. Same pattern
+        // as LibraryViewModel.playNextTrack (Sources/LibraryViewModel.swift:401).
+        if let localItem = localFirstQueueItem(for: track) {
+            PlayerState.shared.addToQueueNext(localItem)
+            HapticManager.success()
+            return
+        }
         StreamURLCache.shared.getStreamUrl(videoId: track.videoId)
             .handleErrors(with: .shared)
             .sink(receiveValue: { streamInfo in
@@ -1187,6 +1178,35 @@ class SearchViewModel: ObservableObject {
                 HapticManager.success()
             })
             .store(in: &cancellables)
+    }
+
+    /// Build a QueueItem preferring the local M4A if the track is
+    /// downloaded. Returns nil if the track isn't downloaded (in
+    /// which case the caller falls through to the stream-URL path).
+    /// Mirrors LibraryViewModel's inline local-first check
+    /// (Sources/LibraryViewModel.swift:401-422).
+    ///
+    /// `internal` (not `private`) so `LocalFirstQueueItemTests` can
+    /// exercise the contract directly. The behavior here is also
+    /// covered by `PlayerState.play(track:)`'s own local-first
+    /// check (C-5 fix at PlayerState.swift:1098), but having the
+    /// helper itself under test prevents regressions in the
+    /// SearchView queue-construction paths specifically.
+    func localFirstQueueItem(for track: Track) -> QueueItem? {
+        let isPlayable = AudioFileManager.shared.isPlayable(
+            videoId: track.videoId,
+            context: PersistenceController.shared.viewContext
+        )
+        if isPlayable {
+            let localURL = AudioFileManager.shared.localFileURL(for: track.videoId)
+            return QueueItem(
+                track: track,
+                streamUrl: localURL.absoluteString,
+                source: .local(path: localURL.path),
+                contentSource: .local
+            )
+        }
+        return nil
     }
 }
 

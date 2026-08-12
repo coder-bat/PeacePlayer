@@ -104,6 +104,7 @@
 		8B8A6A1865FF679994D2EFDC /* DebugBridgeManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5515844102468F2E8BE646 /* DebugBridgeManager.swift */; };
 		8C08C9411CD3B0C2D046272F /* SharedArtworkCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95FF18F20CBA21FA9070F595 /* SharedArtworkCache.swift */; };
 		8D1FF1D194532CA52F63F4A2 /* HistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD03FD83E3A157B679147DD7 /* HistoryView.swift */; };
+		8D35817ED4E2B813A06F979D /* LocalFirstQueueItemTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F0E8EAC13265471D606018E /* LocalFirstQueueItemTests.swift */; };
 		8E2D9F95F39A929F1994D90D /* ChordsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1ABDD1EC6042FE4A7F590CA1 /* ChordsView.swift */; };
 		9068A05A2BADD4295451A08C /* CDTrack.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B9C54B9D7B79F7AE8AD5CAC /* CDTrack.swift */; };
 		90C12B80FF245BBBEC1EAD9F /* HapticReduceToast.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA6ACD057DEE1FA7095F7767 /* HapticReduceToast.swift */; };
@@ -300,6 +301,7 @@
 		8C0720B82757B56EF9C11BD3 /* PersistenceController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistenceController.swift; sourceTree = "<group>"; };
 		8C8E4BAF45080942E2B7C0C2 /* SpotlightService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpotlightService.swift; sourceTree = "<group>"; };
 		8CD2972C7769BDB5C6FFD707 /* DeepLinkIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeepLinkIntent.swift; sourceTree = "<group>"; };
+		8F0E8EAC13265471D606018E /* LocalFirstQueueItemTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalFirstQueueItemTests.swift; sourceTree = "<group>"; };
 		92383E8A72B74896B1FE7BAC /* QRCodeGenerator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QRCodeGenerator.swift; sourceTree = "<group>"; };
 		92F678B243A3E9D1A9E2BBA5 /* VinylRecordView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VinylRecordView.swift; sourceTree = "<group>"; };
 		939FE198F03898EA673D0821 /* AVPlayerController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AVPlayerController.swift; sourceTree = "<group>"; };
@@ -694,6 +696,7 @@
 			isa = PBXGroup;
 			children = (
 				9D14921A5DEB5399A4EFC83D /* AudioFileManagerTests.swift */,
+				8F0E8EAC13265471D606018E /* LocalFirstQueueItemTests.swift */,
 				345D733DD588ABBB240AA767 /* NowPlayingServiceTests.swift */,
 				D3BCCC013A5A0005C2CF2B3C /* PlaybackClockTests.swift */,
 				84DB5EC5B5DE6F4D95E1CD96 /* QueueItemTests.swift */,
@@ -996,6 +999,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				937A11DF74E5E97AFFCBC3CC /* AudioFileManagerTests.swift in Sources */,
+				8D35817ED4E2B813A06F979D /* LocalFirstQueueItemTests.swift in Sources */,
 				00F3E9D5D4553861DF133D34 /* NowPlayingServiceTests.swift in Sources */,
 				C2E1A49F1093057097408A45 /* PlaybackClockTests.swift in Sources */,
 				67670C1DD46FCE786F5AF63C /* QueueItemTests.swift in Sources */,
