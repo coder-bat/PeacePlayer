@@ -645,11 +645,22 @@ struct HeroPlaylistArtworkCyberpunk: View {
 
             if let thumbnailURL = playlist.thumbnailURL,
                let url = URL(string: thumbnailURL) {
+                // v1.8.7: was CachedAsyncImage + .aspectRatio(.fill)
+                // with no frame. The CachedAsyncImage would render
+                // at the image's natural size (e.g. 720x720) and
+                // the .aspectRatio(.fill) only affected its
+                // internal layout, not the outer ZStack — so the
+                // 220x220 parent frame was being overflowed. Now
+                // the CachedAsyncImage explicitly fills the
+                // ZStack, the .aspectRatio gives it a square
+                // ratio, and the outer 220x220 frame clips the
+                // result.
                 CachedAsyncImage(url: url) {
                     RoundedRectangle(cornerRadius: 16)
                         .fill(Theme.cyberSurface)
                 }
-                .aspectRatio(contentMode: .fill)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .aspectRatio(1, contentMode: .fill)
                 .cornerRadius(16)
             } else {
                 artworkContent

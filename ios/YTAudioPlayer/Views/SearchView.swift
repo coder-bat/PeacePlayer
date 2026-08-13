@@ -648,9 +648,13 @@ struct PlaylistSearchRow: View {
     var body: some View {
         HStack(spacing: 12) {
             // Artwork with video count
+            // v1.8.7: was 60x60. Standardized to 50x50 to match
+            // SearchResultRow's song thumbnails (also 50x50) so
+            // the whole search tab has one list-row thumbnail
+            // size. The video-count badge still fits at this size.
             ZStack(alignment: .bottomTrailing) {
                 ArtworkThumbnail(url: playlist.artworkURL)
-                    .frame(width: 60, height: 60)
+                    .frame(width: 50, height: 50)
                 
                 Text("\(playlist.videoCount)")
                     .font(.caption2.bold())
@@ -735,6 +739,18 @@ struct ArtworkThumbnail: View {
     let url: URL?
 
     var body: some View {
+        // v1.8.7 / S18-LIST-THUMBNAILS-CONSISTENT: previously
+        // the CachedAsyncImage had no frame, so it rendered at
+        // its natural image size (e.g. 720x720) and overflowed
+        // the 60x60 wrapper applied by PlaylistSearchRow. The
+        // .clipShape on the outer ZStack clipped the visible
+        // content, but the layout was still wrong (the image
+        // was at 720px and the cell was at 60px). Now the
+        // CachedAsyncImage has .frame(maxWidth: .infinity,
+        // maxHeight: .infinity) to stretch to the parent, and
+        // PlaylistSearchRow is bumped down to 50x50 (matching
+        // SearchResultRow's song thumbnail size) so the whole
+        // search tab uses one consistent list-row size.
         ZStack {
             RoundedRectangle(cornerRadius: CornerRadius.sm)
                 .fill(Color.cyberSurface)
@@ -747,6 +763,7 @@ struct ArtworkThumbnail: View {
                 CachedAsyncImage(url: url) {
                     EmptyView()
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm))

@@ -1762,7 +1762,7 @@ class HomeViewModel: ObservableObject {
         }
         guard !playable.isEmpty else {
             ErrorHandler.shared.show(
-                .downloadFailed("None of your downloaded tracks are playable right now")
+                .playbackFailed("None of your downloaded tracks are playable right now")
             )
             return
         }

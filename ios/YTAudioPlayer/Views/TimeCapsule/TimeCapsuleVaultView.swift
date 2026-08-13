@@ -102,13 +102,15 @@ private struct CapsuleCard: View {
 
     var body: some View {
         HStack(spacing: 14) {
+            // v1.8.7: 56 -> 50. Standardize list-row thumbnails to
+            // 50x50 across the app.
             // Artwork (blurred if sealed)
             CachedAsyncImage(url: capsule.artworkURL) { image in
                 image.resizable().aspectRatio(contentMode: .fill)
             } placeholder: {
                 Color.cyberDim.opacity(0.2)
             }
-            .frame(width: 56, height: 56)
+            .frame(width: 50, height: 50)
             .cornerRadius(10)
             .blur(radius: style == .sealed ? 8 : 0)
             .overlay(

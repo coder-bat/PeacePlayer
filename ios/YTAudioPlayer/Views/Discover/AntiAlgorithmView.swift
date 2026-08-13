@@ -211,12 +211,14 @@ struct AntiAlgorithmContent: View {
 
                     ForEach(engine.explorationQueue) { track in
                         HStack(spacing: 12) {
+                            // v1.8.7: 44 -> 50. Standardize list-row
+                            // thumbnails to 50x50 across the app.
                             CachedAsyncImage(url: track.artworkURL) { image in
                                 image.resizable().aspectRatio(contentMode: .fill)
                             } placeholder: {
                                 Color.cyberDim.opacity(0.2)
                             }
-                            .frame(width: 44, height: 44)
+                            .frame(width: 50, height: 50)
                             .cornerRadius(8)
 
                             VStack(alignment: .leading, spacing: 2) {

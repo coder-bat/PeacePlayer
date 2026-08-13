@@ -9,26 +9,13 @@ import Foundation
 import Combine
 import CoreData
 
-// Bridge class to connect BackgroundDownloadService to DownloadManager
-class DownloadProgressDelegate: NSObject, BackgroundDownloadDelegate {
-    private weak var manager: DownloadManager?
-
-    init(manager: DownloadManager) {
-        self.manager = manager
-    }
-
-    func downloadDidProgress(videoId: String, progress: Double) {
-        manager?.handleDownloadProgress(trackId: videoId, progress: progress)
-    }
-
-    func downloadDidComplete(videoId: String, fileURL: URL) {
-        manager?.handleDownloadComplete(trackId: videoId, fileURL: fileURL)
-    }
-
-    func downloadDidFail(videoId: String, error: Error) {
-        manager?.handleDownloadError(trackId: videoId, error: error)
-    }
-}
+// 2026-08-13: removed `DownloadProgressDelegate`. It was the
+// bridge between BackgroundDownloadService's legacy weak-delegate
+// API and DownloadManager. The Combine subscription in
+// `DownloadManager.init` is now the single source of truth for
+// completion / error / progress events — the legacy path was
+// duplicate-delivering every event. Nothing else in the app
+// referenced this class.
 
 struct DownloadTask: Identifiable {
     let id = UUID()
@@ -86,32 +73,87 @@ class DownloadManager: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     private let maxConcurrentDownloads = 1
 
-    // Serial queue for thread-safe state mutations
-    private let stateQueue = DispatchQueue(label: "com.ytaudio.downloadstate", qos: .utility)
+    // 2026-08-13: removed `stateQueue`. The old
+    // `.receive(on: stateQueue)` Combine pipeline mutated
+    // @Published arrays from the wrong thread (see init
+    // comment for the full story). Everything is now on
+    // main; CoreData work uses `context.performAndWait`'s
+    // own private queue.
 
     private init() {
-        // C-1 fix: subscribe to BackgroundDownloadService's Combine publishers
-        // so download completion / error events are delivered reliably even when
-        // iOS relaunches the app to deliver a background URLSession event.
-        // The previous weak-delegate pattern silently dropped these events
-        // because DownloadManager was lazily initialized *after* the completion
-        // fired during the relaunch.
+        // 2026-08-13: switched the receive scheduler from
+        // `stateQueue` to `.main`. Three reasons:
+        //
+        // 1. **Stops the second-download hang.** With
+        //    `.receive(on: stateQueue)`, the first download's
+        //    completion delivered `handleDownloadComplete` on
+        //    stateQueue, which then called `processQueue()` on
+        //    stateQueue. `processQueue` mutates `@Published`
+        //    arrays (`activeDownloads`, `downloadQueue`,
+        //    `isDownloading`) — and those mutations happened on
+        //    stateQueue, not main. Meanwhile, main was running
+        //    `handleDownloadSuccess` for the just-completed
+        //    task, which also reads + mutates `activeDownloads`
+        //    (`activeDownloads.remove(at: 0)`). The two threads
+        //    hit the same `Array` concurrently. Swift `Array`
+        //    is not thread-safe — concurrent mutation can
+        //    corrupt its internal storage, and the next
+        //    `firstIndex(where:)` call on the corrupted array
+        //    spins or returns a wrong element, freezing the
+        //    main thread. First download dodged this because
+        //    its `processQueue` was on main (called from UI).
+        //    Second download was the one that hung.
+        //
+        // 2. **Stops the silent stall watchdog.** The Timer
+        //    created by `startStallWatchdog` was registered on
+        //    whatever run loop the calling thread had — for
+        //    the second download, that was stateQueue (a GCD
+        //    worker). `Timer.scheduledTimer` on a GCD thread
+        //    either adds to a non-existent run loop (no-op) or
+        //    fires on the wrong loop, so the 30s stall
+        //    watchdog never tripped. With `.receive(on:
+        //    .main)`, `performDownload` and its Timer
+        //    creation land on main → the watchdog actually
+        //    fires.
+        //
+        // 3. **Kills the duplicate `handleDownloadComplete`
+        //    call.** The C-1 fix added the Combine path so
+        //    background-relaunch completions wouldn't be
+        //    lost, but the legacy weak-delegate path was
+        //    still wired. Every completion fired
+        //    `handleDownloadComplete` twice (once from the
+        //    Combine sink, once from the main-thread
+        //    `delegate?.downloadDidComplete` call). The second
+        //    call did a redundant CoreData save + set
+        //    `isDownloading = false` while a fresh download
+        //    was starting, racing with `processQueue`'s
+        //    `isDownloading = true`. The Combine path alone
+        //    covers both foreground and background-relaunch
+        //    cases (the C-1 fix's whole point), so the legacy
+        //    delegate is now unused — see the removal of
+        //    `BackgroundDownloadService.shared.delegate =
+        //    delegate` in `performDownload` below.
+        //
+        // The CoreData save inside `handleDownloadComplete`
+        // already uses `context.performAndWait`, which has
+        // its own private queue — so we don't lose anything
+        // by moving the surrounding orchestration to main.
         BackgroundDownloadService.shared.completions
-            .receive(on: stateQueue)
+            .receive(on: DispatchQueue.main)
             .sink { [weak self] completion in
                 self?.handleDownloadComplete(trackId: completion.videoId, fileURL: completion.fileURL)
             }
             .store(in: &cancellables)
 
         BackgroundDownloadService.shared.errors
-            .receive(on: stateQueue)
+            .receive(on: DispatchQueue.main)
             .sink { [weak self] (videoId, error) in
                 self?.handleDownloadError(trackId: videoId, error: error)
             }
             .store(in: &cancellables)
 
         BackgroundDownloadService.shared.progressPublisher
-            .receive(on: stateQueue)
+            .receive(on: DispatchQueue.main)
             .sink { [weak self] (videoId, progress) in
                 self?.handleDownloadProgress(trackId: videoId, progress: progress)
             }
@@ -256,7 +298,13 @@ class DownloadManager: ObservableObject {
     }
     
     private var progressTimer: Timer?
-    private var downloadDelegate: DownloadProgressDelegate?
+    // 2026-08-13: removed `downloadDelegate: DownloadProgressDelegate?`.
+    // The Combine subscription in `init` is now the single source of
+    // truth for completion / error / progress events; the legacy
+    // weak-delegate path was duplicate-delivering every event.
+    // The `DownloadProgressDelegate` class at the top of this file
+    // is kept around only as a no-op stub (it has no other
+    // references) — see the comment at its declaration.
     // S13: stalled-watchdog state. `lastObservedProgress` is updated
     // every time `handleDownloadProgress` fires; the watchdog timer
     // ticks every 5s and compares it to the previously-observed value.
@@ -350,11 +398,15 @@ class DownloadManager: ObservableObject {
                     let absoluteUrl = APIService.shared.baseURL + downloadUrl
                     let urlWithToken = self.appendToken(to: absoluteUrl)
 
-                    // Create delegate to track progress
-                    let delegate = DownloadProgressDelegate(manager: self)
-                    self.downloadDelegate = delegate
-                    BackgroundDownloadService.shared.delegate = delegate
-
+                    // 2026-08-13: removed the legacy
+                    //   `BackgroundDownloadService.shared.delegate = delegate`
+                    //   assignment. The Combine path (subscribed
+                    //   in `init`) is the single source of truth
+                    //   for completion / error / progress events.
+                    //   The legacy weak-delegate path was
+                    //   duplicate-delivering every event — see
+                    //   the init comment for the full story.
+                    //
                     // Start actual download to phone storage
                     BackgroundDownloadService.shared.download(
                         track: task.track,
@@ -437,91 +489,91 @@ class DownloadManager: ObservableObject {
     }
 
     func handleDownloadProgress(trackId: String, progress: Double) {
-        // Thread-safe access to activeDownloads
-        stateQueue.async { [weak self] in
-            guard let self = self,
-                  let index = self.activeDownloads.firstIndex(where: { $0.track.videoId == trackId }) else {
-                return
-            }
-            let taskId = self.activeDownloads[index].id
-            self.updateProgress(for: taskId, progress: progress)
-
-            // S13: real progress arrived → reset the stalled-watchdog.
-            // The stall counter only increments when progress is unchanged
-            // across timer ticks; normal progression keeps it at zero.
-            DispatchQueue.main.async { [weak self] in
-                guard let self = self else { return }
-                self.lastObservedProgress = progress
-                self.stalledTickCount = 0
-            }
+        // 2026-08-13: invoked on main (the Combine subscription
+        // uses `.receive(on: .main)`). No more stateQueue
+        // indirection — the @Published mutations below need to
+        // land on main, and `updateProgress` is also a main-only
+        // operation. The Combine sink uses `[weak self]`, so the
+        // optional chain is at the call site; once we're in this
+        // method, `self` is non-nil.
+        guard let index = self.activeDownloads.firstIndex(where: { $0.track.videoId == trackId }) else {
+            return
         }
+        let taskId = self.activeDownloads[index].id
+        self.updateProgress(for: taskId, progress: progress)
+
+        // S13: real progress arrived → reset the stalled-watchdog.
+        // The stall counter only increments when progress is unchanged
+        // across timer ticks; normal progression keeps it at zero.
+        self.lastObservedProgress = progress
+        self.stalledTickCount = 0
     }
 
     func handleDownloadComplete(trackId: String, fileURL: URL) {
-        // Thread-safe access to activeDownloads
-        stateQueue.async { [weak self] in
-            guard let self = self,
-                  let index = self.activeDownloads.firstIndex(where: { $0.track.videoId == trackId }) else {
-                return
-            }
-            let taskId = self.activeDownloads[index].id
-            let track = self.activeDownloads[index].track
-
-            // S13: a successful download means the watchdog is no longer
-            // needed; cancel it so we don't false-positive-stall the next
-            // task that re-uses the timer slot.
-            DispatchQueue.main.async { [weak self] in
-                self?.progressTimer?.invalidate()
-                self?.progressTimer = nil
-            }
-
-            // Save to Core Data + verify on the SAME context. Previous
-            // S17-H / LIBRARY-SAVE-SILENT-FAIL split this into
-            // saveDownloadToCoreData (which called a fresh
-            // backgroundContext) and verifyLibraryEntry (which called
-            // ANOTHER fresh backgroundContext). Two new background
-            // contexts don't always see each other's writes reliably
-            // — verify could return false even when save succeeded,
-            // firing the error haptic on a successful download.
-            //
-            // saveDownloadToCoreDataWithVerify does save + verify on
-            // the same context, returns a single Bool. If the save
-            // itself throws, it surfaces the error via ErrorHandler
-            // and returns false (no silent success).
-            let savedOk = self.saveDownloadToCoreDataWithVerify(track: track, fileURL: fileURL)
-
-            if savedOk {
-                self.handleDownloadSuccess(taskId, path: fileURL.path)
-            } else {
-                print("❌ Library save failed for \(track.title) — skipping success haptic")
-                // Mark the task as failed (so the UI shows a retry button)
-                // and surface a real failure to the user.
-                self.handleDownloadFailure(taskId, error: "Library save failed")
-            }
-            self.isDownloading = false
-            self.processQueue()
+        // 2026-08-13: invoked on main (see init). No
+        // stateQueue.async wrapper — the entry is already on
+        // main, and the @Published mutations in
+        // handleDownloadSuccess/Failure need to land on main
+        // to avoid the data race documented in the init
+        // comment.
+        guard let index = self.activeDownloads.firstIndex(where: { $0.track.videoId == trackId }) else {
+            return
         }
+        let taskId = self.activeDownloads[index].id
+        let track = self.activeDownloads[index].track
+
+        // S13: a successful download means the watchdog is no longer
+        // needed; cancel it so we don't false-positive-stall the next
+        // task that re-uses the timer slot.
+        self.progressTimer?.invalidate()
+        self.progressTimer = nil
+
+        // Save to Core Data + verify on the SAME context. Previous
+        // S17-H / LIBRARY-SAVE-SILENT-FAIL split this into
+        // saveDownloadToCoreData (which called a fresh
+        // backgroundContext) and verifyLibraryEntry (which called
+        // ANOTHER fresh backgroundContext). Two new background
+        // contexts don't always see each other's writes reliably
+        // — verify could return false even when save succeeded,
+        // firing the error haptic on a successful download.
+        //
+        // saveDownloadToCoreDataWithVerify does save + verify on
+        // the same context, returns a single Bool. If the save
+        // itself throws, it surfaces the error via ErrorHandler
+        // and returns false (no silent success). Uses
+        // `performAndWait` internally so it blocks the calling
+        // thread (main) for the duration of the save. That's
+        // fine — main is already async with respect to the
+        // URLSession download.
+        let savedOk = self.saveDownloadToCoreDataWithVerify(track: track, fileURL: fileURL)
+
+        if savedOk {
+            self.handleDownloadSuccess(taskId, path: fileURL.path)
+        } else {
+            print("❌ Library save failed for \(track.title) — skipping success haptic")
+            // Mark the task as failed (so the UI shows a retry button)
+            // and surface a real failure to the user.
+            self.handleDownloadFailure(taskId, error: "Library save failed")
+        }
+        self.isDownloading = false
+        self.processQueue()
     }
 
     func handleDownloadError(trackId: String, error: Error) {
-        // Thread-safe access to activeDownloads
-        stateQueue.async { [weak self] in
-            guard let self = self,
-                  let index = self.activeDownloads.firstIndex(where: { $0.track.videoId == trackId }) else {
-                return
-            }
-            let taskId = self.activeDownloads[index].id
-
-            // S13: failed download → stop the watchdog.
-            DispatchQueue.main.async { [weak self] in
-                self?.progressTimer?.invalidate()
-                self?.progressTimer = nil
-            }
-
-            self.handleDownloadFailure(taskId, error: error.localizedDescription)
-            self.isDownloading = false
-            self.processQueue()
+        // 2026-08-13: invoked on main (see init). No
+        // stateQueue.async wrapper.
+        guard let index = self.activeDownloads.firstIndex(where: { $0.track.videoId == trackId }) else {
+            return
         }
+        let taskId = self.activeDownloads[index].id
+
+        // S13: failed download → stop the watchdog.
+        self.progressTimer?.invalidate()
+        self.progressTimer = nil
+
+        self.handleDownloadFailure(taskId, error: error.localizedDescription)
+        self.isDownloading = false
+        self.processQueue()
     }
 
     /// Save the download to CoreData AND verify it persisted, on a
