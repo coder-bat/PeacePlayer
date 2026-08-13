@@ -15,23 +15,98 @@ struct Track: Identifiable, Codable, Equatable {
     let album: String
     let durationSeconds: Int
     let thumbnails: [Thumbnail]
+    // v1.8.5 / S18-SMALL-LARGE-THUMBNAILS: BE now returns an
+    // explicit small (~120-240px) and large (~480-720px) URL
+    // picked from the ytmusicapi list. Optional for backward
+    // compat — old BE responses just leave these nil and the
+    // iOS falls back to `thumbnails.last`.
+    let thumbnailSmall: Thumbnail?
+    let thumbnailLarge: Thumbnail?
     let isExplicit: Bool
     let videoType: String
-    
+
+    // v1.8.5: explicit memberwise init with defaults for the
+    // new optional fields. This keeps the synthesized Codable
+    // decoder working (decoder ignores default values) and lets
+    // call sites construct a Track without specifying the new
+    // fields. Five call sites were broken by the struct change:
+    // PlayerState.swift:2059/2118/2195, AdaptiveWalkDJManager.swift:313,
+    // AddToPlaylistSheet.swift:267, and the two test makeTrack
+    // helpers. They all work again because of these defaults.
+    init(
+        videoId: String,
+        title: String,
+        artists: [String],
+        album: String,
+        durationSeconds: Int,
+        thumbnails: [Thumbnail],
+        thumbnailSmall: Thumbnail? = nil,
+        thumbnailLarge: Thumbnail? = nil,
+        isExplicit: Bool,
+        videoType: String
+    ) {
+        self.videoId = videoId
+        self.title = title
+        self.artists = artists
+        self.album = album
+        self.durationSeconds = durationSeconds
+        self.thumbnails = thumbnails
+        self.thumbnailSmall = thumbnailSmall
+        self.thumbnailLarge = thumbnailLarge
+        self.isExplicit = isExplicit
+        self.videoType = videoType
+    }
+
+    // v1.8.5: custom decoder so missing JSON fields default to
+    // nil. Swift's auto-synthesized decoder requires the field
+    // to be present (even if Optional) — without this, old BE
+    // responses without thumbnailSmall/large would fail to
+    // decode and the iOS app would silently show zero results.
+    private enum CodingKeys: String, CodingKey {
+        case videoId, title, artists, album, durationSeconds
+        case thumbnails, thumbnailSmall, thumbnailLarge
+        case isExplicit, videoType
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        videoId = try c.decode(String.self, forKey: .videoId)
+        title = try c.decode(String.self, forKey: .title)
+        artists = try c.decode([String].self, forKey: .artists)
+        album = try c.decode(String.self, forKey: .album)
+        durationSeconds = try c.decode(Int.self, forKey: .durationSeconds)
+        thumbnails = try c.decode([Thumbnail].self, forKey: .thumbnails)
+        thumbnailSmall = try c.decodeIfPresent(Thumbnail.self, forKey: .thumbnailSmall)
+        thumbnailLarge = try c.decodeIfPresent(Thumbnail.self, forKey: .thumbnailLarge)
+        isExplicit = try c.decode(Bool.self, forKey: .isExplicit)
+        videoType = try c.decode(String.self, forKey: .videoType)
+    }
+
     var id: String { videoId }
-    
+
     var displayTitle: String { title }
-    
+
     var displayArtist: String { artists.isEmpty ? "Unknown Artist" : artists.joined(separator: ", ") }
-    
+
     var durationText: String {
         let minutes = durationSeconds / 60
         let seconds = durationSeconds % 60
         return String(format: "%d:%02d", minutes, seconds)
     }
-    
-    var artworkURL: URL? { thumbnails.last?.url }
-    
+
+    // v1.8.5 / S18-SMALL-LARGE-THUMBNAILS: prefer the small URL
+    // for row cells (50pt @ 3x = 150px render), fall back to
+    // the old `thumbnails.last` for old BE responses.
+    var artworkURL: URL? {
+        thumbnailSmall?.url ?? thumbnails.last?.url
+    }
+
+    // NEW: explicit full-res URL for detail views, share cards,
+    // and the now-playing widget. Same fallback chain.
+    var fullArtworkURL: URL? {
+        thumbnailLarge?.url ?? thumbnails.last?.url
+    }
+
     var isAudioTrack: Bool {
         videoType == "MUSIC_VIDEO_TYPE_ATV" || videoType == "MUSIC_VIDEO_TYPE_OMV"
     }

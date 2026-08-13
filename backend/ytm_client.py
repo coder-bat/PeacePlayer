@@ -14,6 +14,62 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+# v1.8.5 / S18-SMALL-LARGE-THUMBNAILS: YouTube Music returns ~4
+# thumbnail sizes per item (typically 60/120/240/720). List rows
+# (50pt @3x = 150px) want the ~120-240 entry; detail views and
+# share cards want the ~720 entry. Previously the iOS app picked
+# the LARGEST for everything — 720px downloads + 1024px decoded
+# buffer per row, 1-4MB bandwidth per search, up to 200MB memory.
+#
+# The fix: BE picks the closest match to 120 (small) and the
+# closest match to 480+ (large) and returns both. iOS uses small
+# for rows, large for detail. The function is tolerant of:
+#   - Empty list → {small: None, large: None}
+#   - Single entry → that entry for both
+#   - Non-dict entries → skipped
+#   - Missing width → treated as 0
+#
+# ytmusicapi returns ascending order (smallest to largest) so
+# formatted[0] is the smallest, formatted[-1] is the largest.
+def _select_thumbnails(thumbnails: list) -> dict:
+    if not thumbnails:
+        return {"small": None, "large": None}
+
+    formatted = []
+    for t in thumbnails:
+        if not isinstance(t, dict) or "url" not in t:
+            continue
+        formatted.append({
+            "url": t["url"],
+            "width": t.get("width", 0) or 0,
+            "height": t.get("height", 0) or 0,
+        })
+
+    if not formatted:
+        return {"small": None, "large": None}
+
+    # Small: closest to 120, in the 120-240 range. Fall back to
+    # the smallest available if no entry in that range.
+    small = next(
+        (t for t in formatted if 120 <= t["width"] <= 240),
+        None,
+    )
+    if small is None:
+        small = formatted[0]
+
+    # Large: closest to 600+ (480+ is the minimum to be visibly
+    # better than 240 on a 1x or 2x display). Walk in reverse
+    # since the list is ascending. Fall back to the largest.
+    large = next(
+        (t for t in reversed(formatted) if t["width"] >= 480),
+        None,
+    )
+    if large is None:
+        large = formatted[-1]
+
+    return {"small": small, "large": large}
+
+
 class YTMusicClient:
     """
     Wrapper around ytmusicapi for structured data access.
@@ -72,7 +128,11 @@ class YTMusicClient:
             for item in results:
                 if item.get('resultType') != 'song':
                     continue
-                
+
+                # v1.8.5 / S18-SMALL-LARGE-THUMBNAILS: pick small
+                # and large URLs from the ytmusicapi list.
+                thumbs = _select_thumbnails(item.get('thumbnails', []))
+
                 track = {
                     'videoId': item.get('videoId'),
                     'title': item.get('title', 'Unknown Title'),
@@ -80,6 +140,8 @@ class YTMusicClient:
                     'album': item.get('album', {}).get('name', 'Unknown Album'),
                     'durationSeconds': item.get('duration_seconds', 0),
                     'thumbnails': item.get('thumbnails', []),
+                    'thumbnailSmall': thumbs['small'],
+                    'thumbnailLarge': thumbs['large'],
                     'isExplicit': item.get('isExplicit', False),
                     'videoType': item.get('videoType', 'UNKNOWN')
                 }
@@ -146,7 +208,11 @@ class YTMusicClient:
                             'width': thumb.get('width', 0),
                             'height': thumb.get('height', 0)
                         })
-                
+
+                # v1.8.5 / S18-SMALL-LARGE-THUMBNAILS: pick small
+                # and large URLs from the formatted list.
+                thumbs = _select_thumbnails(formatted_thumbnails)
+
                 # Handle author - can be string or dict
                 author_data = item.get('author', 'Unknown')
                 if isinstance(author_data, dict):
@@ -155,13 +221,15 @@ class YTMusicClient:
                     author_name = author_data
                 else:
                     author_name = 'Unknown'
-                
+
                 playlist = {
                     'playlistId': playlist_id,
                     'title': item.get('title', 'Unknown Playlist'),
                     'author': author_name,
                     'videoCount': video_count,
                     'thumbnails': formatted_thumbnails,
+                    'thumbnailSmall': thumbs['small'],
+                    'thumbnailLarge': thumbs['large'],
                     'description': item.get('description', '')[:100]  # Truncate
                 }
                 playlists.append(playlist)
@@ -221,13 +289,20 @@ class YTMusicClient:
                 if album_data and isinstance(album_data, dict):
                     album_name = album_data.get('name', 'Unknown Album')
                 
+                # v1.8.5 / S18-SMALL-LARGE-THUMBNAILS: compute the
+                # formatted list + small/large picks once, share
+                # across the dict fields.
+                track_thumbs = format_thumbnails(track.get('thumbnails', []))
+                track_picks = _select_thumbnails(track_thumbs)
                 parsed_track = {
                     'videoId': video_id,
                     'title': track.get('title') or 'Unknown Title',
                     'artists': [a.get('name', 'Unknown') for a in track.get('artists', []) if a and a.get('name')],
                     'album': album_name,
                     'durationSeconds': track.get('duration_seconds') or 0,
-                    'thumbnails': format_thumbnails(track.get('thumbnails', [])),
+                    'thumbnails': track_thumbs,
+                    'thumbnailSmall': track_picks['small'],
+                    'thumbnailLarge': track_picks['large'],
                     'isExplicit': track.get('isExplicit') or False,
                     'videoType': track.get('videoType') or 'MUSIC_VIDEO_TYPE_ATV'
                 }
@@ -247,13 +322,20 @@ class YTMusicClient:
             thumbnails = format_thumbnails(playlist_data.get('thumbnails', []))
             if not thumbnails and tracks:
                 thumbnails = tracks[0].get('thumbnails', [])
-            
+
+            # v1.8.5 / S18-SMALL-LARGE-THUMBNAILS: small + large
+            # picks for the playlist-level artwork (shown in
+            # PlaylistSearchRow).
+            playlist_picks = _select_thumbnails(thumbnails)
+
             return {
                 'playlistId': playlist_id,
                 'title': playlist_data.get('title', 'Unknown Playlist'),
                 'author': author_name,
                 'videoCount': len(tracks),
                 'thumbnails': thumbnails,
+                'thumbnailSmall': playlist_picks['small'],
+                'thumbnailLarge': playlist_picks['large'],
                 'description': (playlist_data.get('description') or '')[:200],
                 'tracks': tracks
             }
@@ -491,13 +573,21 @@ class YTMusicClient:
                     # Skip the seed track itself — it's already in the
                     # user's queue, no need to repeat it.
                     continue
+                # v1.8.5 / S18-SMALL-LARGE-THUMBNAILS: small + large
+                # picks for this entry. yt-dlp's extract_flat
+                # thumbnails aren't always a clean list of dicts, so
+                # _select_thumbnails is tolerant of bad shapes.
+                entry_thumbs = entry.get('thumbnails') or []
+                entry_picks = _select_thumbnails(entry_thumbs)
                 tracks.append({
                     'videoId': vid,
                     'title': entry.get('title', 'Unknown Title'),
                     'artists': [entry.get('channel') or entry.get('uploader') or 'Unknown'] if (entry.get('channel') or entry.get('uploader')) else ['Unknown'],
                     'album': 'Unknown Album',
                     'durationSeconds': int(entry.get('duration') or 0),
-                    'thumbnails': entry.get('thumbnails') or [],
+                    'thumbnails': entry_thumbs,
+                    'thumbnailSmall': entry_picks['small'],
+                    'thumbnailLarge': entry_picks['large'],
                     'isExplicit': False,
                     'videoType': 'MUSIC_VIDEO_TYPE_ATV',
                 })
@@ -564,6 +654,9 @@ class YTMusicClient:
                            item.get('duration_seconds') or
                            durations.get(vid, 0))
 
+                # v1.8.5 / S18-SMALL-LARGE-THUMBNAILS: small + large
+                # picks for the watch-playlist thumbnail (singular).
+                item_picks = _select_thumbnails(thumbnails)
                 track = {
                     'videoId': vid,
                     'title': item.get('title', 'Unknown Title'),
@@ -571,6 +664,8 @@ class YTMusicClient:
                     'album': album_name,
                     'durationSeconds': duration,
                     'thumbnails': thumbnails,
+                    'thumbnailSmall': item_picks['small'],
+                    'thumbnailLarge': item_picks['large'],
                     'isExplicit': item.get('isExplicit', False),
                     'videoType': item.get('videoType', 'MUSIC_VIDEO_TYPE_ATV')
                 }

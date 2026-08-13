@@ -437,6 +437,13 @@ class TrackResponse(BaseModel):
     album: str
     durationSeconds: int
     thumbnails: List[ThumbnailResponse]
+    # v1.8.5 / S18-SMALL-LARGE-THUMBNAILS: a small (~120-240px)
+    # and large (~480-720px) thumbnail URL picked from the
+    # ytmusicapi list. Optional for backward compat — old iOS
+    # clients ignore unknown fields, old BE responses just have
+    # these as None and the iOS falls back to `thumbnails.last`.
+    thumbnailSmall: Optional[ThumbnailResponse] = None
+    thumbnailLarge: Optional[ThumbnailResponse] = None
     isExplicit: bool
     videoType: str = "UNKNOWN"
 
@@ -447,6 +454,9 @@ class PlaylistResponse(BaseModel):
     author: str
     videoCount: int
     thumbnails: List[ThumbnailResponse]
+    # v1.8.5 / S18-SMALL-LARGE-THUMBNAILS: see TrackResponse.
+    thumbnailSmall: Optional[ThumbnailResponse] = None
+    thumbnailLarge: Optional[ThumbnailResponse] = None
     description: str
 
 
