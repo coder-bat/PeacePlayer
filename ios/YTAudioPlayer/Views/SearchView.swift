@@ -120,7 +120,16 @@ struct SearchView: View {
                 ZStack {
                     Theme.cyberBackground.ignoresSafeArea()
 
-                    if viewModel.isLoading {
+                    // v1.8.6 / S18-SEARCH-KEEP-OLD: only show the
+                    // skeleton on the FIRST-EVER search (no prior
+                    // results to show behind it). On subsequent
+                    // searches, the previous `results` stay visible
+                    // and the new ones replace them when ready.
+                    // The "Updating..." pill above the list is the
+                    // signal that a new search is in flight.
+                    if viewModel.isLoading
+                        && viewModel.results.isEmpty
+                        && viewModel.playlistResults.isEmpty {
                         skeletonLoadingView
                             .transition(.opacity)
                     } else if viewModel.results.isEmpty && viewModel.playlistResults.isEmpty {
@@ -224,6 +233,35 @@ struct SearchView: View {
             .listRowInsets(EdgeInsets(top: 16, leading: 0, bottom: 16, trailing: 0))
             .listRowBackground(Color.clear)
             .listRowSeparator(.hidden)
+
+            // v1.8.6 / S18-SEARCH-KEEP-OLD: when a new search is
+            // in flight and old results are still showing, render
+            // a slim "Updating for X..." pill above the section
+            // header. The pill replaces the previous behavior of
+            // clearing `results` synchronously and showing the
+            // skeleton — the user now sees the old list + a
+            // clear "I'm fetching more" signal. When the new
+            // search completes, the pill hides and `results`
+            // smoothly replace.
+            if let pending = viewModel.pendingSearchQuery {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .scaleEffect(0.7)
+                        .tint(Color.cyberCyan)
+                    Text("Updating for \"\(pending)\"…")
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .foregroundColor(.cyberDim)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 8, trailing: 0))
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+                .transition(.opacity)
+            }
 
             // Songs Section
             if shouldShowSongs {
@@ -960,6 +998,15 @@ class SearchViewModel: ObservableObject {
     @Published var recentSearches: [String] = []
     @Published var searchText = ""
     @Published var activeFilter: SearchFilter = .all
+    // v1.8.6 / S18-SEARCH-KEEP-OLD: when a new search is in
+    // flight, this holds the query being loaded (non-nil). The
+    // view shows an "Updating for X..." pill at the top of the
+    // list while the previous `results` stay on screen. When
+    // the new search completes, the pill hides and `results`
+    // smoothly replace. Without this flag, every keystroke
+    // cleared `results` and showed the skeleton — the user
+    // saw a flash of empty space on every cached search.
+    @Published var pendingSearchQuery: String? = nil
 
     private var cancellables = Set<AnyCancellable>()
     // S17-H follow-up (2026-07-26): generation counter for
@@ -1041,12 +1088,17 @@ class SearchViewModel: ObservableObject {
         searchGeneration &+= 1
         let generation = searchGeneration
 
+        // v1.8.6 / S18-SEARCH-KEEP-OLD: set the pending flag so
+        // the view shows an "Updating..." pill. We do NOT clear
+        // `results` / `playlistResults` synchronously — the old
+        // list stays visible while the new one loads. Only the
+        // first-ever search (no prior results) shows the skeleton,
+        // and that's gated by `isLoading && results.isEmpty &&
+        // playlistResults.isEmpty` in the view body.
         isLoading = true
         hasSearched = true
         saveRecentSearch(query)
-
-        results = []
-        playlistResults = []
+        pendingSearchQuery = query
 
         // Search for songs (YouTube)
         // v1.8.4 / S18-SEARCH-FAST-FEEL: previously isLoading was
@@ -1072,6 +1124,13 @@ class SearchViewModel: ObservableObject {
                     print("⚠️ [SearchView] Request failed: \(error.localizedDescription)")
                 }
                 self.isLoading = false
+                // v1.8.6: only clear the pill if this is still the
+                // latest pending query. If the user has already
+                // typed something newer, leave the pill pointing
+                // at the newer query.
+                if self.pendingSearchQuery == query {
+                    self.pendingSearchQuery = nil
+                }
             },
                   receiveValue: { [weak self] tracks in
                 guard let self = self, self.searchGeneration == generation else {
@@ -1080,6 +1139,9 @@ class SearchViewModel: ObservableObject {
                 self.results = tracks
                 self.refreshDownloadedIds()
                 self.isLoading = false
+                if self.pendingSearchQuery == query {
+                    self.pendingSearchQuery = nil
+                }
             })
             .store(in: &cancellables)
 
@@ -1093,6 +1155,9 @@ class SearchViewModel: ObservableObject {
                 }
                 print("🔍 Playlist search completed")
                 self.isLoading = false
+                if self.pendingSearchQuery == query {
+                    self.pendingSearchQuery = nil
+                }
             }, receiveValue: { [weak self] playlists in
                 guard let self = self, self.searchGeneration == generation else {
                     return
@@ -1100,6 +1165,9 @@ class SearchViewModel: ObservableObject {
                 print("🔍 Found \(playlists.count) playlists")
                 self.playlistResults = playlists
                 self.isLoading = false
+                if self.pendingSearchQuery == query {
+                    self.pendingSearchQuery = nil
+                }
             })
             .store(in: &cancellables)
     }
@@ -1108,6 +1176,7 @@ class SearchViewModel: ObservableObject {
         results = []
         playlistResults = []
         hasSearched = false
+        pendingSearchQuery = nil
         cancellables.removeAll()
     }
     
