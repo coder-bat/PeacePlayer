@@ -957,6 +957,31 @@ struct GridTrackCell: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
+            // v1.8.7 / S18-LIBRARY-GRID-OVERFLOW: the ZStack used
+            // to host a CachedAsyncImage with no frame. The
+            // CachedAsyncImage renders at the image's natural
+            // pixel size (e.g. 720x720 for the largest
+            // thumbnail), which is larger than the grid cell
+            // (column width = ~163pt on iPhone). The ZStack's
+            // .aspectRatio(1, .fit) constrained the ZStack's
+            // frame to a square — but the children inside still
+            // rendered at their intrinsic sizes and overflowed
+            // the ZStack's bounds, despite the trailing
+            // .clipShape. .scaledToFill() on a non-Image view
+            // is a no-op.
+            //
+            // The fix: drop .scaledToFill() (no-op here) and
+            // give the CachedAsyncImage an explicit
+            // maxWidth/maxHeight .infinity frame so it stretches
+            // to the ZStack's bounds. The ZStack's
+            // .aspectRatio(1, .fit) defines the square; the
+            // CachedAsyncImage fills that square. The result:
+            // every grid cell is exactly column-width square,
+            // every thumbnail fills its cell, no overflow.
+            //
+            // Same fix needed for the placeholder SF Symbol so
+            // the layout doesn't shift when the image loads
+            // (it would shrink from 720x720 to 40x40 otherwise).
             ZStack {
                 RoundedRectangle(cornerRadius: CornerRadius.md)
                     .fill(Theme.cyberSurface)
@@ -968,11 +993,12 @@ struct GridTrackCell: View {
                             .font(.system(size: 40))
                             .foregroundColor(Theme.cyberDim)
                     }
-                    .scaledToFill()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     Image(systemName: "music.note")
                         .font(.system(size: 40))
                         .foregroundColor(Theme.cyberDim)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
 
                 // Cyberpunk border
