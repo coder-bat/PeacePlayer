@@ -1049,6 +1049,17 @@ class SearchViewModel: ObservableObject {
         playlistResults = []
 
         // Search for songs (YouTube)
+        // v1.8.4 / S18-SEARCH-FAST-FEEL: previously isLoading was
+        // only flipped false in the PLAYLISTS sink (line 1082). If
+        // songs returned in 500ms but playlists took 1500ms, the
+        // skeleton stayed visible for 1s after the song list was
+        // already on screen. The user saw a "loading..." overlay
+        // covering the very results they were trying to read.
+        //
+        // Fix: flip isLoading = false in BOTH sinks. The generation
+        // check ensures stale completions are dropped, so the
+        // fast-path is: first response (songs OR playlists) clears
+        // the skeleton; second response just populates its array.
         APIService.shared.search(query: query, limit: 20)
             .handleErrors(with: .shared, retry: { [weak self] in
                 self?.search(query: query)
@@ -1060,6 +1071,7 @@ class SearchViewModel: ObservableObject {
                 if case .failure(let error) = completion {
                     print("⚠️ [SearchView] Request failed: \(error.localizedDescription)")
                 }
+                self.isLoading = false
             },
                   receiveValue: { [weak self] tracks in
                 guard let self = self, self.searchGeneration == generation else {
@@ -1067,6 +1079,7 @@ class SearchViewModel: ObservableObject {
                 }
                 self.results = tracks
                 self.refreshDownloadedIds()
+                self.isLoading = false
             })
             .store(in: &cancellables)
 
@@ -1086,6 +1099,7 @@ class SearchViewModel: ObservableObject {
                 }
                 print("🔍 Found \(playlists.count) playlists")
                 self.playlistResults = playlists
+                self.isLoading = false
             })
             .store(in: &cancellables)
     }

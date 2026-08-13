@@ -863,7 +863,13 @@ class PlayerState: ObservableObject {
     /// to queue next, restore-and-resume). Marks the queue as
     /// "user has decided" so a still-in-flight restoreQueue won't
     /// clobber it.
-    private func markUserTouchedPlayback() {
+    ///
+    /// 2026-08-13: promoted from `private` to internal so
+    /// external playback entry points (e.g. HomeView's
+    /// `playDownloaded` for the Downloaded Play All / Shuffle
+    /// chips) can flag the queue as user-touched before
+    /// replacing it. The behavior is unchanged.
+    func markUserTouchedPlayback() {
         hasUserTouchedPlayback = true
     }
 

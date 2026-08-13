@@ -598,12 +598,45 @@ struct HomeView: View {
     @ViewBuilder
     private func downloadedSubsection(downloadedTracks: [Track]) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
+            HStack(spacing: 8) {
                 Text("Downloaded")
                     .font(.system(size: 16, weight: .bold, design: .monospaced))
                     .foregroundColor(.white)
                 Spacer()
                 if !downloadedTracks.isEmpty {
+                    // 2026-08-13: Play All / Shuffle chips for the
+                    // Downloaded sub-section. Replaces the current
+                    // queue with the full downloaded library
+                    // (local files only, no /stream) and loops
+                    // forever. Compact chip styling matches the
+                    // existing header row density — these are
+                    // utilities, not primary CTAs (Library's full
+                    // Play All row is the primary CTA in the
+                    // Library surface).
+                    Button {
+                        HapticManager.medium()
+                        viewModel.playDownloaded(downloadedTracks, shuffled: false)
+                    } label: {
+                        downloadedChipLabel(
+                            icon: "play.fill",
+                            text: "PLAY ALL"
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Play all downloaded tracks")
+
+                    Button {
+                        HapticManager.medium()
+                        viewModel.playDownloaded(downloadedTracks, shuffled: true)
+                    } label: {
+                        downloadedChipLabel(
+                            icon: "shuffle",
+                            text: "SHUFFLE"
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Shuffle all downloaded tracks")
+
                     NavigationLink(value: HomeDestination.library) {
                         Text("View All")
                             .font(Typography.eyebrow)
@@ -698,6 +731,34 @@ struct HomeView: View {
                 }
             }
         }
+    }
+
+    // 2026-08-13: Chip-style label for the Downloaded
+    // sub-section's Play All / Shuffle buttons. Compact,
+    // tappable, mono-cased to match the rest of the header
+    // typography. Cyan foreground on a slightly raised
+    // surface so the chips read as a group against the
+    // dark scrollview background.
+    private func downloadedChipLabel(icon: String, text: String) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: icon)
+                .font(.system(size: 10, weight: .bold))
+            Text(text)
+                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+        }
+        .foregroundColor(.cyberCyan)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 5)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(Color.cyberCyan.opacity(0.12))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(Color.cyberCyan.opacity(0.45), lineWidth: 1)
+                )
+        )
     }
 
     // MARK: - Stats Footer
@@ -1657,6 +1718,99 @@ class HomeViewModel: ObservableObject {
                 PlayerState.shared.seek(to: p)
             }
         }
+    }
+
+    // 2026-08-13: Play All / Shuffle for the Home "Downloaded"
+    // sub-section. Takes every track in the downloaded library
+    // (not just the 15 visible in the section) and replaces the
+    // current queue with local-file QueueItems so the playback
+    // never hits /stream. When `shuffled` is true the tracks are
+    // randomized before being queued; in both cases repeatMode
+    // is set to .all so the queue loops forever after the last
+    // track (per Vergil's spec — Downloaded Play All is a "set
+    // and forget" offline mode).
+    //
+    // Why filter via `isPlayable`:
+    //   LibraryViewModel.tracks reads from CoreData. If a user
+    //   deleted the .m4a via Files.app, the CoreData row is
+    //   stale and the file is missing on disk. Skipping
+    //   unplayable rows up front avoids a "playback failed"
+    //   toast on the first track. LibraryViewModel.refreshLibrary
+    //   will prune the stale row on the next refresh; this is
+    //   just a belt-and-suspenders gate.
+    //
+    // Why `queueStore.replace` (not `addToQueue` x N):
+    //   Going through `add` would dedup against the existing
+    //   queue and could leave stale items in place. `replace`
+    //   gives a clean swap so the user's prior queue (or any
+    //   in-flight restore) can't leak into the new playback.
+    //   Combined with `markUserTouchedPlayback()` this also
+    //   wins the race against QueueRestorer's pending restore.
+    //
+    // Why set isShuffled = shuffled after queueing:
+    //   The store's `originalQueue` is what `toggleShuffle` uses
+    //   to restore the unshuffled order on toggle-off. We build
+    //   the queue in the final order (shuffled or not), so the
+    //   flag just needs to reflect reality — the queue itself
+    //   is the source of truth, not a runtime shuffle.
+    @MainActor
+    func playDownloaded(_ tracks: [Track], shuffled: Bool) {
+        let context = PersistenceController.shared.viewContext
+        // Defensive: skip stale CoreData rows whose file is gone.
+        let playable = tracks.filter {
+            AudioFileManager.shared.isPlayable(videoId: $0.videoId, context: context)
+        }
+        guard !playable.isEmpty else {
+            ErrorHandler.shared.show(
+                .downloadFailed("None of your downloaded tracks are playable right now")
+            )
+            return
+        }
+
+        let ordered: [Track] = shuffled ? Self.shuffled(playable) : playable
+
+        let items: [QueueItem] = ordered.compactMap { track in
+            let localURL = AudioFileManager.shared.localFileURL(for: track.videoId)
+            return QueueItem(
+                track: track,
+                streamUrl: localURL.absoluteString,
+                source: .local(path: localURL.path),
+                contentSource: .local
+            )
+        }
+        guard !items.isEmpty else { return }
+
+        // Defeat any in-flight QueueRestorer swap.
+        PlayerState.shared.markUserTouchedPlayback()
+        // Replace the entire queue with the downloaded set.
+        PlayerState.shared.queueStore.replace(with: items)
+        PlayerState.shared.queueStore.setCurrentIndex(0)
+        // Loop forever (per spec). User can still toggle off
+        // from the player chrome.
+        PlayerState.shared.repeatMode = .all
+        // Reflect the chosen mode in the player's shuffle state.
+        // The queue itself is already in the final order, so the
+        // flag is just a UI signal + a hint for toggle-off.
+        PlayerState.shared.isShuffled = shuffled
+        // Clear any leftover "original queue" so a later
+        // toggleShuffle-off from the chrome doesn't try to
+        // restore a stale order.
+        PlayerState.shared.originalQueue = []
+
+        HapticManager.medium()
+        PlayerState.shared.playQueue(at: 0)
+    }
+
+    // Fisher–Yates shuffle. Pulled out so the random order is
+    // determined once on the main thread, before the queue
+    // replace, instead of being deferred into the queue store.
+    private static func shuffled<T>(_ array: [T]) -> [T] {
+        var copy = array
+        for i in stride(from: copy.count - 1, through: 1, by: -1) {
+            let j = Int.random(in: 0...i)
+            copy.swapAt(i, j)
+        }
+        return copy
     }
 
     func addToQueue(_ track: Track) {
