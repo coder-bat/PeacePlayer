@@ -154,38 +154,114 @@ class AudioExtractor:
 
         filename = f"{safe_title} - {safe_artist}.m4a"
         output_path = self.output_dir / filename
-        
+
         # Check if already exists
         if output_path.exists():
             logger.info(f"File already exists: {output_path}")
             return output_path
-        
-        # Download to temp file
-        temp_path = self.output_dir / f".temp_{video_id}.{stream_info['ext']}"
-        
-        try:
-            logger.info(f"Downloading {video_id}...")
-            self._download_stream(stream_info['url'], temp_path)
-            
-            logger.info(f"Converting to M4A...")
-            self._convert_to_m4a(
-                temp_path, 
-                output_path, 
-                metadata,
-                quality
-            )
-            
-            logger.info(f"Saved to {output_path}")
-            return output_path
-            
-        except Exception as e:
-            logger.error(f"Download/convert failed: {e}")
-            # Cleanup
-            if temp_path.exists():
-                temp_path.unlink()
-            if output_path.exists():
-                output_path.unlink()
-            return None
+
+        # Download to temp file. The extension can change between
+        # attempts (different format picked from get_audio_info),
+        # so we re-derive temp_path on each retry below.
+        def _temp_path_for(info: dict) -> Path:
+            return self.output_dir / f".temp_{video_id}.{info['ext']}"
+
+        temp_path = _temp_path_for(stream_info)
+
+        # v1.8.3 / YouTube-CDN-403-Retry: YouTube's CDN rate-limits
+        # long-running connections from a single IP. After a few
+        # successful Range-chunked downloads, individual chunks can
+        # come back as 403 Forbidden. The previous code surfaced
+        # this to the iOS app as a 500 ("Download or conversion
+        # failed"), which the user saw as "500 failed to download
+        # or convert" — happening on ~40-50% of downloads during
+        # heavy sessions.
+        #
+        # The fix: on a 403 HTTPError, re-call get_audio_info to
+        # fetch a fresh stream URL and retry. YouTube's throttle is
+        # often URL-specific (the URL has a per-token counter that
+        # resets when the token is rotated), and a fresh URL also
+        # often sidesteps a short-lived IP-level throttle. We give
+        # up to 2 retries with 1-2s backoff before failing — that
+        # bounds the worst-case at ~5s extra latency, well inside
+        # the iOS 120s POST /download timeout.
+        max_attempts = 3
+        last_error: Optional[Exception] = None
+        for attempt in range(1, max_attempts + 1):
+            try:
+                if attempt > 1:
+                    # Re-extract the stream URL. The previous URL
+                    # hit a 403; a fresh URL often works.
+                    logger.info(
+                        f"Retry {attempt}/{max_attempts} for {video_id}: "
+                        f"re-extracting stream URL"
+                    )
+                    time.sleep(attempt - 1)  # 1s, 2s backoff
+                    stream_info = self.get_audio_info(video_id)
+                    if not stream_info:
+                        logger.error(
+                            f"Could not get stream info for {video_id} "
+                            f"on retry {attempt}"
+                        )
+                        return None
+                    temp_path = _temp_path_for(stream_info)
+                    # Clean up any half-written temp from the
+                    # previous attempt before retrying.
+                    if temp_path.exists():
+                        temp_path.unlink()
+
+                logger.info(f"Downloading {video_id} (attempt {attempt}/{max_attempts})...")
+                self._download_stream(stream_info['url'], temp_path)
+
+                logger.info(f"Converting to M4A...")
+                self._convert_to_m4a(
+                    temp_path,
+                    output_path,
+                    metadata,
+                    quality
+                )
+
+                logger.info(f"Saved to {output_path}")
+                return output_path
+
+            except requests.exceptions.HTTPError as e:
+                # 403 = YouTube CDN throttle. Retry with a fresh URL.
+                # 404 = URL is dead. Re-extract + retry (no backoff).
+                # 4xx/5xx other = same retry strategy. We retry on
+                # any HTTPError since the URL is the only thing that
+                # changes between attempts.
+                status = e.response.status_code if e.response is not None else 0
+                last_error = e
+                if attempt < max_attempts:
+                    logger.warning(
+                        f"HTTP {status} on attempt {attempt}/{max_attempts} "
+                        f"for {video_id}: {e}. Will retry with fresh URL."
+                    )
+                    continue
+                # Out of retries — fall through to cleanup.
+                logger.error(
+                    f"HTTP {status} on final attempt ({max_attempts}/{max_attempts}) "
+                    f"for {video_id}: {e}. Giving up."
+                )
+                break
+            except Exception as e:
+                logger.error(f"Download/convert failed: {e}")
+                # Cleanup
+                if temp_path.exists():
+                    temp_path.unlink()
+                if output_path.exists():
+                    output_path.unlink()
+                return None
+
+        # All retries exhausted.
+        if temp_path.exists():
+            temp_path.unlink()
+        if output_path.exists():
+            output_path.unlink()
+        logger.error(
+            f"Download/convert failed after {max_attempts} attempts: {last_error}"
+        )
+        return None
     
     def _download_stream(self, url: str, output_path: Path) -> None:
         """
