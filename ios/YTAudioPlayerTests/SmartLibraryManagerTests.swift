@@ -40,8 +40,14 @@ final class SmartLibraryManagerTests: XCTestCase {
         originalSet = sut.autoDownloadedVideoIds
         originalCleanupDaysAuto = sut.cleanupDaysAuto
         originalCleanupDaysManual = sut.cleanupDaysManual
-        // Start with a clean set so test order doesn't matter
-        sut.autoDownloadedVideoIds = []
+        // Start with a clean set so test order doesn't matter.
+        // The autoDownloadedVideoIds property is `private(set)`,
+        // so we can't assign to it from outside (even with
+        // @testable). Use the public removeFromAutoSet API per
+        // videoId — O(n) but n is small in practice.
+        for videoId in sut.autoDownloadedVideoIds {
+            sut.removeFromAutoSet(videoId: videoId)
+        }
         // v1.8.2: also reset the v1.8.2-only fields so tests
         // don't see state from a previous test. The auto-
         // storage wrapper can't be set back to nil, so we
@@ -50,7 +56,15 @@ final class SmartLibraryManagerTests: XCTestCase {
     }
 
     override func tearDown() {
-        sut.autoDownloadedVideoIds = originalSet
+        // Restore the original set. The @AppStorage-backed
+        // cleanupDays* values are settable from outside (no
+        // `private(set)`), so direct assignment works for them.
+        for videoId in sut.autoDownloadedVideoIds {
+            sut.removeFromAutoSet(videoId: videoId)
+        }
+        for videoId in originalSet {
+            sut.markAsAutoDownloaded(videoId)
+        }
         sut.cleanupDaysAuto = originalCleanupDaysAuto
         sut.cleanupDaysManual = originalCleanupDaysManual
         super.tearDown()
@@ -275,5 +289,71 @@ final class SmartLibraryManagerTests: XCTestCase {
         // guard test: even if the first hasn't finished,
         // the second should be a no-op.
         sut.runRefreshNow()
+    }
+
+    // MARK: - isAutoDownloadEligible (v1.9.0 tier-1 filter)
+
+    func testIsAutoDownloadEligible_normalSong_passes() {
+        // 3:24 song, music video type
+        let track = makeTrack(durationSeconds: 204, videoType: "MUSIC_VIDEO_TYPE_OMV")
+        XCTAssertTrue(SmartLibraryManager.isAutoDownloadEligible(track))
+    }
+
+    func testIsAutoDownloadEligible_audioTrackType_passes() {
+        // ATV (audio-only) type — common for YouTube Music
+        // tracks where there's no music video.
+        let track = makeTrack(durationSeconds: 240, videoType: "MUSIC_VIDEO_TYPE_ATV")
+        XCTAssertTrue(SmartLibraryManager.isAutoDownloadEligible(track))
+    }
+
+    func testIsAutoDownloadEligible_tooShort_rejected() {
+        // 15s — could be a Topic channel sample, an
+        // intro snippet, or a TikTok-style clip.
+        let track = makeTrack(durationSeconds: 15, videoType: "MUSIC_VIDEO_TYPE_OMV")
+        XCTAssertFalse(SmartLibraryManager.isAutoDownloadEligible(track))
+    }
+
+    func testIsAutoDownloadEligible_tooLong_rejected() {
+        // 18 min — likely a full live set or DJ mix.
+        // The user probably didn't mean to "auto-top up"
+        // a 50MB+ download from a search result.
+        let track = makeTrack(durationSeconds: 18 * 60, videoType: "MUSIC_VIDEO_TYPE_OMV")
+        XCTAssertFalse(SmartLibraryManager.isAutoDownloadEligible(track))
+    }
+
+    func testIsAutoDownloadEligible_nonAudioType_rejected() {
+        // 4 min podcast-style content. Even though the
+        // duration is fine, the videoType says "not music"
+        // (could be a podcast, audiobook, talk show, etc.).
+        // Smart Library is music-only for now.
+        let track = makeTrack(durationSeconds: 240, videoType: "MUSIC_VIDEO_TYPE_PODCAST")
+        XCTAssertFalse(SmartLibraryManager.isAutoDownloadEligible(track))
+    }
+
+    func testIsAutoDownloadEligible_boundary30s_passes() {
+        // Exactly 30s — accepted (inclusive lower bound).
+        let track = makeTrack(durationSeconds: 30, videoType: "MUSIC_VIDEO_TYPE_OMV")
+        XCTAssertTrue(SmartLibraryManager.isAutoDownloadEligible(track))
+    }
+
+    func testIsAutoDownloadEligible_boundary15min_passes() {
+        // Exactly 15 min — accepted (inclusive upper bound).
+        let track = makeTrack(durationSeconds: 15 * 60, videoType: "MUSIC_VIDEO_TYPE_OMV")
+        XCTAssertTrue(SmartLibraryManager.isAutoDownloadEligible(track))
+    }
+
+    // MARK: - Test helpers
+
+    private func makeTrack(durationSeconds: Int, videoType: String) -> Track {
+        Track(
+            videoId: "test-\(UUID().uuidString)",
+            title: "Test Track",
+            artists: ["Test Artist"],
+            album: "Test Album",
+            durationSeconds: durationSeconds,
+            thumbnails: [],
+            isExplicit: false,
+            videoType: videoType
+        )
     }
 }

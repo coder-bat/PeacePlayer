@@ -19,12 +19,13 @@
 //
 //  Triggers:
 //    - Auto-download: NetworkMonitor WiFi change (30s debounce)
-//      + UIApplication.willEnterForegroundNotification. Debounced
-//      to once per 24h via UserDefaults timestamp.
-//    - Cleanup: UIApplication.willEnterForegroundNotification.
-//      Debounced to once per 7d via UserDefaults timestamp.
-//      Storage emergency (< 1GB free) bypasses the debounce and
-//      prioritises auto-downloaded removals first.
+//      + scenePhase .active in the App scene (covers both cold
+//      launch and warm foreground). v1.8.2 dropped the previous
+//      24h debounce; the maxLibraryTracks cap is the limiter.
+//    - Cleanup: scenePhase .active in the App scene. v1.8.2
+//      dropped the previous 7d debounce; cleanup is read-only
+//      and cheap. Storage emergency (< 1GB free) bypasses any
+//      preconditions and prioritises auto-downloaded removals.
 //
 
 import Foundation
@@ -193,17 +194,17 @@ final class SmartLibraryManager: ObservableObject {
             }
             .store(in: &cancellables)
 
-        // App foreground → run both cycles (each has its own
-        // debounce). The willEnterForegroundNotification is
-        // the canonical "user is back in the app" signal;
-        // .active scene phase also fires here but the
-        // notification has a cleaner contract for our purposes.
-        NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)
-            .sink { [weak self] _ in
-                self?.runAutoDownloadIfDue()
-                self?.runCleanupIfDue(emergency: false)
-            }
-            .store(in: &cancellables)
+        // App foreground → run both cycles. The scenePhase
+        // .active handler in YTAudioPlayerApp.swift is the
+        // single source of truth for "user is back in the
+        // app" — it fires on both cold launch and warm
+        // foreground. Previously this manager also listened
+        // to UIApplication.willEnterForegroundNotification,
+        // which fires only on warm foreground; the two
+        // signals overlapped on every warm foreground,
+        // causing runAutoDownloadIfDue to spin up two
+        // redundant Tasks (cheap but wasted work). The
+        // scenePhase path covers both cases now.
 
         // Download-deleted notification keeps the auto-set
         // from growing unboundedly. Posted by DownloadManager
@@ -380,6 +381,30 @@ final class SmartLibraryManager: ObservableObject {
         return (try? context.count(for: request)) ?? 0
     }
 
+    /// v1.9.0: Number of downloaded tracks that are also
+    /// in the user's liked set. Used by the Refresh
+    /// Downloads confirm sheet so the user sees a concrete
+    /// "X tracks, including Y liked" before nuking the
+    /// library. Single CoreData fetch over the joined
+    /// CDDownloadedTrack + CDTrack + likedTracks set.
+    ///
+    /// Liked tracks are NEVER auto-removed by the cleanup
+    /// cycle, so the Refresh flow's "delete all then
+    /// re-derive" is genuinely destructive for the liked
+    /// subset — the user would have to re-heart them
+    /// after the refresh if they want permanent retention.
+    /// Showing the count makes that cost visible.
+    func likedDownloadedCount() -> Int {
+        let context = PersistenceController.shared.viewContext
+        let request: NSFetchRequest<CDDownloadedTrack> = CDDownloadedTrack.fetchRequest()
+        let rows = (try? context.fetch(request)) ?? []
+        let likedIds = PlaylistManager.shared.likedTracks
+        return rows.filter { row in
+            guard let videoId = row.track?.videoId else { return false }
+            return likedIds.contains(videoId)
+        }.count
+    }
+
     // MARK: - Public API: free disk space
 
     /// Free disk space available to the app, in bytes.
@@ -408,9 +433,18 @@ final class SmartLibraryManager: ObservableObject {
     /// `autoDownloadMaxPerCycle` tracks to download, ordered
     /// by "user likely wants this". The two tiers are
     /// weighted: 1 new-release/top-track per liked artist
-    /// (up to 5 artists) first, then recently-played tracks
+    /// (up to 10 artists) first, then recently-played tracks
     /// that aren't downloaded yet, filling the remainder of
     /// the per-cycle cap.
+    ///
+    /// v1.9.0: bumped the artist probe cap from 5 to 10.
+    /// Users with 20+ liked artists were only seeing the
+    /// first 5 of them represented in auto-downloads — a
+    /// silent truncation that read as "my library only knows
+    /// about 5 of my favourite artists". 10 is a balance
+    /// against the per-cycle cap (20 by default — bumping
+    /// above 20 starts to feel aggressive on a slow WiFi
+    /// reconnect).
     private func computeAutoDownloadCandidates() async -> [Track] {
         let likedArtists = FavoriteArtistsManager.shared.getArtists()
         let recentlyPlayedTracks = DataManager.shared.recentlyPlayed
@@ -429,7 +463,7 @@ final class SmartLibraryManager: ObservableObject {
         var candidates: [Track] = []
         var seenVideoIds = Set<String>()
 
-        for artist in likedArtists.prefix(5) {
+        for artist in likedArtists.prefix(10) {
             if let track = await firstSearchResult(for: artist, excluding: seenVideoIds) {
                 candidates.append(track)
                 seenVideoIds.insert(track.videoId)
@@ -451,11 +485,45 @@ final class SmartLibraryManager: ObservableObject {
         return Array(candidates.prefix(autoDownloadMaxPerCycle))
     }
 
+    /// v1.9.0: tier-1 eligibility filter. Public-static so
+    /// unit tests can exercise the predicate without
+    /// standing up the search / network layer.
+    ///
+    /// Rules:
+    ///   - `isAudioTrack` must be true (excludes karaoke
+    ///     tracks, music videos with extended talking intros,
+    ///     and any non-music-video-typed result that the
+    ///     YouTube search may surface)
+    ///   - duration must be in [30s, 15min] (excludes
+    ///     shorts/loops < 30s and full DJ sets / live
+    ///     recordings > 15min that the user probably didn't
+    ///     mean to "auto-top up")
+    ///
+    /// The 30s lower bound also covers the case where a
+    /// search returns a "Topic" channel auto-generated track
+    /// that's just a 30s sample — explicitly rejected.
+    static func isAutoDownloadEligible(_ track: Track) -> Bool {
+        guard track.isAudioTrack else { return false }
+        let duration = track.durationSeconds
+        guard duration >= 30, duration <= 15 * 60 else { return false }
+        return true
+    }
+
     /// Fetch the first search result for an artist query that
     /// isn't already in the `excluding` set. Returns nil on
-    /// failure or if all results are already candidates.
+    /// failure or if all results are already candidates or
+    /// fail the tier-1 filter.
     /// Bounded by a 5s timeout — a hung backend shouldn't
     /// block the auto-download cycle indefinitely.
+    ///
+    /// v1.9.0: the picker now applies `isAutoDownloadEligible`
+    /// (track.isAudioTrack + duration in 30s..15min). Without
+    /// this, the backend's "first result" for a query like
+    /// "Tame Impala" can return a karaoke/instrumental/music-
+    /// video-with-talking track that the user doesn't actually
+    /// want auto-downloaded. The filter is loose enough to
+    /// accept any reasonable song but tight enough to skip
+    /// the obvious non-music picks.
     private func firstSearchResult(for artist: String, excluding: Set<String>) async -> Track? {
         await withCheckedContinuation { (continuation: CheckedContinuation<Track?, Never>) in
             var resumed = false
@@ -470,16 +538,18 @@ final class SmartLibraryManager: ObservableObject {
                     receiveValue: { tracks in
                         if resumed { return }
                         // Pick the first result not already in
-                        // the exclusion set and not already
-                        // downloaded. (The exclusion set is the
-                        // dedup across multiple artists in this
-                        // cycle — without it, the same track
-                        // could appear twice if the user has 2
-                        // liked artists and the backend ranks
-                        // the same song for both.)
+                        // the exclusion set, not already
+                        // downloaded, and that passes the
+                        // tier-1 filter. (The exclusion set is
+                        // the dedup across multiple artists in
+                        // this cycle — without it, the same
+                        // track could appear twice if the user
+                        // has 2 liked artists and the backend
+                        // ranks the same song for both.)
                         let pick = tracks.first { track in
                             !excluding.contains(track.videoId) &&
-                            !DownloadManager.shared.isAlreadyDownloaded(track)
+                            !DownloadManager.shared.isAlreadyDownloaded(track) &&
+                            Self.isAutoDownloadEligible(track)
                         }
                         resumed = true
                         continuation.resume(returning: pick)
@@ -561,7 +631,7 @@ final class SmartLibraryManager: ObservableObject {
                 // leave the auto set as-is.
                 continue
             }
-            DownloadManager.shared.download(track)
+            DownloadManager.shared.download(track, source: .auto)
             markAsAutoDownloaded(track.videoId)
             downloadedCount += 1
             // Estimate ~5 MB per track. Used only for the
@@ -639,7 +709,11 @@ final class SmartLibraryManager: ObservableObject {
         var downloadedCount = 0
         for track in candidates.prefix(autoDownloadMaxPerCycle) {
             if DownloadManager.shared.isAlreadyDownloaded(track) { continue }
-            DownloadManager.shared.download(track)
+            // v1.9.0: refresh-source download. The new tracks
+            // are tier-marked .auto below so the 14d cleanup
+            // grace period applies; the user can heart them
+            // for permanent retention.
+            DownloadManager.shared.download(track, source: .refresh)
             markAsAutoDownloaded(track.videoId)
             downloadedCount += 1
         }

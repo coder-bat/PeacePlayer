@@ -17,6 +17,31 @@ import CoreData
 // duplicate-delivering every event. Nothing else in the app
 // referenced this class.
 
+// v1.9.0: DownloadSource — distinguishes user-initiated downloads
+// from system-initiated ones (auto-cycle, refresh). The
+// SmartLibraryManager uses this to fix the tier-upgrade bug
+// (gap #2): when a user manually re-downloads a previously
+// auto-downloaded track, the track should be promoted from the
+// .auto tier (14d cleanup) to the .manual tier (60d cleanup).
+//
+// Callers pass the source explicitly:
+//   - `source: .user`     — user tapped the download button in
+//                          any context menu, row, sheet, etc.
+//   - `source: .auto`     — SmartLibraryManager auto-download
+//                          cycle, candidates are tier-marked
+//                          after successful download.
+//   - `source: .refresh`  — SmartLibraryManager Refresh Downloads
+//                          flow, clears library first then
+//                          re-derives. The new tracks are
+//                          tier-marked .auto (14d applies) so the
+//                          user can heart them for permanent
+//                          retention.
+enum DownloadSource: String {
+    case user
+    case auto
+    case refresh
+}
+
 struct DownloadTask: Identifiable {
     let id = UUID()
     let track: Track
@@ -161,29 +186,71 @@ class DownloadManager: ObservableObject {
     }
     
     // MARK: - Public Methods
-    
-    func download(_ track: Track) {
+
+    /// Queue a track for download.
+    /// - Parameters:
+    ///   - track: the track to download
+    ///   - source: who initiated the download. Defaults to
+    ///     `.user` so the safe path is the default for any
+    ///     caller that hasn't been audited. See `DownloadSource`
+    ///     for the per-source semantics.
+    func download(_ track: Track, source: DownloadSource = .user) {
+        // v1.9.0: tier-upgrade fix (gap #2). When a user
+        // explicitly downloads a track that was previously
+        // auto-downloaded, promote it from the .auto tier
+        // (14d cleanup) to .manual (60d cleanup) by removing
+        // it from SmartLibraryManager's autoDownloadedVideoIds
+        // set. This MUST run before the isAlreadyDownloaded
+        // short-circuit below — that early return would skip
+        // the promotion and the track would stay tier=.auto
+        // for its next cleanup check, even though the user
+        // just took an explicit action.
+        //
+        // SmartLibraryManager is @MainActor-isolated;
+        // DownloadManager is not, so we hop to the main
+        // actor via Task. The hop is fine because the
+        // subsequent isAlreadyDownloaded check + queue
+        // append are local (in-memory) operations and
+        // don't race with the prune — the prune only
+        // mutates a Set + writes UserDefaults, both of
+        // which can happen any time before the actual
+        // download completes. The download itself is
+        // async via BackgroundDownloadService, so by the
+        // time the file is on disk the prune has long
+        // since run.
+        if source == .user {
+            let videoId = track.videoId
+            Task { @MainActor in
+                if SmartLibraryManager.shared.autoDownloadedVideoIds.contains(videoId) {
+                    SmartLibraryManager.shared.removeFromAutoSet(videoId: videoId)
+                }
+            }
+        }
+
         // Check if already in queue
         if activeDownloads.contains(where: { $0.track.videoId == track.videoId }) ||
            downloadQueue.contains(where: { $0.track.videoId == track.videoId }) {
             return
         }
-        
+
         // Check if already downloaded
         if isAlreadyDownloaded(track) {
             return
         }
-        
+
         let task = DownloadTask(track: track)
         downloadQueue.append(task)
         HapticManager.light()
-        
+
         processQueue()
     }
-    
-    func downloadMultiple(_ tracks: [Track]) {
+
+    /// Bulk variant. The source applies to every track in the
+    /// batch — callers that need mixed sources should call
+    /// `download(_:source:)` per track.
+    func downloadMultiple(_ tracks: [Track], source: DownloadSource = .user) {
         for track in tracks {
-            download(track)
+            download(track, source: source)
         }
     }
     

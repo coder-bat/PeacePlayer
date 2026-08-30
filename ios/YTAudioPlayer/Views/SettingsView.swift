@@ -776,13 +776,26 @@ struct SettingsView: View {
                 // v1.8.2: confirmation alert for Refresh.
                 // Destructive button role above + the alert
                 // here = double guard against accidental taps.
+                // v1.9.0: the message now shows the concrete
+                // count of liked tracks that will be deleted,
+                // so the user can see the real cost of the
+                // refresh before confirming. Previously the
+                // message said "liked tracks will need to be
+                // re-liked" without saying how many — easy to
+                // dismiss until you realise you had 47 liked
+                // tracks and now they're all gone.
                 .alert("Refresh downloads?", isPresented: $showRefreshConfirm) {
                     Button("Refresh", role: .destructive) {
                         smartLibrary.runRefreshNow()
                     }
                     Button("Cancel", role: .cancel) {}
                 } message: {
-                    Text("This will remove all \(libraryCount) downloaded tracks and re-download based on your recent history. Liked tracks will need to be re-liked after the refresh if you want them kept long-term.")
+                    let likedCount = smartLibrary.likedDownloadedCount()
+                    if likedCount == 0 {
+                        Text("This will remove all \(libraryCount) downloaded tracks and re-download based on your recent history.")
+                    } else {
+                        Text("This will remove all \(libraryCount) downloaded tracks, including \(likedCount) liked \(likedCount == 1 ? "track" : "tracks"). You'll need to re-like them after the refresh if you want them kept long-term.")
+                    }
                 }
 
                 // MARK: - Backend Section (S15)
