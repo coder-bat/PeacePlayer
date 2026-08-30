@@ -69,7 +69,51 @@ enum LibraryMode: String, CaseIterable, Identifiable {
     }
 }
 
-struct LibraryView: View {
+// 2026-08-14: renamed `struct LibraryView` to
+// `struct LibraryContent` and added a new thin
+// `struct LibraryView` wrapper below that hosts
+// the content in its own NavigationStack. The
+// HomeView's `.library` destination pushes
+// `LibraryContent()` directly (no inner
+// NavigationStack — that crashed iOS). Same
+// pattern as `LikedSongsContent` / `LikedSongsView`.
+//
+// The body inside `LibraryContent` is also a clean
+// 2026-08-14 UI pass: removed the system
+// `ToolbarItem`-based top-right buttons (they
+// rendered with the iOS system toolbar look — blue
+// tint, system padding), replaced the segmented
+// `Picker` for Liked/Downloaded with a custom chip
+// strip matching SearchView's `FilterChip`, restyled
+// the search bar to match SearchView's
+// "FIND MUSIC..." treatment, and rewrote the list
+// row to use the unified `TrackRow` configured to
+// match `SearchResultRow` (50pt artwork, title +
+// artist subtitle, cyberCyan playing highlight,
+// 36pt right-side accessory cluster). All previous
+// functionality (SELECT mode with multi-select,
+// downloads bell with active/failed badge, grid/list
+// toggle, sort menu, storage info, download queue,
+// delete alert) is preserved.
+
+struct LibraryContent: View {
+    // 2026-08-14: `showsBackButton` is true when the
+    // content is pushed onto a parent NavigationStack
+    // (e.g. from Home's "View All" link). When true, a
+    // custom chevron back button is rendered at the
+    // leading edge of the header instead of the system
+    // nav bar's back button. When false (the Library
+    // tab root), no back button is shown — there's
+    // nowhere to go back to.
+    var showsBackButton: Bool = false
+    // 2026-08-14: SwiftUI's dismiss action — pops the
+    // current destination from the parent NavigationStack
+    // (no-op when there's no parent to pop, e.g. the
+    // Library tab root). Always available via the
+    // environment; only called from the custom back
+    // button.
+    @Environment(\.dismiss) private var dismiss
+
     @StateObject private var viewModel = LibraryViewModel()
     @StateObject private var playerState = PlayerState.shared
     @StateObject private var songMemoryManager = SongMemoryManager.shared
@@ -84,6 +128,10 @@ struct LibraryView: View {
     @State private var selectedTracks: Set<String> = []
     @State private var isEditing = false
     @State private var searchQuery = ""
+    // 2026-08-14: search bar focus state. Matches the
+    // SearchView's `isSearchFocused` pattern — drives the
+    // animated cyan-stroke border on the input.
+    @FocusState private var isSearchFocused: Bool
     // v1.6.9 (CV-15b): segmented Picker state. Default
     // Downloaded so the first thing the user sees is
     // the offline-available library they already know
@@ -99,255 +147,414 @@ struct LibraryView: View {
     @State private var cancellables: Set<AnyCancellable> = []
 
     var body: some View {
-        // S14: NavigationStack replaces the deprecated NavigationView
-        // so the Library tab's chrome (DONE/DELETE toolbar in edit
-        // mode + standard nav bar) is consistent with iOS 16+ patterns.
-        // v1.6.8 (CV-13): Liked Songs opens as a .sheet (below) —
-        // not pushed onto this stack — to avoid nested
-        // NavigationStacks with PlaylistDetailView.
-        NavigationStack {
-            ZStack {
-                // Cyberpunk background
-                Theme.cyberBackground
-                    .ignoresSafeArea()
+        // 2026-08-14: removed the inner NavigationStack
+        // (now provided by the `LibraryView` wrapper) and
+        // the system `.toolbar { ToolbarItem ... }` chrome
+        // (which rendered buttons with the iOS system
+        // toolbar look — blue tint, system padding). The
+        // chrome is now a custom `HStack` inside the
+        // `customHeader` view, with the same affordances
+        // (downloads bell, SELECT, view mode, sort) but
+        // themed to match the rest of the app: cyber cyan
+        // icons on glass circles, monospaced labels.
+        //
+        // Mode picker, search bar, and list row were also
+        // restyled in this pass — see `modePicker`,
+        // `searchBar`, and `listView`.
+        ZStack {
+            // Cyberpunk background
+            Theme.cyberBackground
+                .ignoresSafeArea()
 
-                Group {
-                    // v1.6.9 (CV-15b): empty check is per-mode
-                    // so the user sees the Liked empty state
-                    // (or the Downloaded one) based on the
-                    // active segment — not a single global
-                    // "library is empty" overlay that hides
-                    // both modes.
-                    if currentTracks.isEmpty {
-                        emptyView
-                    } else {
-                        contentView
-                    }
+            VStack(spacing: 0) {
+                customHeader
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
+                    .padding(.bottom, 12)
+
+                // v1.6.9 (CV-15b): empty check is per-mode
+                // so the user sees the Liked empty state
+                // (or the Downloaded one) based on the
+                // active segment — not a single global
+                // "library is empty" overlay that hides
+                // both modes.
+                if currentTracks.isEmpty {
+                    emptyView
+                } else {
+                    contentView
                 }
             }
-            .navigationTitle("")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    if isEditing {
-                        HStack(spacing: 16) {
-                            Button("DONE") {
-                                isEditing = false
-                                selectedTracks.removeAll()
-                            }
-                            .font(.system(size: 13, weight: .bold, design: .monospaced))
-                            .foregroundColor(Theme.cyberCyan)
-
-                            if !selectedTracks.isEmpty {
-                                // v1.6.9 (CV-15b): destructive
-                                // action label switches with the
-                                // active mode — "UNLIKE" for the
-                                // Liked segment, "DELETE" for
-                                // Downloaded.
-                                Button(libraryMode == .liked ? "UNLIKE" : "DELETE", role: .destructive) {
-                                    print("🗑️ Toolbar Delete button tapped. selectedTracks: \(selectedTracks.count)")
-                                    viewModel.showDeleteConfirmation = true
-                                }
-                                .font(.system(size: 13, weight: .bold, design: .monospaced))
-                            }
-                        }
-                    }
-                }
-
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    HStack(spacing: 12) {
-                        // v1.6.9 (CV-15b): Downloads queue bell
-                        // is only relevant for the Downloaded
-                        // mode. In the Liked mode it's hidden —
-                        // the user is browsing favorites, not
-                        // managing downloads, and a downloads
-                        // bell that does nothing would just be
-                        // visual noise.
-                        if libraryMode == .downloaded {
-                            // S18 (P0-1 rescue): Downloads queue +
-                            // History were orphaned because
-                            // nothing observed
-                            // DownloadManager.showDownloadQueue.
-                            // Surface them via a bell in the
-                            // Library toolbar. The bell also
-                            // shows a badge when there are active
-                            // or failed downloads.
-                            Button {
-                                HapticManager.light()
-                                showDownloadQueue = true
-                            } label: {
-                                ZStack(alignment: .topTrailing) {
-                                    Image(systemName: "arrow.down.circle")
-                                        .font(.system(size: 17, weight: .semibold))
-                                        .foregroundColor(Theme.cyberCyan)
-                                    // Badge: active OR failed downloads
-                                    let activeCount = DownloadManager.shared.activeDownloads.count
-                                    let failedCount = DownloadManager.shared.completedDownloads.filter {
-                                        if case .failed = $0.status { return true }; return false
-                                    }.count
-                                    if activeCount + failedCount > 0 {
-                                        Text("\(activeCount + failedCount)")
-                                            .font(.system(size: 9, weight: .bold, design: .monospaced))
-                                            .foregroundColor(.white)
-                                            .padding(.horizontal, 4)
-                                            .padding(.vertical, 1)
-                                            .background(
-                                                Capsule().fill(failedCount > 0 ? Theme.cyberMagenta : Theme.cyberYellow)
-                                            )
-                                            .offset(x: 6, y: -4)
-                                    }
-                                }
-                            }
-                            .accessibilityLabel("Downloads")
-                            .accessibilityHint("Show download queue and history")
-                        }
-
-                        // 2026-06-28 (S6): show toolbar even when the
-                        // library is empty so the sort menu is
-                        // always accessible (it controls the
-                        // empty-state as well). v1.6.9 (CV-15b):
-                        // enabled state follows the current mode's
-                        // track list, not just the downloaded
-                        // library.
-                        Button(isEditing ? "\(selectedTracks.count)" : "SELECT") {
-                            isEditing.toggle()
-                            if !isEditing {
-                                selectedTracks.removeAll()
-                            }
-                        }
-                        .font(.system(size: 13, weight: .bold, design: .monospaced))
-                        .foregroundColor(Theme.cyberCyan)
-                        .disabled(currentTracks.isEmpty)
-                        .opacity(currentTracks.isEmpty ? 0.4 : 1)
-
-                        Button {
-                            viewMode = viewMode == .grid ? .list : .grid
-                        } label: {
-                            Image(systemName: viewMode == .grid ? "list.bullet" : "square.grid.2x2")
-                                .font(.system(size: 17, weight: .semibold))
-                                .foregroundColor(Theme.cyberCyan)
-                        }
-
-                        Menu {
-                            Section("SORT BY") {
-                                // v1.6.9 (CV-15b): in Liked mode
-                                // we hide the "Size" sort option
-                                // (file size is meaningless for
-                                // liked tracks that aren't
-                                // downloaded). Downloaded mode
-                                // gets the full list.
-                                ForEach(availableSortOptions) { option in
-                                    Button {
-                                        viewModel.sortOption = option
-                                    } label: {
-                                        Label(option.rawValue,
-                                              systemImage: viewModel.sortOption == option ? "checkmark" : option.icon)
-                                    }
-                                }
-                            }
-
-                            // v1.6.9 (CV-15b): STORAGE INFO is
-                            // only relevant for the Downloaded
-                            // mode — it tracks on-disk bytes,
-                            // which is meaningless for liked
-                            // tracks that may not be downloaded.
-                            if libraryMode == .downloaded {
-                                Divider()
-
-                                Button {
-                                    showStorageInfo = true
-                                } label: {
-                                    Label("STORAGE INFO", systemImage: "externaldrive")
-                                }
-                            }
-                        } label: {
-                            // 2026-06-28 (S6): wrap the icon in a glass
-                            // circle so it's clearly visible against
-                            // the dark background. The previous plain
-                            // `arrow.up.arrow.down.circle` SF Symbol
-                            // was nearly invisible at the toolbar
-                            // size on the simulator.
-                            ZStack {
-                                Circle()
-                                    .fill(Theme.cyberSurface.opacity(0.85))
-                                    .frame(width: 30, height: 30)
-                                Image(systemName: "arrow.up.arrow.down")
-                                    .font(.system(size: 13, weight: .bold))
-                                    .foregroundColor(Theme.cyberCyan)
-                            }
-                        }
-                    }
-                }
-            }
-            .sheet(isPresented: $showStorageInfo) {
-                StorageInfoSheetCyberpunk(
-                    totalSize: viewModel.totalSize,
-                    trackCount: viewModel.tracks.count,
-                    onClearAll: {
-                        viewModel.clearLibrary()
-                    }
-                )
-            }
-            .sheet(isPresented: $showDownloadQueue) {
-                DownloadQueueView()
-            }
-            // v1.6.9 (CV-15b): Liked Songs sheet removed.
-            // Liked tracks are now a first-class Library
-            // mode toggled via the segmented Picker at the
-            // top of contentView — no separate sheet
-            // needed. The LikedSongsView file stays around
-            // for any future standalone use (e.g. a
-            // ShareCard / search-result jump-to).
-            .alert(deleteAlertTitle, isPresented: $viewModel.showDeleteConfirmation) {
-                Button("CANCEL", role: .cancel) {
-                    print("🗑️ Delete cancelled")
-                }
-                Button(libraryMode == .liked ? "UNLIKE" : "DELETE", role: .destructive) {
-                    print("🗑️ Alert Delete button tapped. Selected tracks: \(selectedTracks.count)")
-                    let ids = Array(selectedTracks)
-                    print("🗑️ Track IDs to delete: \(ids)")
-                    HapticManager.heavy()
-                    let count = ids.count
-                    // v1.6.9 (CV-15b): destructive action
-                    // depends on the active mode. Downloaded
-                    // mode removes the files from disk via
-                    // the LibraryViewModel; Liked mode just
-                    // toggles the like state in
-                    // PlaylistManager. Different toast
-                    // messages reflect the difference.
-                    if libraryMode == .liked {
-                        for id in ids {
-                            playlistManager.toggleLike(trackId: id)
-                        }
-                        UndoService.shared.registerUndo(
-                            message: "Unliked \(count) track\(count == 1 ? "" : "s")",
-                            restore: nil,
-                            showUndoButton: false
-                        )
-                    } else {
-                        viewModel.deleteTracks(ids)
-                        // S15: Library multi-delete is destructive
-                        // (files are removed from disk). No working
-                        // restore, so the toast is a confirmation
-                        // only — no Undo button (previously the
-                        // button was a lie).
-                        UndoService.shared.registerUndo(
-                            message: "Deleted \(count) track\(count == 1 ? "" : "s")",
-                            restore: nil,
-                            showUndoButton: false
-                        )
-                    }
-                    selectedTracks.removeAll()
-                    isEditing = false
-                }
-            } message: {
-                Text(deleteAlertMessage)
-            }
-            .preferredColorScheme(.dark)
         }
+        .sheet(isPresented: $showStorageInfo) {
+            StorageInfoSheetCyberpunk(
+                totalSize: viewModel.totalSize,
+                trackCount: viewModel.tracks.count,
+                onClearAll: {
+                    viewModel.clearLibrary()
+                }
+            )
+        }
+        .sheet(isPresented: $showDownloadQueue) {
+            DownloadQueueView()
+        }
+        // v1.6.9 (CV-15b): Liked Songs sheet removed.
+        // Liked tracks are now a first-class Library
+        // mode toggled via the segmented Picker at the
+        // top of contentView — no separate sheet
+        // needed. The LikedSongsView file stays around
+        // for any future standalone use (e.g. a
+        // ShareCard / search-result jump-to).
+        .alert(deleteAlertTitle, isPresented: $viewModel.showDeleteConfirmation) {
+            Button("CANCEL", role: .cancel) {
+                print("🗑️ Delete cancelled")
+            }
+            Button(libraryMode == .liked ? "UNLIKE" : "DELETE", role: .destructive) {
+                print("🗑️ Alert Delete button tapped. Selected tracks: \(selectedTracks.count)")
+                let ids = Array(selectedTracks)
+                print("🗑️ Track IDs to delete: \(ids)")
+                HapticManager.heavy()
+                let count = ids.count
+                // v1.6.9 (CV-15b): destructive action
+                // depends on the active mode. Downloaded
+                // mode removes the files from disk via
+                // the LibraryViewModel; Liked mode just
+                // toggles the like state in
+                // PlaylistManager. Different toast
+                // messages reflect the difference.
+                if libraryMode == .liked {
+                    for id in ids {
+                        playlistManager.toggleLike(trackId: id)
+                    }
+                    UndoService.shared.registerUndo(
+                        message: "Unliked \(count) track\(count == 1 ? "" : "s")",
+                        restore: nil,
+                        showUndoButton: false
+                    )
+                } else {
+                    viewModel.deleteTracks(ids)
+                    // S15: Library multi-delete is destructive
+                    // (files are removed from disk). No working
+                    // restore, so the toast is a confirmation
+                    // only — no Undo button (previously the
+                    // button was a lie).
+                    UndoService.shared.registerUndo(
+                        message: "Deleted \(count) track\(count == 1 ? "" : "s")",
+                        restore: nil,
+                        showUndoButton: false
+                    )
+                }
+                selectedTracks.removeAll()
+                isEditing = false
+            }
+        } message: {
+            Text(deleteAlertMessage)
+        }
+        .preferredColorScheme(.dark)
+        // 2026-08-14: hide the system nav bar so the
+        // customHeader is the only header chrome. When
+        // LibraryContent is hosted inside the
+        // `LibraryView` wrapper (the Library tab
+        // root), the wrapper also applies
+        // `.toolbar(.hidden, for: .navigationBar)`
+        // — applying it here too is redundant but
+        // safe, and is the only way to hide the
+        // system back button when LibraryContent is
+        // pushed onto a parent NavigationStack
+        // (e.g. Home's `.library` destination).
+        .toolbar(.hidden, for: .navigationBar)
         .onAppear {
             viewModel.loadLibrary()
         }
+    }
+
+    // 2026-08-14: replaced the system toolbar with a
+    // custom HStack header. Same affordances as before
+    // (downloads bell with active/failed badge, SELECT
+    // toggle, grid/list view-mode toggle, sort menu) but
+    // themed to match the rest of the app: cyber cyan
+    // icons on a glass surface, monospaced labels, no
+    // system toolbar tint.
+    private var customHeader: some View {
+        HStack(spacing: 10) {
+            // 2026-08-14: custom back chevron at the
+            // leading edge when this view was pushed
+            // onto a parent NavigationStack (e.g. from
+            // Home's "View All" link). Replaces the
+            // system nav bar back button — same icon
+            // weight, size, and tint as
+            // AntiAlgorithmScreen and RadioView's
+            // custom back chevron so the destinations
+            // share one back-button language. Hidden
+            // when this is the Library tab root (no
+            // parent to pop to).
+            if showsBackButton {
+                Button {
+                    HapticManager.light()
+                    dismiss()
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundColor(Theme.cyberCyan)
+                        .frame(width: 32, height: 32)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Back")
+            }
+
+            // Title (left) — gives the header structure and
+            // matches the rest of the app's screen-level
+            // titles (e.g. Home's "Downloaded", Search's
+            // "Search").
+            Text("Library")
+                .font(.system(size: 22, weight: .bold, design: .monospaced))
+                .foregroundColor(.white)
+                .shadow(color: Theme.cyberCyan.opacity(0.4), radius: 8, x: 0, y: 0)
+
+            Spacer()
+
+            // Right-side action cluster. Each button is a
+            // glass circle with a cyber cyan icon, matching
+            // the chip cluster style we use on Home.
+            // Conditional on isEditing (DONE / DELETE
+            // instead of bell / select / etc).
+            if isEditing {
+                // DONE button (monospaced label, no icon —
+                // the standard "exit edit mode" affordance).
+                Button {
+                    isEditing = false
+                    selectedTracks.removeAll()
+                } label: {
+                    Text("DONE")
+                        .font(.system(size: 12, weight: .bold, design: .monospaced))
+                        .foregroundColor(.cyberCyan)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(Theme.cyberSurface)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .stroke(Theme.cyberCyan.opacity(0.5), lineWidth: 1)
+                                )
+                        )
+                }
+                .buttonStyle(.plain)
+
+                // DELETE / UNLIKE button — destructive,
+                // magenta tint. Only shown when at least one
+                // row is selected.
+                if !selectedTracks.isEmpty {
+                    Button {
+                        HapticManager.light()
+                        viewModel.showDeleteConfirmation = true
+                    } label: {
+                        HStack(spacing: 5) {
+                            Image(systemName: "trash")
+                                .font(.system(size: 11, weight: .bold))
+                            Text(libraryMode == .liked ? "UNLIKE" : "DELETE")
+                                .font(.system(size: 12, weight: .bold, design: .monospaced))
+                            Text("\(selectedTracks.count)")
+                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 1)
+                                .background(
+                                    Capsule().fill(Theme.cyberMagenta.opacity(0.3))
+                                )
+                        }
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 8)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(Theme.cyberMagenta.opacity(0.18))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .stroke(Theme.cyberMagenta.opacity(0.6), lineWidth: 1)
+                                )
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+            } else {
+                // Normal (non-edit) action cluster: 4 glass
+                // circle buttons (downloads bell, SELECT,
+                // view mode, sort). Each is a ZStack with a
+                // circle background and an SF Symbol, so
+                // they read as a cohesive set, not a row of
+                // system buttons.
+
+                // Downloads queue bell — Downloaded mode only.
+                if libraryMode == .downloaded {
+                    headerIconButton(
+                        systemImage: "arrow.down.circle",
+                        badge: downloadBadgeText,
+                        badgeColor: downloadBadgeColor,
+                        accessibilityLabel: "Downloads",
+                        accessibilityHint: "Show download queue and history"
+                    ) {
+                        HapticManager.light()
+                        showDownloadQueue = true
+                    }
+                }
+
+                // SELECT — also shows the selected count
+                // when isEditing is somehow true (defensive
+                // — this branch only renders when
+                // !isEditing, but the toolbar code had the
+                // same dual-state button, so we keep parity).
+                headerIconButton(
+                    systemImage: "checkmark.circle",
+                    badge: nil,
+                    badgeColor: .cyberCyan,
+                    accessibilityLabel: "Select tracks",
+                    accessibilityHint: "Enter multi-select mode"
+                ) {
+                    HapticManager.light()
+                    isEditing = true
+                }
+                .opacity(currentTracks.isEmpty ? 0.4 : 1)
+                .disabled(currentTracks.isEmpty)
+
+                // Grid / list view-mode toggle.
+                headerIconButton(
+                    systemImage: viewMode == .grid ? "list.bullet" : "square.grid.2x2",
+                    badge: nil,
+                    badgeColor: .cyberCyan,
+                    accessibilityLabel: viewMode == .grid ? "Switch to list view" : "Switch to grid view",
+                    accessibilityHint: nil
+                ) {
+                    HapticManager.light()
+                    viewMode = viewMode == .grid ? .list : .grid
+                }
+
+                // Sort menu — the only button that retains
+                // a `Menu` because the dropdown contents
+                // (sort options + storage info) are
+                // multi-item. The trigger itself is the
+                // same glass-circle style as the other
+                // buttons.
+                Menu {
+                    Section("SORT BY") {
+                        // v1.6.9 (CV-15b): in Liked mode
+                        // we hide the "Size" sort option
+                        // (file size is meaningless for
+                        // liked tracks that aren't
+                        // downloaded). Downloaded mode
+                        // gets the full list.
+                        ForEach(availableSortOptions) { option in
+                            Button {
+                                viewModel.sortOption = option
+                            } label: {
+                                Label(option.rawValue,
+                                      systemImage: viewModel.sortOption == option ? "checkmark" : option.icon)
+                            }
+                        }
+                    }
+
+                    // v1.6.9 (CV-15b): STORAGE INFO is
+                    // only relevant for the Downloaded
+                    // mode.
+                    if libraryMode == .downloaded {
+                        Divider()
+                        Button {
+                            showStorageInfo = true
+                        } label: {
+                            Label("STORAGE INFO", systemImage: "externaldrive")
+                        }
+                    }
+                } label: {
+                    headerIconCircle(systemImage: "arrow.up.arrow.down")
+                }
+            }
+        }
+    }
+
+    // 2026-08-14: helper for the glass-circle icon
+    // buttons in `customHeader`. Renders a 32pt circle
+    // on a `cyberSurface` fill with a 1pt cyber cyan
+    // stroke, an SF Symbol centered inside, and an
+    // optional pill badge in the top-right corner (used
+    // by the downloads bell to show active + failed
+    // download count). The badge mirrors the old toolbar
+    // behavior exactly (active + failed count, magenta
+    // tint when any are failed, yellow otherwise).
+    @ViewBuilder
+    private func headerIconButton(
+        systemImage: String,
+        badge: String?,
+        badgeColor: Color,
+        accessibilityLabel: String,
+        accessibilityHint: String?,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button {
+            action()
+        } label: {
+            headerIconCircle(
+                systemImage: systemImage,
+                badge: badge,
+                badgeColor: badgeColor
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(accessibilityLabel)
+        .accessibilityHint(accessibilityHint ?? "")
+    }
+
+    // 2026-08-14: the visual primitive for a header
+    // icon button — glass circle + SF Symbol + optional
+    // badge. Extracted so the `Menu` (sort) can reuse the
+    // same look without going through the action-button
+    // wrapper.
+    @ViewBuilder
+    private func headerIconCircle(
+        systemImage: String,
+        badge: String? = nil,
+        badgeColor: Color = .cyberCyan
+    ) -> some View {
+        ZStack(alignment: .topTrailing) {
+            ZStack {
+                Circle()
+                    .fill(Theme.cyberSurface)
+                    .frame(width: 32, height: 32)
+                Circle()
+                    .stroke(Theme.cyberCyan.opacity(0.45), lineWidth: 1)
+                    .frame(width: 32, height: 32)
+                Image(systemName: systemImage)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(Theme.cyberCyan)
+            }
+            if let badge {
+                Text(badge)
+                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 1)
+                    .background(Capsule().fill(badgeColor))
+                    .offset(x: 6, y: -4)
+            }
+        }
+    }
+
+    // 2026-08-14: computed badge text + color for the
+    // downloads bell. Mirrors the old toolbar badge
+    // exactly: sum of active + failed download counts,
+    // magenta if any are failed (more urgent), yellow
+    // otherwise. nil when there's nothing to show, so
+    // `headerIconCircle` can skip rendering the badge.
+    private var downloadBadgeText: String? {
+        let activeCount = DownloadManager.shared.activeDownloads.count
+        let failedCount = DownloadManager.shared.completedDownloads.filter {
+            if case .failed = $0.status { return true }; return false
+        }.count
+        let total = activeCount + failedCount
+        return total > 0 ? "\(total)" : nil
+    }
+    private var downloadBadgeColor: Color {
+        let failedCount = DownloadManager.shared.completedDownloads.filter {
+            if case .failed = $0.status { return true }; return false
+        }.count
+        return failedCount > 0 ? Theme.cyberMagenta : Theme.cyberYellow
     }
 
     private var emptyView: some View {
@@ -376,29 +583,21 @@ struct LibraryView: View {
     }
 
     private var contentView: some View {
+        // 2026-08-14: removed the duplicate "Library"
+        // title HStack — `customHeader` at the top of
+        // the body now owns the title + action cluster.
+        // The mode picker, play-all row, search bar,
+        // stats bar, and content all live here.
         VStack(spacing: 0) {
-            // Header
-            HStack {
-                Text("Library")
-                    .font(.system(size: 24, weight: .bold, design: .monospaced))
-                    .foregroundColor(.white)
-                    .shadow(color: Theme.cyberCyan.opacity(0.5), radius: 10, x: 0, y: 0)
-
-                Spacer()
-            }
-            .padding(.horizontal)
-            .padding(.top, 8)
-            .padding(.bottom, 8)
-
-            // v1.6.9 (CV-15b): segmented Picker
-            // toggles between Liked and Downloaded.
-            // Same view, same screen, one tap to
-            // switch — meets the "show both in the
-            // same view" goal without burying one
-            // mode behind a card or a sheet.
+            // v1.6.9 (CV-15b): mode picker toggles
+            // between Liked and Downloaded. Same view,
+            // same screen, one tap to switch — meets
+            // the "show both in the same view" goal
+            // without burying one mode behind a card
+            // or a sheet.
             modePicker
-                .padding(.horizontal)
-                .padding(.bottom, 8)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 12)
 
             // v1.6.9 (CV-15b): Play-all row. Only
             // shown in Liked mode (Downloaded mode
@@ -408,14 +607,14 @@ struct LibraryView: View {
             // an artist).
             if libraryMode == .liked && !currentTracks.isEmpty {
                 playAllRow
-                    .padding(.horizontal)
-                    .padding(.bottom, 8)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 12)
             }
 
             // Search bar
             searchBar
-                .padding(.horizontal)
-                .padding(.bottom, 8)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 12)
 
             // Stats bar
             HStack {
@@ -431,7 +630,7 @@ struct LibraryView: View {
                         .foregroundColor(Theme.cyberDim)
                 }
             }
-            .padding(.horizontal)
+            .padding(.horizontal, 16)
             .padding(.vertical, 8)
 
             // Content
@@ -443,20 +642,51 @@ struct LibraryView: View {
         }
     }
 
-    // v1.6.9 (CV-15b): segmented Picker for the
-    // Liked / Downloaded toggle. Segmented style
-    // matches the iOS 17 default; the underlying
-    // labels use the heart / download-circle icons
-    // so the two modes are visually distinct even
-    // when text is truncated.
+    // 2026-08-14: replaced the segmented `Picker` with a
+    // custom chip strip matching SearchView's `FilterChip`.
+    // The segmented control rendered with the iOS system
+    // look (rounded gray pill, system-tinted selected
+    // state) which clashed with the rest of the app's
+    // custom cyber theme. Now both modes are pills with
+    // a cyber-cyan filled state when selected and a
+    // dim-stroke + surface fill when unselected, identical
+    // to the "ALL / SONGS / PLAYLISTS" filter row at the
+    // top of SearchView.
+    //
+    // Each chip also shows a count badge (liked count /
+    // downloaded count) so the user can see at a glance
+    // how many tracks are in each mode without switching
+    // to find out.
     private var modePicker: some View {
-        Picker("Library mode", selection: $libraryMode) {
-            ForEach(LibraryMode.allCases) { mode in
-                Label(mode.label, systemImage: mode.icon)
-                    .tag(mode)
+        HStack(spacing: 10) {
+            // Liked chip
+            LibraryModeChip(
+                title: "Liked",
+                icon: "heart.fill",
+                count: playlistManager.likedTracks.count,
+                isSelected: libraryMode == .liked
+            ) {
+                HapticManager.medium()
+                withAnimation(.spring(response: 0.3)) {
+                    libraryMode = .liked
+                }
             }
+
+            // Downloaded chip
+            LibraryModeChip(
+                title: "Downloaded",
+                icon: "arrow.down.circle.fill",
+                count: viewModel.tracks.count,
+                isSelected: libraryMode == .downloaded
+            ) {
+                HapticManager.medium()
+                withAnimation(.spring(response: 0.3)) {
+                    libraryMode = .downloaded
+                }
+            }
+
+            Spacer()
         }
-        .pickerStyle(.segmented)
     }
 
     // v1.6.9 (CV-15b): Play-all action for the
@@ -656,38 +886,58 @@ struct LibraryView: View {
 
     // MARK: - Search Bar
 
+    // 2026-08-14: restyled to match SearchView's
+    // "FIND MUSIC..." treatment. Same monospaced
+    // placeholder, same animated focus border, same
+    // magnifier icon color transition, same xmark
+    // clear button. The placeholder is uppercased
+    // ("SEARCH LIBRARY...") to match the "FIND MUSIC..."
+    // pattern from SearchView.
     private var searchBar: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 12) {
             Image(systemName: "magnifyingglass")
-                .font(.system(size: 14))
-                .foregroundColor(Theme.cyberDim)
+                .font(.system(size: 15, weight: .medium))
+                .foregroundColor(isSearchFocused || !searchQuery.isEmpty ? .cyberCyan : .cyberDim)
 
-            TextField("Search library...", text: $searchQuery)
-                .font(.system(.body, design: .default))
+            TextField("", text: $searchQuery,
+                      prompt: Text("SEARCH LIBRARY...")
+                          .foregroundColor(Color.cyberDim)
+                          .font(.system(size: 14, design: .monospaced)))
                 .foregroundColor(.white)
+                .font(.system(size: 14, design: .monospaced))
+                .focused($isSearchFocused)
+                .submitLabel(.search)
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.never)
                 .accentColor(Theme.cyberCyan)
 
             if !searchQuery.isEmpty {
                 Button {
+                    HapticManager.light()
                     searchQuery = ""
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 16))
-                        .foregroundColor(Theme.cyberDim)
+                        .foregroundColor(.cyberDim)
                 }
+                .buttonStyle(.plain)
                 .transition(.opacity)
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .background(
-            RoundedRectangle(cornerRadius: CornerRadius.smd)
-                .fill(Theme.cyberSurface)
-                .overlay(
-                    RoundedRectangle(cornerRadius: CornerRadius.smd)
-                        .stroke(Theme.cyberCyan.opacity(0.15), lineWidth: 1)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(Color.cyberSurface)
+        .overlay(
+            RoundedRectangle(cornerRadius: CornerRadius.md)
+                .stroke(
+                    isSearchFocused || !searchQuery.isEmpty
+                        ? Color.cyberCyan.opacity(0.5)
+                        : Color.cyberDim.opacity(0.3),
+                    lineWidth: 1
                 )
         )
+        .cornerRadius(CornerRadius.md)
+        .animation(.easeInOut(duration: 0.2), value: isSearchFocused)
     }
 
     private var gridView: some View {
@@ -751,41 +1001,217 @@ struct LibraryView: View {
         }
     }
 
+    // 2026-08-14: rewrote the list view to use the
+    // unified `TrackRow` configured to match
+    // `SearchResultRow`'s style (50pt artwork, title +
+    // artist subtitle, cyber-cyan playing highlight,
+    // 36pt right-side accessory cluster with download
+    // icon / playing bars / small play icon). The
+    // previous `ListTrackRow` was its own bespoke
+    // component with subtle inconsistencies vs Search
+    // (different title/subtitle sizes, different
+    // right-side accessory, file-size line that's
+    // irrelevant for the Liked mode and unused in
+    // practice).
+    //
+    // The edit-mode selection circle is rendered
+    // OUTSIDE the TrackRow via a leading HStack, so
+    // the row itself stays a clean SearchView match
+    // when not editing. The `.contextMenu` +
+    // `.swipeActions` on TrackRow give us Play /
+    // Play Next / Add to Queue / Like / Delete
+    // without needing our own custom row component.
+    //
+    // We use a plain `List` (still .listStyle(.plain))
+    // for the swipe-to-delete affordance + section
+    // separator support that `TrackRow` already
+    // provides. The `.listRowBackground(Color.cyberSurface)`
+    // matches SearchView's results list so the two
+    // surfaces feel like one design system.
     private var listView: some View {
         List {
             ForEach(currentTracks) { track in
-                    ListTrackRow(
-                        track: track,
-                        isSelected: selectedTracks.contains(track.videoId),
-                        isEditing: isEditing,
-                        isPlaying: viewModel.isCurrentlyPlaying(track),
-                        memoryPreview: songMemoryManager.memory(for: track.track)?.previewText,
-                        mode: libraryMode,
+                let isSelected = selectedTracks.contains(track.videoId)
+                let isPlaying = viewModel.isCurrentlyPlaying(track)
+                let isDownloadedTrack = libraryMode == .downloaded
+                // 2026-08-14: `isDownloaded` for the badge
+                // cluster — true in Downloaded mode
+                // (always, by construction) AND in Liked
+                // mode if the track happens to also be on
+                // disk (the user liked it before/after
+                // downloading it). Mirrors
+                // `SearchResultRow.isDownloaded` which
+                // checks via `LibraryViewModel.isAlreadyDownloaded`.
+                let trackIsOnDisk: Bool = {
+                    if isDownloadedTrack { return true }
+                    return AudioFileManager.shared.isPlayable(
+                        videoId: track.videoId,
+                        context: PersistenceController.shared.viewContext
+                    )
+                }()
+
+                HStack(spacing: 12) {
+                    if isEditing {
+                        // 2026-08-14: edit-mode selection
+                        // circle. Same 24pt cyber-cyan
+                        // filled circle with a white
+                        // checkmark as the previous
+                        // `ListTrackRow`, kept on the
+                        // leading edge of the row. Tapping
+                        // anywhere on the row still
+                        // toggles selection in edit mode
+                        // (handled by the
+                        // `Button { toggleSelection(track) }`
+                        // below).
+                        Button {
+                            HapticManager.light()
+                            toggleSelection(track)
+                        } label: {
+                            ZStack {
+                                Circle()
+                                    .fill(isSelected ? Theme.cyberCyan : Color.clear)
+                                    .frame(width: 22, height: 22)
+                                    .overlay(
+                                        Circle()
+                                            .stroke(
+                                                isSelected ? Theme.cyberCyan : Theme.cyberDim.opacity(0.5),
+                                                lineWidth: 1.5
+                                            )
+                                    )
+                                if isSelected {
+                                    Image(systemName: "checkmark")
+                                        .font(.system(size: 12, weight: .bold))
+                                        .foregroundColor(Theme.cyberBackground)
+                                }
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    // 2026-08-14: the SearchView-style
+                    // track row. Same visual treatment as
+                    // SearchView.SearchResultRow — 50pt
+                    // artwork, title + artist subtitle,
+                    // cyber-cyan playing highlight, 36pt
+                    // right-side accessory cluster.
+                    TrackRow(
+                        title: track.title,
+                        subtitle: track.artist,
+                        subtitle2: nil,  // no album/duration
+                        artworkURL: track.thumbnailURL,
+                        isPlaying: isPlaying,
+                        // 2026-08-14: dropped subtitle2
+                        // (no file-size line) for visual
+                        // parity with SearchView's
+                        // `SearchResultRow`. The file
+                        // size is still shown in the
+                        // header stats bar above the
+                        // list (`.padding(.horizontal)`
+                        // row with "X TRACKS · Y MB")
+                        // for Downloaded mode.
+                        showSubtitle: true,
+                        accessory: .custom(AnyView(
+                            libraryAccessoryCluster(
+                                isPlaying: isPlaying,
+                                isDownloaded: trackIsOnDisk,
+                                isEditing: isEditing
+                            )
+                        )),
                         onTap: {
                             if isEditing {
+                                HapticManager.light()
                                 toggleSelection(track)
                             } else {
+                                HapticManager.medium()
                                 viewModel.playTrack(track)
                             }
-                        },
-                        onPlay: {
-                            viewModel.playTrack(track)
-                        },
-                        onPlayNext: {
-                            HapticManager.light()
-                            handlePlayNext(track)
-                        },
-                        onAddToQueue: {
-                            HapticManager.light()
-                            handleAddToQueue(track)
-                        },
-                        onDelete: {
-                            handleDelete(track)
                         }
                     )
+                }
+                .listRowBackground(Color.cyberSurface)
+                .listRowSeparatorTint(Theme.cyberDim.opacity(0.2))
+                .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                    // 2026-08-14: trailing swipe action
+                    // — destructive action labelled per
+                    // mode (Unlike / Remove from
+                    // Library), matches the old
+                    // `ListTrackRow`'s swipe behavior.
+                    Button(role: .destructive) {
+                        handleDelete(track)
+                    } label: {
+                        Label(
+                            libraryMode == .liked ? "Unlike" : "Remove",
+                            systemImage: libraryMode == .liked ? "heart.slash" : "trash"
+                        )
+                    }
+                    .tint(libraryMode == .liked ? Theme.cyberMagenta : Theme.cyberCyan)
+
+                    // 2026-08-14: also surface Play Next
+                    // + Add to Queue as swipe actions,
+                    // matching the SearchView's swipe
+                    // action set.
+                    Button {
+                        HapticManager.light()
+                        handleAddToQueue(track)
+                    } label: {
+                        Label("Queue", systemImage: "plus")
+                    }
+                    .tint(Theme.cyberMagenta)
+                }
+                .contextMenu {
+                    Button {
+                        HapticManager.medium()
+                        viewModel.playTrack(track)
+                    } label: {
+                        Label(isPlaying ? "Now Playing" : "Play", systemImage: "play.fill")
+                    }
+
+                    Button {
+                        HapticManager.light()
+                        handlePlayNext(track)
+                    } label: {
+                        Label("Play Next", systemImage: "text.badge.plus")
+                    }
+
+                    Button {
+                        HapticManager.light()
+                        handleAddToQueue(track)
+                    } label: {
+                        Label("Add to Queue", systemImage: "plus")
+                    }
+
+                    // 2026-08-14: like/unlike context
+                    // menu item — only shown in
+                    // Downloaded mode (Liked mode is
+                    // already the "liked" view, so
+                    // toggling is redundant).
+                    if libraryMode == .downloaded {
+                        Button {
+                            HapticManager.medium()
+                            playlistManager.toggleLike(trackId: track.videoId)
+                        } label: {
+                            let isLiked = playlistManager.isLiked(trackId: track.videoId)
+                            Label(isLiked ? "Unlike" : "Like",
+                                  systemImage: isLiked ? "heart.slash.fill" : "heart.fill")
+                        }
+                    }
+
+                    Divider()
+
+                    Button(role: .destructive) {
+                        HapticManager.medium()
+                        handleDelete(track)
+                    } label: {
+                        Label(libraryMode == .liked ? "Unlike" : "Remove from Library",
+                              systemImage: libraryMode == .liked ? "heart.slash" : "trash")
+                    }
+                }
             }
         }
         .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .background(Theme.cyberBackground)
         .refreshable {
             // v1.6.9 (CV-15b): same as gridView —
             // pull-to-refresh only refreshes
@@ -795,6 +1221,44 @@ struct LibraryView: View {
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
             }
         }
+    }
+
+    // 2026-08-14: 36pt right-side accessory cluster
+    // for the SearchView-style track row. Mirrors
+    // `SearchResultRow`'s right cluster: a small
+    // downloaded indicator on the left (when
+    // downloaded), then a play icon or playing bars on
+    // the right. Wrapped in `AnyView` via the
+    // `TrackRowAccessory.custom` case so we can use the
+    // existing `TrackRow` primitive instead of
+    // duplicating it.
+    @ViewBuilder
+    private func libraryAccessoryCluster(
+        isPlaying: Bool,
+        isDownloaded: Bool,
+        isEditing: Bool
+    ) -> some View {
+        HStack(spacing: 8) {
+            if isDownloaded && !isEditing {
+                Image(systemName: "arrow.down.circle.fill")
+                    .font(.system(size: 14))
+                    .foregroundColor(.cyberCyan)
+            }
+
+            if isPlaying {
+                CyberPlayingBars()
+            } else if !isEditing {
+                Image(systemName: "play.fill")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.cyberCyan)
+            } else {
+                // Edit mode: show nothing on the right
+                // (the selection circle is on the
+                // leading edge).
+                EmptyView()
+            }
+        }
+        .frame(width: 36)
     }
 
     // v1.6.9 (CV-15b): mode-aware dispatch for
@@ -970,82 +1434,146 @@ struct GridTrackCell: View {
             // .clipShape. .scaledToFill() on a non-Image view
             // is a no-op.
             //
-            // The fix: drop .scaledToFill() (no-op here) and
-            // give the CachedAsyncImage an explicit
-            // maxWidth/maxHeight .infinity frame so it stretches
-            // to the ZStack's bounds. The ZStack's
+            // The v1.8.7 fix: drop .scaledToFill() (no-op here)
+            // and give the CachedAsyncImage an explicit
+            // maxWidth/maxHeight .infinity frame so it
+            // stretches to the ZStack's bounds. The ZStack's
             // .aspectRatio(1, .fit) defines the square; the
-            // CachedAsyncImage fills that square. The result:
-            // every grid cell is exactly column-width square,
-            // every thumbnail fills its cell, no overflow.
+            // CachedAsyncImage fills that square.
             //
-            // Same fix needed for the placeholder SF Symbol so
-            // the layout doesn't shift when the image loads
-            // (it would shrink from 720x720 to 40x40 otherwise).
-            ZStack {
-                RoundedRectangle(cornerRadius: CornerRadius.md)
-                    .fill(Theme.cyberSurface)
+            // 2026-08-14 / S18-LIBRARY-GRID-OVERFLOW-2: the
+            // v1.8.7 fix was incomplete. The
+            // `.frame(maxWidth: .infinity).aspectRatio(1, .fit)`
+            // pattern on a ZStack is unreliable when the
+            // children have variable intrinsic sizes (the
+            // placeholder SF Symbol is 40x40; the loaded
+            // image is its natural pixel size like 720x720;
+            // the resizable+fill image has no intrinsic size
+            // at all). The aspectRatio modifier picks the
+            // larger of the intrinsic dimensions and the
+            // proposed size, which means cells where the
+            // placeholder hasn't yet been replaced by the
+            // loaded image OR where the resizable image
+            // "leaks" through with a different intrinsic size
+            // get sized larger than the column. The trailing
+            // .clipShape only hides the visual overflow; the
+            // LAYOUT frame is still wrong, so neighboring
+            // cells get pushed sideways.
+            //
+            // 2026-08-14 / S18-LIBRARY-GRID-OVERFLOW-4: the
+            // previous fix (Color.clear.aspectRatio + .overlay)
+            // was still leaking the ZStack's intrinsic content
+            // size up through the overlay into the outer VStack.
+            // The CachedAsyncImage, when loaded, has a
+            // `image.resizable().aspectRatio(contentMode: .fill)`
+            // child whose intrinsic size is the image's natural
+            // pixel size (e.g., 720×720). Without an explicit
+            // frame constraint, that intrinsic size propagates
+            // up: the ZStack becomes 720×720, the overlay
+            // reports 720×720 to its parent (Color.clear), and
+            // the outer VStack ends up 720 wide — which is way
+            // more than the 172pt column. The .clipShape
+            // hides the visual overflow, but the LAYOUT
+            // frame is still wrong, so the whole cell is
+            // wider than its column and the next column gets
+            // pushed off-screen.
+            //
+            // The fix: explicitly bound the ZStack to the
+            // overlay's size with `.frame(maxWidth: .infinity,
+            // maxHeight: .infinity)`. Now the ZStack's layout
+            // frame is the overlay's size (172.5×172.5),
+            // not its intrinsic content size. The
+            // CachedAsyncImage (which still has no explicit
+            // frame, since the overlay already bounds it) is
+            // also bounded to 172.5×172.5. The visual
+            // overflow is gone AND the layout is correct.
+            //
+            // Also added `.frame(maxWidth: .infinity,
+            // alignment: .leading)` on the outer VStack
+            // (forces it to take the full column width
+            // instead of its intrinsic content width) and
+            // on the text VStack (forces it to the column
+            // width so long titles don't push the cell
+            // wider). Together these four constraints make
+            // the cell's layout frame exactly column-width
+            // regardless of any child's intrinsic size.
+            Color.clear
+                .aspectRatio(1, contentMode: .fit)
+                .overlay(
+                    ZStack {
+                        RoundedRectangle(cornerRadius: CornerRadius.md)
+                            .fill(Theme.cyberSurface)
 
-                // Artwork image
-                if let url = track.thumbnailURL {
-                    CachedAsyncImage(url: url) {
-                        Image(systemName: "music.note")
-                            .font(.system(size: 40))
-                            .foregroundColor(Theme.cyberDim)
+                        // Artwork image
+                        if let url = track.thumbnailURL {
+                            CachedAsyncImage(url: url) {
+                                Image(systemName: "music.note")
+                                    .font(.system(size: 40))
+                                    .foregroundColor(Theme.cyberDim)
+                            }
+                        } else {
+                            Image(systemName: "music.note")
+                                .font(.system(size: 40))
+                                .foregroundColor(Theme.cyberDim)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        }
+
+                        // Cyberpunk border
+                        RoundedRectangle(cornerRadius: CornerRadius.md)
+                            .stroke(isPlaying ? Theme.cyberCyan.opacity(0.5) : Theme.cyberCyan.opacity(0.1), lineWidth: 1)
+
+                        if memoryPreview != nil {
+                            SongMemoryBadge(text: nil)
+                                .padding(8)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                        }
+
+                        // Playing indicator overlay
+                        if isPlaying {
+                            Color.black.opacity(0.3)
+
+                            CyberPlayingBars()
+                                .frame(width: 30, height: 30)
+                        }
+
+                        if !isEditing && !isPlaying {
+                            Button(action: onPlay) {
+                                Image(systemName: "play.fill")
+                                    .font(.system(size: 24))
+                                    .foregroundColor(.white)
+                                    .frame(width: 50, height: 50)
+                                    .background(Theme.cyberCyan.opacity(0.8))
+                                    .clipShape(Circle())
+                                    .shadow(color: Theme.cyberCyan.opacity(0.5), radius: 10, x: 0, y: 0)
+                            }
+                        }
+
+                        if isEditing {
+                            Circle()
+                                .fill(isSelected ? Theme.cyberCyan : Theme.cyberDim.opacity(0.3))
+                                .frame(width: 28, height: 28)
+                                .overlay(
+                                    Image(systemName: isSelected ? "checkmark" : "")
+                                        .font(.system(size: 14, weight: .bold))
+                                        .foregroundColor(Theme.cyberBackground)
+                                )
+                                .padding(8)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                        }
                     }
+                    // 2026-08-14 / OVERFLOW-4: bound the
+                    // ZStack to the overlay's size. Without
+                    // this, the CachedAsyncImage's natural
+                    // 720×720 intrinsic size propagates up
+                    // and the whole cell overflows the
+                    // column. With this, the ZStack's
+                    // layout frame is the overlay's size
+                    // (column-width square) and the
+                    // CachedAsyncImage is constrained
+                    // inside it.
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    Image(systemName: "music.note")
-                        .font(.system(size: 40))
-                        .foregroundColor(Theme.cyberDim)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
-
-                // Cyberpunk border
-                RoundedRectangle(cornerRadius: CornerRadius.md)
-                    .stroke(isPlaying ? Theme.cyberCyan.opacity(0.5) : Theme.cyberCyan.opacity(0.1), lineWidth: 1)
-
-                if memoryPreview != nil {
-                    SongMemoryBadge(text: nil)
-                        .padding(8)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                }
-
-                // Playing indicator overlay
-                if isPlaying {
-                    Color.black.opacity(0.3)
-
-                    CyberPlayingBars()
-                        .frame(width: 30, height: 30)
-                }
-
-                if !isEditing && !isPlaying {
-                    Button(action: onPlay) {
-                        Image(systemName: "play.fill")
-                            .font(.system(size: 24))
-                            .foregroundColor(.white)
-                            .frame(width: 50, height: 50)
-                            .background(Theme.cyberCyan.opacity(0.8))
-                            .clipShape(Circle())
-                            .shadow(color: Theme.cyberCyan.opacity(0.5), radius: 10, x: 0, y: 0)
-                    }
-                }
-
-                if isEditing {
-                    Circle()
-                        .fill(isSelected ? Theme.cyberCyan : Theme.cyberDim.opacity(0.3))
-                        .frame(width: 28, height: 28)
-                        .overlay(
-                            Image(systemName: isSelected ? "checkmark" : "")
-                                .font(.system(size: 14, weight: .bold))
-                                .foregroundColor(Theme.cyberBackground)
-                        )
-                        .padding(8)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-                }
-            }
-            .aspectRatio(1, contentMode: .fit)
-            .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
+                    .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
+                )
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(track.title)
@@ -1073,7 +1601,32 @@ struct GridTrackCell: View {
                         .foregroundColor(Theme.cyberTextSecondary)
                 }
             }
+            // 2026-08-14 / OVERFLOW-4: bound the text
+            // VStack to the column width. Without
+            // this, a long track title or artist
+            // name would let the text VStack's
+            // intrinsic content width exceed the
+            // column, pushing the whole cell wider.
+            // With `.frame(maxWidth: .infinity)` the
+            // text VStack takes the column width and
+            // the `.lineLimit(1)` on the Text views
+            // truncates cleanly at the column edge.
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
+        // 2026-08-14 / OVERFLOW-4: bound the outer
+        // VStack to the column width. Without this,
+        // the VStack's intrinsic content width
+        // (the max of its children's widths) could
+        // exceed the column if any child's intrinsic
+        // size was larger than the column — the
+        // Color.clear with aspectRatio is column
+        // width, but the text VStack's intrinsic
+        // content width could be wider for a long
+        // title. Forcing `.frame(maxWidth: .infinity)`
+        // on the outer VStack ensures the cell's
+        // layout frame is exactly the column width
+        // regardless of any child's intrinsic size.
+        .frame(maxWidth: .infinity, alignment: .leading)
         // S13: tap target. The inner play-button overlay (in the
         // ZStack above) is itself a Button — SwiftUI's hit-testing
         // routes taps on the play button to its action, and taps
@@ -1159,6 +1712,59 @@ struct GridTrackCell: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - Library Mode Chip
+//
+// 2026-08-14: custom Liked / Downloaded mode pill
+// matching SearchView's `FilterChip` (same cyber-cyan
+// filled state when selected, dim-stroke + surface fill
+// when unselected, count badge in the trailing edge).
+// Replaces the system `Picker` + `.segmented` style.
+struct LibraryModeChip: View {
+    let title: String
+    let icon: String
+    let count: Int
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Image(systemName: icon)
+                    .font(.system(size: 11, weight: .bold))
+
+                Text(title)
+                    .font(.system(size: 12, weight: .bold, design: .monospaced))
+
+                if count > 0 {
+                    Text("\(count)")
+                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(
+                            isSelected
+                                ? Color.cyberBackground.opacity(0.3)
+                                : Color.cyberDim.opacity(0.25)
+                        )
+                        .clipShape(Capsule())
+                }
+            }
+            .foregroundColor(isSelected ? .cyberBackground : .white)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(isSelected ? Color.cyberCyan : Color.cyberSurface)
+            .clipShape(RoundedRectangle(cornerRadius: 20))
+            .overlay(
+                RoundedRectangle(cornerRadius: 20)
+                    .stroke(
+                        isSelected ? Color.clear : Color.cyberDim.opacity(0.4),
+                        lineWidth: 0.5
+                    )
+            )
+        }
+        .buttonStyle(.plain)
     }
 }
 
@@ -1489,6 +2095,30 @@ struct StatRowCyberpunk: View {
         .padding(.vertical, 12)
         Divider()
             .background(Theme.cyberCyan.opacity(0.2))
+    }
+}
+
+// 2026-08-14: thin wrapper that hosts `LibraryContent` in
+// a NavigationStack. Used by the Library tab (so the tab
+// still gets a NavigationStack host, useful for any future
+// push destinations from Library). The HomeView's
+// `.library` destination uses `LibraryContent()` directly
+// to avoid nested NavigationStacks (crash on iOS).
+//
+// `.toolbar(.hidden, for: .navigationBar)` is applied here
+// so the Library tab doesn't get a system back button
+// (the tab is the root — there's nowhere to go back to).
+// When the content is pushed from another surface (e.g.
+// Home's "View All" link), that surface owns the
+// NavigationStack and hides its own system back button
+// (the pushed `LibraryContent(showsBackButton: true)`
+// renders its own custom back chevron in the header).
+struct LibraryView: View {
+    var body: some View {
+        NavigationStack {
+            LibraryContent()
+        }
+        .toolbar(.hidden, for: .navigationBar)
     }
 }
 

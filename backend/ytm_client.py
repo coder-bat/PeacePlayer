@@ -364,6 +364,7 @@ class YTMusicClient:
             ydl_opts = {
                 'format': 'bestaudio/best',
                 'quiet': True,
+                'no_warnings': True,
                 'skip_download': True,
                 'extract_flat': False,
                 # S17-H (2026-07-26): YouTube's n-challenge (the
@@ -383,6 +384,24 @@ class YTMusicClient:
                 # (instead of installing deno locally) and avoids a
                 # local runtime dependency.
                 'remote_components': 'ejs:github',
+                # S17-H2 (2026-08-30): ANDROID_VR stream URLs have been
+                # coming back as HTTP 403 Forbidden on YouTube's CDN
+                # for months, even with valid signatures.
+                #
+                # First attempt was `['ios', 'web']` — these return zero
+                # formats for most music.youtube.com tracks (only
+                # storyboard), so every stream URL extraction fails with
+                # "Requested format is not available".
+                #
+                # Switching to `mediaconnect` (the new visionOS / YouTube
+                # Music player client) which returns a proper format list
+                # including itag 140 m4a AAC. Direct HEAD requests
+                # confirm 200, not 403. Same fix as extractor.py.
+                'extractor_args': {
+                    'youtube': {
+                        'player_client': ['mediaconnect', 'tv_embedded'],
+                    },
+                },
             }
             
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:

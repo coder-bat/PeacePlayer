@@ -178,13 +178,33 @@ struct HomeView: View {
                     // now have a back button in the nav stack).
                     LikedSongsContent()
                 case .library:
-                    // 2026-08-12: LibraryView has its own
-                    // NavigationStack (same as Settings /
-                    // Playlists / Radio above). Accept the nested
-                    // stack here for consistency with the existing
-                    // pattern; the back button in Home's
-                    // NavigationStack works as expected.
-                    LibraryView()
+                    // 2026-08-14: was `LibraryView()`, which has
+                    // its own `NavigationStack` — nested
+                    // NavigationStacks crash iOS, per the
+                    // `.likedSongs` case comment above (the
+                    // 2026-08-12 note that "LibraryView has its
+                    // own NavigationStack, accept the nested
+                    // stack" was wrong; the user hit the crash
+                    // on the Downloaded "View All" tap). The
+                    // `LikedSongsContent` pattern is the
+                    // correct one: extract the LibraryView's
+                    // content body (chrome + search + chips +
+                    // list) into a stack-less view, push that
+                    // from Home's NavigationStack. The full
+                    // `LibraryView` (with its own stack) is
+                    // still used for the Library tab — same
+                    // pattern as `LikedSongsView` being a thin
+                    // wrapper around `LikedSongsContent`.
+                    //
+                    // 2026-08-14: pass `showsBackButton: true`
+                    // so `LibraryContent`'s custom header
+                    // renders a back chevron at the leading
+                    // edge (replacing the system nav bar's
+                    // back button, which is hidden by the
+                    // matching `.toolbar(.hidden, ...)` on
+                    // the `LibraryContent` body when it's
+                    // pushed from a parent stack).
+                    LibraryContent(showsBackButton: true)
                 }
             }
         }

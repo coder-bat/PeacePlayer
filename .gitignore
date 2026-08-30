@@ -54,6 +54,7 @@ __pycache__/
 *.pyo
 *.pyd
 venv/
+venv311/    # 2026-08-30: Python 3.11 venv (replaces the 3.10 venv/)
 .venv/
 env/
 ENV/

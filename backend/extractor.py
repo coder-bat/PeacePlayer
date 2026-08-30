@@ -49,6 +49,27 @@ class AudioExtractor:
             'no_warnings': True,
             'extract_audio': False,
             'skip_download': True,
+            # S17-H2 (2026-08-30): YouTube's ANDROID_VR player_client has
+            # been returning HTTP 403 Forbidden on stream URL fetches for
+            # several months now — even with valid signatures and matching
+            # source IP. yt-dlp still uses it as a default for
+            # music.youtube.com, which surfaced as repeated 500s on
+            # POST /download in the live log.
+            #
+            # First attempt was `['ios', 'web']` — these return zero formats
+            # for most music.youtube.com tracks (only storyboard), so every
+            # download 500'd with "Requested format is not available".
+            #
+            # Switching to `mediaconnect` (the new visionOS / YouTube Music
+            # player client) which returns a proper format list including
+            # itag 140 m4a AAC — the iOS-native format the extractor
+            # already prefers. Confirmed working via direct HEAD requests:
+            # all audio itags (139/140/249/250) return HTTP 200, not 403.
+            'extractor_args': {
+                'youtube': {
+                    'player_client': ['mediaconnect', 'tv_embedded'],
+                },
+            },
         }
     
     def get_audio_info(self, video_id: str) -> Optional[Dict]:
@@ -71,21 +92,35 @@ class AudioExtractor:
                     return None
                 
                 # Find audio-only formats
+                # S17-H3 (2026-08-30): mediaconnect client returns some
+                # formats with acodec=None and vcodec=none (e.g. itag 233/234
+                # for the visionOS/mediaconnect player). The previous check
+                # `f.get('acodec') != 'none'` was True for None (because
+                # None != 'none' in Python), so those garbage formats
+                # slipped in. Require acodec to be a real, non-'none' codec
+                # string before counting the format as audio-capable.
                 audio_formats = [
                     f for f in info.get('formats', [])
-                    if f.get('acodec') != 'none' and f.get('vcodec') == 'none'
+                    if f.get('acodec') and f.get('acodec') != 'none'
+                    and f.get('vcodec') == 'none'
                 ]
-                
+
                 if not audio_formats:
                     logger.warning(f"No audio-only formats for {video_id}")
                     return None
-                
+
                 # Sort by our preference order, then by bitrate
+                # S17-H3 (2026-08-30): mediaconnect returns abr=None for
+                # some formats. `fmt.get('abr', 0)` only returns the
+                # default 0 if 'abr' is absent — if the key exists with
+                # value None, it returns None, and `-None` crashes the
+                # sort with "bad operand type for unary -: 'NoneType'".
+                # Use `or 0` to coerce both missing and None to 0.
                 def sort_key(fmt):
                     itag = str(fmt.get('format_id', ''))
                     if itag in self.PREFERRED_FORMATS:
                         return (self.PREFERRED_FORMATS.index(itag), 0)
-                    return (999, -fmt.get('abr', 0))
+                    return (999, -(fmt.get('abr') or 0))
                 
                 audio_formats.sort(key=sort_key)
                 best = audio_formats[0]
@@ -93,11 +128,16 @@ class AudioExtractor:
                 return {
                     'url': best.get('url'),
                     'ext': best.get('ext'),
-                    'abr': best.get('abr', 0),
+                    # S17-H3 (2026-08-30): use `or 0` for the same reason
+                    # as the sort key — mediaconnect may return abr/filesize
+                    # as None instead of absent. `dict.get(k, 0)` only uses
+                    # the default when the key is missing, not when it's
+                    # present with value None.
+                    'abr': best.get('abr') or 0,
                     'codec': best.get('acodec'),
-                    'filesize': best.get('filesize') or best.get('filesize_approx', 0),
+                    'filesize': best.get('filesize') or best.get('filesize_approx') or 0,
                     'format_id': best.get('format_id'),
-                    'duration': info.get('duration', 0)
+                    'duration': info.get('duration') or 0
                 }
                 
         except Exception as e:
