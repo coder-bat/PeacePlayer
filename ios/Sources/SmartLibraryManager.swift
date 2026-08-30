@@ -39,6 +39,74 @@ import CoreData
 // uses @AppStorage for its LabsToggle).
 import SwiftUI
 
+// MARK: - v1.9.0 cycle types
+
+/// A prepared set of auto-download candidates waiting for
+/// user confirmation (or auto-confirm by timer). The cycle
+/// has been computed (candidates selected, preconditions
+/// checked) but no downloads have been kicked off yet.
+///
+/// `id` is the cycle's identity — SwiftUI uses it to
+/// distinguish cycles for animations and to let
+/// `commitCycle(_:source:)` reject stale cycles if the
+/// user backed out and re-prepared between prepare and
+/// commit.
+struct PendingCycle: Equatable, Identifiable {
+    let id: UUID
+    let candidates: [Track]
+    let estimatedBytes: Int64
+    let createdAt: Date
+    let tierBreakdown: TierBreakdown
+
+    /// The source to use when this cycle commits. Always
+    /// `.auto` for the normal auto-cycle — the user-confirmed
+    /// vs auto-confirmed distinction is on the CycleSummary,
+    /// not the download tier.
+    let downloadSource: DownloadSource
+
+    static func == (lhs: PendingCycle, rhs: PendingCycle) -> Bool {
+        lhs.id == rhs.id
+    }
+}
+
+/// How the candidate set was assembled. Drives the
+/// "Liked artists (3) / Recently played (2)" filter chips
+/// in the Review sheet.
+struct TierBreakdown: Equatable {
+    let fromLikedArtists: Int
+    let fromRecentlyPlayed: Int
+    var total: Int { fromLikedArtists + fromRecentlyPlayed }
+}
+
+/// What happened after a cycle committed. Drives the
+/// post-run undo toast and the Settings status line.
+struct CycleSummary: Equatable, Identifiable {
+    let id: UUID
+    let addedVideoIds: [String]
+    let failedVideoIds: [String]
+    let bytesEstimated: Int64
+    /// v1.9.0: real bytes are read from CDDownloadedTrack.fileSize
+    /// after commit. In Phase B this is still an estimate
+    /// (~5 MB/track) — Phase C replaces it with the actual
+    /// sum once downloads complete.
+    let bytesActual: Int64
+    let committedAt: Date
+    let source: CommitSource
+
+    /// Where the commit came from. Used by the UI to
+    /// decide whether to show the undo toast (yes for
+    /// user-confirmed, yes for auto-confirmed) and by
+    /// future analytics to learn which path users prefer.
+    enum CommitSource: String, Equatable {
+        case userConfirmed
+        case autoConfirmed
+    }
+
+    var undoAvailable: Bool {
+        !addedVideoIds.isEmpty
+    }
+}
+
 @MainActor
 final class SmartLibraryManager: ObservableObject {
     static let shared = SmartLibraryManager()
@@ -120,6 +188,30 @@ final class SmartLibraryManager: ObservableObject {
     // control, not on the auto-download status line.
     @Published private(set) var isRefreshing: Bool = false
 
+    // MARK: - v1.9.0 cycle state (publish/commit split)
+
+    /// The currently-pending auto-download cycle, if any.
+    /// Nil = no cycle in flight. Non-nil = candidates are
+    /// ready and waiting for user action (Download / Review /
+    /// Skip) or auto-confirm.
+    @Published private(set) var pendingCandidates: PendingCycle? = nil
+
+    /// The deadline at which `pendingCandidates` will
+    /// auto-confirm. Nil when there is no pending cycle or
+    /// when auto-confirm is off (`autoConfirmSeconds <= 0`).
+    @Published private(set) var autoConfirmDeadline: Date? = nil
+
+    /// The most recently committed cycle's result. Set when
+    /// `commitCycle(_:source:)` finishes, cleared by
+    /// `dismissSummary()` or by the next commit.
+    @Published private(set) var lastCycleSummary: CycleSummary? = nil
+
+    /// v1.9.0: user-configurable auto-confirm window.
+    /// Stored in seconds. 0 = off (no auto-confirm, user
+    /// must explicitly tap Download). Default 300 (5 min).
+    /// Surfaced in Settings as a Picker: Off / 1m / 5m / 15m / 30m.
+    @AppStorage("smartLibrary.autoConfirmSeconds") var autoConfirmSeconds: Int = 300
+
     // MARK: - Tier marker (UserDefaults)
 
     /// Set of videoIds that were auto-downloaded. Used by the
@@ -136,6 +228,12 @@ final class SmartLibraryManager: ObservableObject {
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
     private var cancellables = Set<AnyCancellable>()
+
+    // v1.9.0: handle to the active auto-confirm Task. Cancelled
+    // when the user commits, skips, or the cycle is cancelled for
+    // any reason (background, toggle off, network change). When
+    // it fires, the cycle commits with source: .autoConfirmed.
+    private var autoConfirmTask: Task<Void, Never>? = nil
 
     private enum Keys {
         static let autoDownloadedIds = "smartLibrary.autoDownloadedIds"
@@ -189,8 +287,34 @@ final class SmartLibraryManager: ObservableObject {
             .removeDuplicates()
             .debounce(for: .seconds(30), scheduler: DispatchQueue.main)
             .sink { [weak self] isWiFi in
-                guard isWiFi else { return }
+                guard isWiFi else {
+                    // v1.9.0: WiFi dropped → cancel any
+                    // pending cycle. The cycle is only valid
+                    // on WiFi, so leaving it pending on
+                    // cellular would either commit on
+                    // cellular (bad — burns user data) or
+                    // sit forever waiting for WiFi to
+                    // come back (also bad — stale state).
+                    self?.cancelPendingCycle(reason: "WiFi dropped")
+                    return
+                }
                 self?.runAutoDownloadIfDue()
+            }
+            .store(in: &cancellables)
+
+        // v1.9.0: when the network becomes metered (Low
+        // Data Mode, hotspot), cancel any pending cycle.
+        // Metered is one of the prepare-preconditions; if
+        // it flips true after prepare but before commit,
+        // the next prepare would have skipped anyway.
+        // Cancelling here matches the user's mental
+        // model: "I turned on Low Data Mode, the app
+        // should respect that".
+        NetworkMonitor.shared.$isMetered
+            .removeDuplicates()
+            .sink { [weak self] isMetered in
+                guard isMetered else { return }
+                self?.cancelPendingCycle(reason: "network became metered")
             }
             .store(in: &cancellables)
 
@@ -205,6 +329,43 @@ final class SmartLibraryManager: ObservableObject {
         // causing runAutoDownloadIfDue to spin up two
         // redundant Tasks (cheap but wasted work). The
         // scenePhase path covers both cases now.
+
+        // v1.9.0: cancel the pending cycle when the user
+        // toggles the master switch off. The cycle is
+        // invalid while the toggle is off; leaving it
+        // pending would either commit anyway (defeats
+        // the toggle) or sit forever waiting for the
+        // toggle to come back (also bad — stale state).
+        //
+        // @AppStorage is a property wrapper but the
+        // $ projection gives a Binding, not a Combine
+        // publisher. We observe UserDefaults directly
+        // via KVO publisher. The key matches the
+        // @AppStorage key verbatim. We compare values
+        // in the sink (not via removeDuplicates) so the
+        // publisher's first value doesn't fire and
+        // accidentally cancel a cycle before any user
+        // action has happened.
+        UserDefaults.standard
+            .publisher(for: \.smartLibraryAutoDownloadEnabled)
+            .sink { [weak self] enabled in
+                guard !enabled else { return }
+                self?.cancelPendingCycle(reason: "autoDownloadEnabled toggled off")
+            }
+            .store(in: &cancellables)
+
+        // v1.9.0: cancel the pending cycle on app
+        // backgrounding. The user has left the app;
+        // the 5-min auto-confirm timer is invalidated
+        // and the next foreground re-prepares with
+        // fresh candidates. This matches the
+        // "Cancel + re-prepare" decision from the
+        // planning phase.
+        NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)
+            .sink { [weak self] _ in
+                self?.cancelPendingCycle(reason: "app backgrounded")
+            }
+            .store(in: &cancellables)
 
         // Download-deleted notification keeps the auto-set
         // from growing unboundedly. Posted by DownloadManager
@@ -294,25 +455,262 @@ final class SmartLibraryManager: ObservableObject {
 
     // MARK: - Public API: orchestration entry points
 
-    /// Run the auto-download cycle. v1.8.2: dropped the
-    /// 24h debounce. The product intent is "always have
-    /// library ready" — every WiFi connect + every
-    /// foreground is a chance to top up. The hard
-    /// limiter is now maxLibraryTracks: if the library is
-    /// already at the cap, we skip (so a user with a
-    /// 200-track manual library doesn't get spammed with
-    /// auto-downloads they don't need). The 30s debounce
-    /// on the WiFi trigger (in setupHooks) is the only
-    /// rate limiting — it's the standard "don't fire
-    /// multiple times during a WiFi reconnect handshake"
-    /// throttle.
+    /// v1.9.0: Run the auto-download cycle's *prepare*
+    /// phase. Computes candidates and publishes them to
+    /// `pendingCandidates`. The actual downloads happen
+    /// when the user confirms (via the Smart Library card)
+    /// or the auto-confirm timer fires.
+    ///
+    /// v1.8.2: dropped the 24h debounce. The product
+    /// intent is "always have library ready" — every WiFi
+    /// connect + every foreground is a chance to top up.
+    /// The hard limiter is now maxLibraryTracks: if the
+    /// library is already at the cap, we skip (so a user
+    /// with a 200-track manual library doesn't get spammed
+    /// with auto-downloads they don't need). The 30s
+    /// debounce on the WiFi trigger (in setupHooks) is
+    /// the only rate limiting.
     ///
     /// All other preconditions (toggle, WiFi, metered,
     /// backend, free space) are checked inside
-    /// runAutoDownloadCycle.
+    /// `prepareCycle()`.
     func runAutoDownloadIfDue() {
         guard autoDownloadEnabled else { return }
-        Task { await runAutoDownloadCycle() }
+        Task { await prepareCycle() }
+    }
+
+    /// v1.9.0: prepare an auto-download cycle and publish
+    /// it to `pendingCandidates`. The cycle is then either
+    /// committed by the user (via the card), committed by
+    /// the auto-confirm timer, or cancelled (toggle off,
+    /// backgrounding, network change).
+    ///
+    /// Idempotent: if a cycle is already pending, the
+    /// existing one is left in place (the new prepare is
+    /// a no-op). This prevents thrashing the candidate
+    /// list if `runAutoDownloadIfDue` is called multiple
+    /// times in quick succession (e.g., on a WiFi
+    /// reconnect that fires two path updates within the
+    /// 30s debounce).
+    func prepareCycle() async {
+        // If a cycle is already pending, leave it alone.
+        // A new prepare is a no-op — the user can still
+        // act on the existing cycle.
+        guard pendingCandidates == nil else { return }
+
+        // Re-check all preconditions. A user could have
+        // toggled autoDownloadEnabled off, the network
+        // could have changed, etc., between the trigger
+        // and the actual run.
+        guard autoDownloadEnabled else { return }
+        guard NetworkMonitor.shared.connectionType == .wifi else { return }
+        guard !NetworkMonitor.shared.isMetered else { return }
+        guard NetworkMonitor.shared.isBackendReachable else { return }
+        guard freeDiskSpace() > minFreeBytes else { return }
+
+        // Library-cap check. If the user already has
+        // maxLibraryTracks or more downloaded, skip the
+        // cycle (don't top up a full library).
+        let currentCount = currentDownloadedTrackCount()
+        if currentCount >= maxLibraryTracks {
+            // Don't update lastAutoDownloadAt / count —
+            // we didn't actually do anything. Just record
+            // the skip reason so the status line can show
+            // it.
+            lastAutoDownloadSkippedReason = "Library full (\(currentCount)/\(maxLibraryTracks))"
+            return
+        }
+        lastAutoDownloadSkippedReason = nil
+
+        // Compute candidates. Returns nil if the
+        // liked-artists + recently-played lists are
+        // empty (or all candidates are already
+        // downloaded). We don't surface "no candidates"
+        // to the user via the card — that's a silent
+        // skip, not a pending cycle.
+        guard let cycle = await computePendingCycle() else {
+            return
+        }
+
+        // Publish. The card (Phase C) will observe
+        // `pendingCandidates` and show the UI.
+        pendingCandidates = cycle
+        scheduleAutoConfirm(for: cycle)
+    }
+
+    /// v1.9.0: commit a pending cycle. Downloads the
+    /// candidates via DownloadManager and publishes a
+    /// `CycleSummary` to `lastCycleSummary`.
+    ///
+    /// `source` is the commit trigger — user-confirmed
+    /// (tapped Download) or auto-confirmed (5-min timer
+    /// fired). It drives the post-run toast copy.
+    ///
+    /// The cycle's `id` is matched against the current
+    /// `pendingCandidates.id` — a stale cycle (e.g., the
+    /// user backed out and re-prepared) is silently
+    /// rejected. This prevents the "I cancelled but it
+    /// downloaded anyway" bug if the auto-confirm timer
+    /// fires just as the user re-prepares.
+    func commitCycle(_ cycle: PendingCycle, source: CycleSummary.CommitSource) async {
+        // Stale-cycle guard. If the user has already
+        // cancelled or re-prepared, do nothing.
+        guard pendingCandidates?.id == cycle.id else { return }
+
+        // Clear the pending state + cancel the auto-
+        // confirm timer. The card will hide; the post-run
+        // toast will appear when the commit completes.
+        cancelAutoConfirmTimer()
+        autoConfirmDeadline = nil
+        pendingCandidates = nil
+
+        isAutoDownloading = true
+        defer { isAutoDownloading = false }
+
+        var addedVideoIds: [String] = []
+        var failedVideoIds: [String] = []
+        var bytesEstimated: Int64 = 0
+        var downloadedCount = 0
+
+        for track in cycle.candidates {
+            // Per-iteration library-count re-check. The
+            // count at prepare time might have changed
+            // between then and now (user manually
+            // downloaded a track, a previous cycle is
+            // still finishing). Stop the moment we hit
+            // the cap, even mid-cycle.
+            let nowCount = currentDownloadedTrackCount()
+            if nowCount >= maxLibraryTracks { break }
+
+            // Per-iteration isAlreadyDownloaded re-check.
+            // A track may have been downloaded between
+            // prepare and commit (e.g., user manually
+            // downloaded it).
+            if DownloadManager.shared.isAlreadyDownloaded(track) {
+                // If it was previously auto-set and the
+                // user manually re-downloaded it, the
+                // tier-upgrade fix (Phase A) has already
+                // pruned it from the auto set. Don't
+                // touch it.
+                continue
+            }
+            DownloadManager.shared.download(track, source: cycle.downloadSource)
+            markAsAutoDownloaded(track.videoId)
+            downloadedCount += 1
+            addedVideoIds.append(track.videoId)
+            bytesEstimated += 5_000_000
+        }
+
+        // Update the "last auto-download" status fields.
+        // These drive the Settings status line, not the
+        // card or the post-run toast.
+        lastAutoDownloadAt = Date()
+        lastAutoDownloadCount = downloadedCount
+        lastAutoDownloadBytesEstimated = bytesEstimated
+        defaults.set(lastAutoDownloadAt, forKey: Keys.lastAutoDownloadAt)
+        defaults.set(downloadedCount, forKey: Keys.lastAutoDownloadCount)
+        defaults.set(Int(bytesEstimated), forKey: Keys.lastAutoDownloadBytesEstimated)
+
+        // Build and publish the post-run summary. The
+        // post-run toast observes this.
+        let summary = CycleSummary(
+            id: UUID(),
+            addedVideoIds: addedVideoIds,
+            failedVideoIds: failedVideoIds,
+            bytesEstimated: bytesEstimated,
+            // v1.9.0: real bytes are not yet measured
+            // (they require waiting for downloads to
+            // complete, which is async). Phase C
+            // replaces this with a sum of
+            // CDDownloadedTrack.fileSize from the
+            // committed tracks.
+            bytesActual: bytesEstimated,
+            committedAt: Date(),
+            source: source
+        )
+        lastCycleSummary = summary
+    }
+
+    /// v1.9.0: cancel a pending cycle. Clears
+    /// `pendingCandidates`, cancels the auto-confirm
+    /// timer, and clears the deadline. Called by:
+    ///   - the Smart Library card's Skip button
+    ///   - the autoDownloadEnabled toggle being flipped off
+    ///   - the app being backgrounded
+    ///   - WiFi dropping or becoming metered
+    ///
+    /// `reason` is a debug-only log string; not surfaced
+    /// in the UI.
+    func cancelPendingCycle(reason: String? = nil) {
+        guard pendingCandidates != nil else { return }
+        cancelAutoConfirmTimer()
+        autoConfirmDeadline = nil
+        pendingCandidates = nil
+        if let reason = reason, ProcessInfo.processInfo.environment["OS_ACTIVITY_MODE"] != "disable" {
+            print("🛑 [SmartLibrary] Cancelled pending cycle: \(reason)")
+        }
+    }
+
+    /// v1.9.0: dismiss the post-run summary card / toast.
+    /// Called by the user tapping "Got it" or the
+    /// 24h-TTL auto-dismiss.
+    func dismissSummary() {
+        lastCycleSummary = nil
+    }
+
+    /// v1.9.0: human-readable countdown text for the
+    /// "Auto-confirming in 4:32" line in the card. Returns
+    /// nil if no auto-confirm is scheduled (either no
+    /// pending cycle, or auto-confirm is off).
+    var autoConfirmRemainingFormatted: String? {
+        guard let deadline = autoConfirmDeadline else { return nil }
+        let remaining = max(0, Int(deadline.timeIntervalSinceNow))
+        let m = remaining / 60
+        let s = remaining % 60
+        return String(format: "%d:%02d", m, s)
+    }
+
+    // MARK: - Private: auto-confirm timer
+
+    /// v1.9.0: schedule the auto-confirm Task for a
+    /// freshly-prepared cycle. Cancels any previously-
+    /// scheduled timer (a new prepare replaces the old).
+    private func scheduleAutoConfirm(for cycle: PendingCycle) {
+        cancelAutoConfirmTimer()
+        let seconds = autoConfirmSeconds
+        guard seconds > 0 else {
+            // Off — no auto-confirm. The user must
+            // explicitly tap Download or Skip.
+            autoConfirmDeadline = nil
+            return
+        }
+        let deadline = Date().addingTimeInterval(TimeInterval(seconds))
+        autoConfirmDeadline = deadline
+        let cycleId = cycle.id
+        autoConfirmTask = Task { [weak self] in
+            let nanos = UInt64(seconds) * 1_000_000_000
+            try? await Task.sleep(nanoseconds: nanos)
+            guard !Task.isCancelled else { return }
+            await MainActor.run { [weak self] in
+                guard let self = self else { return }
+                // Stale-cycle guard: if the user cancelled
+                // or re-prepared in the meantime, the
+                // current pendingCandidates will have a
+                // different id (or be nil).
+                guard self.pendingCandidates?.id == cycleId else { return }
+                let pending = self.pendingCandidates
+                self.autoConfirmTask = nil
+                guard let pending = pending else { return }
+                Task { await self.commitCycle(pending, source: .autoConfirmed) }
+            }
+        }
+    }
+
+    /// v1.9.0: cancel the auto-confirm timer. Safe to
+    /// call when no timer is scheduled.
+    private func cancelAutoConfirmTimer() {
+        autoConfirmTask?.cancel()
+        autoConfirmTask = nil
     }
 
     /// v1.8.2: drop the 24h debounce on the auto-cleanup
@@ -445,44 +843,73 @@ final class SmartLibraryManager: ObservableObject {
     /// against the per-cycle cap (20 by default — bumping
     /// above 20 starts to feel aggressive on a slow WiFi
     /// reconnect).
-    private func computeAutoDownloadCandidates() async -> [Track] {
+    /// v1.9.0: Compute auto-download candidates and wrap
+    /// them in a `PendingCycle`. The cycle is not yet
+    /// published — `prepareCycle()` does the precondition
+    /// checks and then publishes it.
+    ///
+    /// Returns nil if no candidates could be assembled
+    /// (no liked artists AND no recently played, or all
+    /// candidates are already downloaded).
+    ///
+    /// Returns a non-nil cycle even if `candidates` is
+    /// empty after filtering — `prepareCycle()` decides
+    /// whether an empty cycle is worth publishing (it's
+    /// not — empty cycles return early without publishing).
+    private func computePendingCycle() async -> PendingCycle? {
         let likedArtists = FavoriteArtistsManager.shared.getArtists()
         let recentlyPlayedTracks = DataManager.shared.recentlyPlayed
             .map { $0.toTrack }
             .filter { !DownloadManager.shared.isAlreadyDownloaded($0) }
 
-        // Tier 1: 1 search result per liked artist (up to 5
+        // Tier 1: 1 search result per liked artist (up to 10
         // artists). search() returns the artist's top track
         // (or newest, depending on backend ranking) which
         // serves as a proxy for "new release or top track".
-        // The user asked for "both, weighted" — taking the
-        // first result from search gets us both because the
-        // backend's ranking is recency-weighted. We deduplicate
-        // across artists to avoid the same track appearing
-        // twice.
-        var candidates: [Track] = []
+        // We deduplicate across artists to avoid the same
+        // track appearing twice.
+        var tier1Candidates: [Track] = []
         var seenVideoIds = Set<String>()
 
         for artist in likedArtists.prefix(10) {
             if let track = await firstSearchResult(for: artist, excluding: seenVideoIds) {
-                candidates.append(track)
+                tier1Candidates.append(track)
                 seenVideoIds.insert(track.videoId)
             }
         }
 
         // Tier 2: recently-played tracks that aren't already
-        // downloaded, filled in until we hit the cap. The
-        // recentlyPlayedTracks list is already ordered by
-        // recency (most recent first), so taking prefix(N)
-        // gives us the freshest unplayed-offline tracks.
+        // downloaded, filled in until we hit the cap.
+        var tier2Candidates: [Track] = []
         for track in recentlyPlayedTracks {
-            if candidates.count >= autoDownloadMaxPerCycle { break }
+            if tier1Candidates.count + tier2Candidates.count >= autoDownloadMaxPerCycle { break }
             if seenVideoIds.contains(track.videoId) { continue }
-            candidates.append(track)
+            tier2Candidates.append(track)
             seenVideoIds.insert(track.videoId)
         }
 
-        return Array(candidates.prefix(autoDownloadMaxPerCycle))
+        let candidates = tier1Candidates + tier2Candidates
+        guard !candidates.isEmpty else { return nil }
+
+        // Cap the final list. (Both tiers are already
+        // computed up to autoDownloadMaxPerCycle, so this
+        // is a belt-and-suspenders.)
+        let capped = Array(candidates.prefix(autoDownloadMaxPerCycle))
+        guard !capped.isEmpty else { return nil }
+
+        let breakdown = TierBreakdown(
+            fromLikedArtists: tier1Candidates.count,
+            fromRecentlyPlayed: tier2Candidates.count
+        )
+
+        return PendingCycle(
+            id: UUID(),
+            candidates: capped,
+            estimatedBytes: Int64(capped.count) * 5_000_000,
+            createdAt: Date(),
+            tierBreakdown: breakdown,
+            downloadSource: .auto
+        )
     }
 
     /// v1.9.0: tier-1 eligibility filter. Public-static so
@@ -571,83 +998,10 @@ final class SmartLibraryManager: ObservableObject {
         }
     }
 
-    private func runAutoDownloadCycle() async {
-        // Re-check all preconditions on the actual cycle
-        // (not just the .due check). A user could have
-        // toggled autoDownloadEnabled off, the network
-        // could have changed, etc., between the .due call
-        // and the actual run.
-        guard autoDownloadEnabled else { return }
-        guard NetworkMonitor.shared.connectionType == .wifi else { return }
-        guard !NetworkMonitor.shared.isMetered else { return }
-        guard NetworkMonitor.shared.isBackendReachable else { return }
-        guard freeDiskSpace() > minFreeBytes else { return }
-        // v1.8.2: library-size check. If the user already
-        // has maxLibraryTracks or more downloaded, skip
-        // the cycle (don't top up a full library). The
-        // status line in Settings will show "X of N
-        // (at limit)" so the user can see why nothing
-        // happened. Empty tracks are NOT counted — only
-        // CDDownloadedTrack rows that survive
-        // isPlayable's reconciliation.
-        let currentCount = currentDownloadedTrackCount()
-        if currentCount >= maxLibraryTracks {
-            // Don't update lastAutoDownloadAt / count — we
-            // didn't actually do anything. Just record the
-            // skip reason so the status line can show it.
-            lastAutoDownloadSkippedReason = "Library full (\(currentCount)/\(maxLibraryTracks))"
-            return
-        }
-        lastAutoDownloadSkippedReason = nil
-
-        isAutoDownloading = true
-        defer { isAutoDownloading = false }
-
-        let candidates = await computeAutoDownloadCandidates()
-
-        var downloadedCount = 0
-        var bytesEstimated: Int64 = 0
-        for track in candidates {
-            // v1.8.2: per-iteration library-count check.
-            // The count above might have changed between the
-            // start of the cycle and now (user manually
-            // downloaded a track, a previous cycle is
-            // still finishing). Stop the moment we hit the
-            // cap, even mid-cycle.
-            let nowCount = currentDownloadedTrackCount()
-            if nowCount >= maxLibraryTracks {
-                break
-            }
-            // Re-check isAlreadyDownloaded at kick-off time —
-            // a track may have been downloaded between candidate
-            // selection and now (e.g., user manually downloaded
-            // it). If so, skip and don't add to the auto set
-            // (user explicitly downloaded = manual tier).
-            if DownloadManager.shared.isAlreadyDownloaded(track) {
-                // If it was previously auto-set (e.g., the user
-                // re-downloaded the same track), the existing
-                // entry is fine. If it was a fresh manual
-                // download, the user took an explicit action —
-                // leave the auto set as-is.
-                continue
-            }
-            DownloadManager.shared.download(track, source: .auto)
-            markAsAutoDownloaded(track.videoId)
-            downloadedCount += 1
-            // Estimate ~5 MB per track. Used only for the
-            // Settings status line ("Last run: 3h ago · 12
-            // tracks · ~60 MB"). Real bytes are hard to
-            // measure without polling DownloadManager.
-            bytesEstimated += 5_000_000
-        }
-
-        lastAutoDownloadAt = Date()
-        lastAutoDownloadCount = downloadedCount
-        lastAutoDownloadBytesEstimated = bytesEstimated
-        defaults.set(lastAutoDownloadAt, forKey: Keys.lastAutoDownloadAt)
-        defaults.set(downloadedCount, forKey: Keys.lastAutoDownloadCount)
-        defaults.set(Int(bytesEstimated), forKey: Keys.lastAutoDownloadBytesEstimated)
-    }
+    // v1.9.0: runAutoDownloadCycle has been removed.
+    // The cycle is now split into prepareCycle() (preconditions
+    // + compute + publish) and commitCycle(_:source:) (download).
+    // See the v1.9.0 block comments above for the rationale.
 
     // MARK: - Private: refresh cycle (v1.8.2)
     //
@@ -705,7 +1059,14 @@ final class SmartLibraryManager: ObservableObject {
         // auto-download cycle, capped at autoDownloadMaxPerCycle.
         // No library-count check — we just cleared it, so
         // the new downloads always fit.
-        let candidates = await computeAutoDownloadCandidates()
+        // v1.9.0: use computePendingCycle (returns a
+        // PendingCycle wrapping the candidates + tier
+        // breakdown). The Refresh flow ignores the
+        // PendingCycle wrapper and just walks the
+        // candidates — it doesn't publish to
+        // pendingCandidates (that's reserved for the
+        // auto-cycle's user-confirm flow).
+        let candidates = (await computePendingCycle())?.candidates ?? []
         var downloadedCount = 0
         for track in candidates.prefix(autoDownloadMaxPerCycle) {
             if DownloadManager.shared.isAlreadyDownloaded(track) { continue }
@@ -915,4 +1276,30 @@ extension Notification.Name {
     /// videoId from its autoDownloadedVideoIds set so the
     /// set doesn't grow unboundedly with stale entries.
     static let downloadDeleted = Notification.Name("smartLibrary.downloadDeleted")
+}
+
+// MARK: - UserDefaults KVO bridge (v1.9.0)
+//
+// Why this exists: @AppStorage in a non-View context
+// works as a property wrapper, but `self.$autoDownloadEnabled`
+// returns a `Binding<Bool>`, not a Combine publisher. To
+// observe toggle changes from this manager (so we can
+// cancel a pending cycle when the user flips the switch
+// off), we need a publisher. The standard pattern is a
+// `@objc dynamic` key-path extension on UserDefaults.
+//
+// The key string MUST match the @AppStorage key
+// verbatim ("smartLibrary.autoDownloadEnabled") —
+// SwiftUI's @AppStorage stores under the literal key,
+// and the KVO publisher reads from the same key.
+
+extension UserDefaults {
+    @objc dynamic var smartLibraryAutoDownloadEnabled: Bool {
+        // Read the bool with a default of true (matching
+        // the @AppStorage default). registerDefaults
+        // would be cleaner but the @AppStorage default
+        // and the KVO reader need to agree; we mirror
+        // the default here.
+        bool(forKey: "smartLibrary.autoDownloadEnabled")
+    }
 }

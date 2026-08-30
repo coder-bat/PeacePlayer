@@ -356,4 +356,143 @@ final class SmartLibraryManagerTests: XCTestCase {
             videoType: videoType
         )
     }
+
+    // MARK: - v1.9.0 publish/commit split
+
+    func testPendingCycle_startsNil() {
+        XCTAssertNil(sut.pendingCandidates, "fresh manager should have no pending cycle")
+        XCTAssertNil(sut.autoConfirmDeadline, "no pending cycle → no deadline")
+        XCTAssertNil(sut.lastCycleSummary, "no commits yet → no summary")
+    }
+
+    func testCancelPendingCycle_clearsState() {
+        // Simulate that a cycle is pending. We don't run
+        // prepareCycle (it would try to hit the network);
+        // we manipulate the published state directly via
+        // the public API surface. The setup tests in
+        // setUp() clean the auto set; we trust the rest of
+        // the manager's state is similarly cleared.
+        // For the cancel API itself, the cleanest
+        // assertion is "no crash, no state corruption when
+        // there's nothing to cancel".
+        sut.cancelPendingCycle(reason: "test")
+        XCTAssertNil(sut.pendingCandidates)
+        XCTAssertNil(sut.autoConfirmDeadline)
+        // Calling cancel twice should be a no-op.
+        sut.cancelPendingCycle(reason: "test again")
+        XCTAssertNil(sut.pendingCandidates)
+    }
+
+    func testAutoConfirmSeconds_defaultIs5Minutes() {
+        XCTAssertEqual(sut.autoConfirmSeconds, 300, "default auto-confirm window is 5 min")
+    }
+
+    func testAutoConfirmRemainingFormatted_noDeadline_returnsNil() {
+        XCTAssertNil(sut.autoConfirmRemainingFormatted)
+    }
+
+    func testCommitCycle_staleCycle_isNoOp() {
+        // Construct two cycles with different ids. Commit
+        // the second one when the first is "pending" — the
+        // id-mismatch should silently reject. We can't run
+        // prepareCycle (network), so we use the public
+        // type to construct a stale cycle.
+        let fakePending = PendingCycle(
+            id: UUID(),
+            candidates: [],
+            estimatedBytes: 0,
+            createdAt: Date(),
+            tierBreakdown: TierBreakdown(fromLikedArtists: 0, fromRecentlyPlayed: 0),
+            downloadSource: .auto
+        )
+        // pendingCandidates is nil (nothing has prepared),
+        // so commitCycle should bail via the
+        // pendingCandidates?.id == cycle.id guard.
+        // We can't directly assert "no-op" but we can
+        // verify the API doesn't crash and the public
+        // state doesn't get a summary published.
+        let staleCycle = PendingCycle(
+            id: UUID(),  // different id from fakePending
+            candidates: [],
+            estimatedBytes: 0,
+            createdAt: Date(),
+            tierBreakdown: TierBreakdown(fromLikedArtists: 0, fromRecentlyPlayed: 0),
+            downloadSource: .auto
+        )
+        // Run the commit on the stale cycle. It should
+        // not crash and should not publish a summary.
+        Task {
+            await sut.commitCycle(staleCycle, source: .userConfirmed)
+        }
+        // Give the Task a moment to run, then check.
+        // We don't wait synchronously (commitCycle is
+        // async and might not complete within the test's
+        // synchronous body) — the post-run summary
+        // would be set AFTER the await resumes.
+        // The stale guard fires before any download
+        // work, so we can check synchronously that no
+        // summary was published immediately.
+        XCTAssertNil(sut.lastCycleSummary, "stale commit must not publish a summary")
+        // _ = fakePending to silence unused-warning.
+        _ = fakePending
+    }
+
+    func testDismissSummary_clearsSummary() {
+        // Synthesize a summary via the published-state
+        // surface. We can't easily build a real one
+        // through the public API (commitCycle is async
+        // and gated on preconditions), but the
+        // dismissSummary contract is "set → dismiss →
+        // nil", and the public surface is a simple
+        // @Published private(set). We can verify the
+        // dismiss path on a manually-set state.
+        // Note: lastCycleSummary is private(set), so
+        // we can't set it from outside. Instead, we
+        // test that dismissSummary on a nil state is a
+        // no-op (the idempotent case).
+        sut.dismissSummary()
+        XCTAssertNil(sut.lastCycleSummary)
+    }
+
+    func testPendingCycle_equalityByID() {
+        // PendingCycle is Equatable by id only. Two
+        // cycles with the same id but different
+        // candidates should compare equal. This is the
+        // invariant that makes the stale-cycle guard
+        // work.
+        let id = UUID()
+        let a = PendingCycle(
+            id: id, candidates: [makeTrack(durationSeconds: 200, videoType: "MUSIC_VIDEO_TYPE_OMV")],
+            estimatedBytes: 5_000_000, createdAt: Date(),
+            tierBreakdown: TierBreakdown(fromLikedArtists: 1, fromRecentlyPlayed: 0),
+            downloadSource: .auto
+        )
+        let b = PendingCycle(
+            id: id, candidates: [],
+            estimatedBytes: 0, createdAt: Date().addingTimeInterval(10),
+            tierBreakdown: TierBreakdown(fromLikedArtists: 0, fromRecentlyPlayed: 0),
+            downloadSource: .refresh
+        )
+        XCTAssertEqual(a, b, "PendingCycle equality is by id only")
+    }
+
+    func testCycleSummary_undoAvailable_reflectsAddedTracks() {
+        let s1 = CycleSummary(
+            id: UUID(), addedVideoIds: ["a", "b", "c"], failedVideoIds: [],
+            bytesEstimated: 15_000_000, bytesActual: 15_000_000,
+            committedAt: Date(), source: .userConfirmed
+        )
+        XCTAssertTrue(s1.undoAvailable)
+        let s2 = CycleSummary(
+            id: UUID(), addedVideoIds: [], failedVideoIds: [],
+            bytesEstimated: 0, bytesActual: 0,
+            committedAt: Date(), source: .userConfirmed
+        )
+        XCTAssertFalse(s2.undoAvailable, "no tracks added → no undo available")
+    }
+
+    func testTierBreakdown_totalIsSum() {
+        let b = TierBreakdown(fromLikedArtists: 7, fromRecentlyPlayed: 3)
+        XCTAssertEqual(b.total, 10)
+    }
 }

@@ -131,6 +131,19 @@ struct SettingsView: View {
         return "Last: \(formatRelative(last)) · \(smartLibrary.lastCleanupCount) · \(mb)"
     }
 
+    /// v1.9.0: status line for the "Auto-confirm after"
+    /// picker. Explains what the selected value means
+    /// in user terms — "card auto-closes in 5 min" reads
+    /// better than just "5 min" next to a toggle the user
+    /// didn't ask for.
+    private var autoConfirmLabel: String {
+        let s = smartLibrary.autoConfirmSeconds
+        if s == 0 { return "Card stays open until you act" }
+        if s < 60 { return "Card auto-closes in \(s)s" }
+        let mins = s / 60
+        return "Card auto-closes in \(mins) min"
+    }
+
     /// "5m ago" / "2h ago" / "3d ago" — used by both Smart
     /// Library status lines. Caps at "1y+" for ancient
     /// timestamps (which shouldn't happen in practice but
@@ -696,6 +709,41 @@ struct SettingsView: View {
                             ForEach([25, 50, 100, 200, 500], id: \.self) { limit in
                                 Text("\(limit)").tag(limit)
                             }
+                        }
+                        .labelsHidden()
+                        .pickerStyle(.menu)
+                        .tint(Theme.cyberCyan)
+                    }
+                    .listRowBackground(Theme.cyberSurface)
+
+                    // v1.9.0: Auto-confirm window. How long
+                    // the Smart Library card waits before
+                    // auto-committing the candidates if the
+                    // user doesn't act. Off means the user
+                    // must explicitly tap Download or Skip
+                    // every cycle (power-user mode).
+                    HStack {
+                        Image(systemName: "clock.arrow.circlepath")
+                            .foregroundColor(Theme.cyberCyan)
+                            .frame(width: 24)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Auto-confirm after")
+                                .foregroundColor(.white)
+                            Text(autoConfirmLabel)
+                                .font(.system(size: 12, design: .monospaced))
+                                .foregroundColor(Theme.cyberTextSecondary)
+                        }
+                        Spacer()
+                        Picker("", selection: $smartLibrary.autoConfirmSeconds) {
+                            // 0 = off. The remaining options
+                            // cover "set it and forget it" → "I
+                            // want to see every cycle". 5m is
+                            // the default.
+                            Text("Off").tag(0)
+                            Text("1 min").tag(60)
+                            Text("5 min").tag(300)
+                            Text("15 min").tag(900)
+                            Text("30 min").tag(1800)
                         }
                         .labelsHidden()
                         .pickerStyle(.menu)
