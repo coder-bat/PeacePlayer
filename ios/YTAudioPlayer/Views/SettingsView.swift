@@ -144,6 +144,51 @@ struct SettingsView: View {
         return "Card auto-closes in \(mins) min"
     }
 
+    /// v1.9.0 (r5): dynamic options for the "Candidates per
+    /// cycle" Picker. The Picker must always offer values
+    /// strictly less than the current "Library limit" —
+    /// otherwise the per-cycle batch would equal or
+    /// exceed the total library cap, and the cycle would
+    /// always be skipped at the `currentCount >= maxLibraryTracks`
+    /// check in `runAutoDownloadCycle`.
+    ///
+    /// The base option set is [10, 20, 30, 50, 100]. The
+    /// computed list filters out anything >= maxLibraryTracks
+    /// and ensures the current value is always selectable
+    /// (defensive — the .onChange below should keep them
+    /// in sync, but a stale value from a fresh install
+    /// shouldn't crash the Picker).
+    private var candidateCapOptions: [Int] {
+        let allOptions = [10, 20, 30, 50, 100]
+        let filtered = allOptions.filter { $0 < smartLibrary.maxLibraryTracks }
+        if filtered.contains(smartLibrary.autoDownloadMaxPerCycle) {
+            return filtered
+        }
+        // Current value isn't in the filtered list — append
+        // it so the Picker still shows the active value.
+        // This shouldn't happen post-clamp but guards
+        // against a stale UserDefaults value on a fresh
+        // install with a small library limit.
+        return filtered + [smartLibrary.autoDownloadMaxPerCycle]
+    }
+
+    /// v1.9.0 (r5): when maxLibraryTracks changes, clamp
+    /// autoDownloadMaxPerCycle to the largest valid option
+    /// if it would otherwise be >= the new limit. Without
+    /// this, the user could have a 50-track library with
+    /// a 50-per-cycle cap, then change the library cap
+    /// to 25 — leaving a 50-per-cycle cap that would
+    /// immediately fail the `currentCount >= maxLibraryTracks`
+    /// check in runAutoDownloadCycle and never run again.
+    private func clampCandidateCapIfNeeded(newLimit: Int) {
+        if smartLibrary.autoDownloadMaxPerCycle >= newLimit {
+            let valid = candidateCapOptions.filter { $0 < newLimit }
+            if let clamped = valid.max() {
+                smartLibrary.autoDownloadMaxPerCycle = clamped
+            }
+        }
+    }
+
     /// "5m ago" / "2h ago" / "3d ago" — used by both Smart
     /// Library status lines. Caps at "1y+" for ancient
     /// timestamps (which shouldn't happen in practice but
@@ -716,16 +761,22 @@ struct SettingsView: View {
                     }
                     .listRowBackground(Theme.cyberSurface)
 
-                    // v1.9.0 (r4): Per-cycle candidate count.
-                    // Distinct from "Library limit" above —
-                    // that one caps the TOTAL number of
-                    // downloaded tracks (default 50). This
+                    // v1.9.0 (r4 + r5): Per-cycle candidate
+                    // count. Distinct from "Library limit"
+                    // above — that one caps the TOTAL number
+                    // of downloaded tracks (default 50). This
                     // one caps how many candidates the card
                     // offers in a SINGLE cycle (default 20).
-                    // A user with a 50-track library might
-                    // still want only 10 candidates per cycle
-                    // to keep the review lightweight, or
-                    // 50 to fill quickly.
+                    //
+                    // v1.9.0 (r5): the Picker options are
+                    // dynamic — computed from candidateCapOptions,
+                    // which filters the base set [10, 20, 30,
+                    // 50, 100] down to values strictly less
+                    // than the current Library limit. If the
+                    // user changes the Library limit, the
+                    // .onChange below auto-clamps the
+                    // candidate cap to the largest valid
+                    // option.
                     HStack {
                         Image(systemName: "tray.full")
                             .foregroundColor(Theme.cyberCyan)
@@ -733,19 +784,24 @@ struct SettingsView: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Candidates per cycle")
                                 .foregroundColor(.white)
-                            Text("Up to \(smartLibrary.autoDownloadMaxPerCycle) per auto-download")
+                            // Sublabel explains the constraint
+                            // so the user understands why the
+                            // Picker doesn't show 50/100 when
+                            // the library limit is 25.
+                            Text("Up to \(smartLibrary.autoDownloadMaxPerCycle) · must be < library limit (\(smartLibrary.maxLibraryTracks))")
                                 .font(.system(size: 12, design: .monospaced))
                                 .foregroundColor(Theme.cyberTextSecondary)
                                 .lineLimit(2)
                         }
                         Spacer()
                         Picker("", selection: $smartLibrary.autoDownloadMaxPerCycle) {
-                            // v1.9.0 (r4): 10/20/30/50/100.
-                            // Default 20. Power users can
-                            // bump to 100 to fill fast; 10
-                            // is for the "I want a tiny
-                            // top-up batch" use case.
-                            ForEach([10, 20, 30, 50, 100], id: \.self) { cap in
+                            // v1.9.0 (r5): dynamic options,
+                            // not the hardcoded [10,20,30,50,100]
+                            // from r4. The list adapts to the
+                            // current Library limit so the
+                            // Picker can never offer an
+                            // invalid value.
+                            ForEach(candidateCapOptions, id: \.self) { cap in
                                 Text("\(cap)").tag(cap)
                             }
                         }
@@ -754,6 +810,18 @@ struct SettingsView: View {
                         .tint(Theme.cyberCyan)
                     }
                     .listRowBackground(Theme.cyberSurface)
+                    // v1.9.0 (r5): when the Library limit
+                    // changes, clamp the candidate cap so it
+                    // stays strictly less. Without this, a
+                    // user with maxLibraryTracks=50 and
+                    // autoDownloadMaxPerCycle=50 who changes
+                    // the library limit to 25 would leave
+                    // a 50-per-cycle cap that immediately
+                    // fails the cycle's `currentCount >=
+                    // maxLibraryTracks` precondition.
+                    .onChange(of: smartLibrary.maxLibraryTracks) { _, newLimit in
+                        clampCandidateCapIfNeeded(newLimit: newLimit)
+                    }
 
                     // v1.9.0: Auto-confirm window. How long
                     // the Smart Library card waits before
@@ -1088,6 +1156,13 @@ struct SettingsView: View {
         }
         .onAppear {
             calculateCacheSize()
+            // v1.9.0 (r5): clamp a stale candidate cap
+            // (e.g. from v1.9.0 r4 with maxLibraryTracks=25
+            // and autoDownloadMaxPerCycle=50) on first
+            // appearance. The Picker also handles this
+            // for in-app changes; this catches the
+            // cross-version upgrade case.
+            clampCandidateCapIfNeeded(newLimit: smartLibrary.maxLibraryTracks)
         }
         .preferredColorScheme(.dark)
         // S14: standard nav chrome when pushed into Home's
