@@ -40,11 +40,14 @@ struct SmartLibraryReviewSheet: View {
     // Source filter
     @State private var sourceFilter: SourceFilter = .all
 
-    // Add-track search
-    @State private var addSearchQuery: String = ""
-    @State private var addSearchResults: [Track] = []
-    @State private var isSearching: Bool = false
-    @State private var searchCancellable: AnyCancellable? = nil
+    // v1.9.0 (r3): removed the "add a track" search input.
+    // It was too easy for the user to think the spinner
+    // was a bug — the filter (isAudioTrack + 30s-15min)
+    // would silently drop every result, and the UX of
+    // "type → wait → nothing" is worse than no input at
+    // all. Users who want a track they don't see can
+    // search from the main Search tab and heart it
+    // (liked tracks never auto-remove).
 
     enum SourceFilter: String, CaseIterable, Identifiable {
         case all = "All"
@@ -61,7 +64,6 @@ struct SmartLibraryReviewSheet: View {
                     headerSummary
                     sourceFilterChips
                     candidateList
-                    addTrackRow
                     commitBar
                 }
             }
@@ -318,157 +320,15 @@ struct SmartLibraryReviewSheet: View {
         .padding(.vertical, Spacing.xl)
     }
 
-    // MARK: - Add track
+    // v1.9.0 (r3): removed the "add a track" search input.
+    // The spinner → no-results flow was too easy to misread
+    // as a bug — the isAutoTrack + 30s-15min filter silently
+    // dropped every result, and the UX of "type → wait →
+    // nothing" is worse than no input at all. Users who want
+    // a specific track the system didn't pick can find it via
+    // the main Search tab and heart it; liked tracks never
+    // auto-remove.
 
-    private var addTrackRow: some View {
-        VStack(alignment: .leading, spacing: Spacing.xs) {
-            HStack(spacing: 6) {
-                Image(systemName: "plus.circle.fill")
-                    .foregroundColor(Theme.cyberCyan)
-                Text("Add a track")
-                    .font(.system(size: 12, weight: .bold, design: .monospaced))
-                    .foregroundColor(Theme.cyberCyan)
-            }
-            HStack {
-                Image(systemName: "magnifyingglass")
-                    .foregroundColor(Theme.cyberDim)
-                TextField("Search to add...", text: $addSearchQuery)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 14))
-                    .foregroundColor(.white)
-                    .onChange(of: addSearchQuery) { _, newValue in
-                        triggerAddSearch(query: newValue)
-                    }
-                if isSearching {
-                    ProgressView()
-                        .tint(Theme.cyberCyan)
-                        .scaleEffect(0.7)
-                }
-            }
-            .padding(Spacing.sm)
-            .background(
-                RoundedRectangle(cornerRadius: CornerRadius.md)
-                    .fill(Theme.cyberSurface)
-            )
-
-            // Inline results
-            if !addSearchResults.isEmpty {
-                ScrollView {
-                    LazyVStack(spacing: 4) {
-                        ForEach(addSearchResults, id: \.videoId) { track in
-                            addResultRow(track: track)
-                        }
-                    }
-                }
-                .frame(maxHeight: 180)
-            }
-        }
-        .padding(.horizontal, Spacing.md)
-        .padding(.bottom, Spacing.sm)
-    }
-
-    private func addResultRow(track: Track) -> some View {
-        HStack(spacing: Spacing.xs) {
-            // Small thumb
-            ZStack {
-                RoundedRectangle(cornerRadius: 4)
-                    .fill(Theme.cyberBackground)
-                if let url = track.artworkURL {
-                    CachedAsyncImage(url: url) { image in
-                        image.resizable().aspectRatio(contentMode: .fill)
-                    } placeholder: {
-                        Image(systemName: "music.note")
-                            .font(.system(size: 12))
-                            .foregroundColor(Theme.cyberDim)
-                    }
-                    .frame(width: 28, height: 28)
-                    .clipShape(RoundedRectangle(cornerRadius: 4))
-                } else {
-                    Image(systemName: "music.note")
-                        .font(.system(size: 12))
-                        .foregroundColor(Theme.cyberDim)
-                }
-            }
-            .frame(width: 28, height: 28)
-            VStack(alignment: .leading, spacing: 0) {
-                Text(track.title)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(.white)
-                    .lineLimit(1)
-                Text(track.artists.first ?? "")
-                    .font(.system(size: 10))
-                    .foregroundColor(Theme.cyberTextSecondary)
-                    .lineLimit(1)
-            }
-            Spacer()
-            let alreadyAdded = workingCandidates.contains(where: { $0.videoId == track.videoId })
-            Button {
-                HapticManager.light()
-                if alreadyAdded {
-                    removeCandidate(track)
-                } else {
-                    addCandidate(track)
-                }
-            } label: {
-                Image(systemName: alreadyAdded ? "checkmark.circle.fill" : "plus.circle")
-                    .font(.system(size: 18))
-                    .foregroundColor(alreadyAdded ? Theme.cyberCyan : Theme.cyberTextSecondary)
-            }
-            .buttonStyle(.plain)
-        }
-        .padding(.vertical, 4)
-        .padding(.horizontal, Spacing.xs)
-        .background(
-            RoundedRectangle(cornerRadius: CornerRadius.xs)
-                .fill(Theme.cyberSurface.opacity(0.3))
-        )
-    }
-
-    private func triggerAddSearch(query: String) {
-        // Debounce + cancel any in-flight search.
-        searchCancellable?.cancel()
-        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else {
-            addSearchResults = []
-            isSearching = false
-            return
-        }
-        isSearching = true
-        searchCancellable = APIService.shared.search(query: trimmed, limit: 5)
-            .receive(on: DispatchQueue.main)
-            .sink(
-                receiveCompletion: { _ in
-                    isSearching = false
-                },
-                receiveValue: { tracks in
-                    addSearchResults = tracks.filter { Self.isAutoDownloadEligibleLocal($0) }
-                    isSearching = false
-                }
-            )
-    }
-
-    /// Reuse the manager's filter for the inline add
-    /// search — we don't want to add karaoke or
-    /// podcast-style results to the download list.
-    private static func isAutoDownloadEligibleLocal(_ track: Track) -> Bool {
-        SmartLibraryManager.isAutoDownloadEligible(track)
-    }
-
-    private func addCandidate(_ track: Track) {
-        guard !workingCandidates.contains(where: { $0.videoId == track.videoId }) else { return }
-        workingCandidates.append(track)
-        // Additions count as "recently played" for
-        // breakdown purposes (they didn't come from
-        // the liked-artist probe).
-        workingBreakdown = TierBreakdown(
-            fromLikedArtists: workingBreakdown.fromLikedArtists,
-            fromRecentlyPlayed: workingBreakdown.fromRecentlyPlayed + 1
-        )
-        // Clear the search after a successful add so
-        // the user can search for the next track.
-        addSearchQuery = ""
-        addSearchResults = []
-    }
 
     private func removeCandidate(_ track: Track) {
         guard let idx = workingCandidates.firstIndex(where: { $0.videoId == track.videoId }) else { return }
