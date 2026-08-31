@@ -495,4 +495,29 @@ final class SmartLibraryManagerTests: XCTestCase {
         let b = TierBreakdown(fromLikedArtists: 7, fromRecentlyPlayed: 3)
         XCTAssertEqual(b.total, 10)
     }
+
+    // MARK: - v1.9.0 undoLastCycle
+
+    func testUndoLastCycle_noSummary_isNoOp() {
+        // No lastCycleSummary → undoLastCycle returns
+        // false and is a no-op.
+        let expectation = self.expectation(description: "undo completes")
+        var result: Bool? = nil
+        Task {
+            result = await sut.undoLastCycle()
+            expectation.fulfill()
+        }
+        wait(for: [expectation], timeout: 2.0)
+        XCTAssertEqual(result, false)
+    }
+
+    func testDismissSummary_viaUndoService() {
+        // dismissSummary clears lastCycleSummary. We can
+        // verify this by calling it twice in a row and
+        // confirming the second call is also a no-op
+        // (doesn't crash, doesn't throw).
+        sut.dismissSummary()
+        sut.dismissSummary()
+        XCTAssertNil(sut.lastCycleSummary)
+    }
 }

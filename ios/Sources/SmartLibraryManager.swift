@@ -658,6 +658,82 @@ final class SmartLibraryManager: ObservableObject {
             source: source
         )
         lastCycleSummary = summary
+
+        // v1.9.0: post-run undo toast. The UndoService is
+        // a process-wide singleton observed by
+        // UndoToastView (rendered globally in ContentView,
+        // above the tab bar + MiniPlayer). Registering an
+        // undo here makes the toast appear the moment the
+        // commit lands; the user gets immediate feedback
+        // that the cycle ran.
+        //
+        // The restore closure is the undoLastCycle() call
+        // — it walks addedVideoIds and deletes the
+        // downloads. See the undoLastCycle() docstring
+        // for the in-flight edge case.
+        if !addedVideoIds.isEmpty {
+            let count = addedVideoIds.count
+            let bytesString = byteString(bytesEstimated)
+            UndoService.shared.registerUndo(
+                message: "Added \(count) \(count == 1 ? "track" : "tracks") · ~\(bytesString)",
+                restore: { [weak self] in
+                    Task { [weak self] in
+                        await self?.undoLastCycle()
+                    }
+                },
+                showUndoButton: true
+            )
+        }
+    }
+
+    /// v1.9.0: undo the most recent cycle's downloads.
+    /// Walks the `addedVideoIds` in `lastCycleSummary`
+    /// and deletes each one via `DownloadManager`. The
+    /// `.downloadDeleted` notification will fire per
+    /// deletion and the `setupHooks` listener at the top
+    /// of this file removes the videoId from
+    /// `autoDownloadedVideoIds` automatically.
+    ///
+    /// In-flight edge case: if the user taps Undo within
+    /// a few seconds of the commit (before all downloads
+    /// have completed), the in-flight downloads will
+    /// continue. `deleteDownload` for an in-flight
+    /// download will:
+    ///   - remove the CDDownloadedTrack row (if it
+    ///     exists yet) — the .downloadDeleted handler
+    ///     removes it from autoDownloadedVideoIds
+    ///   - delete the local file (no-op if not yet on
+    ///     disk)
+    ///   - the in-flight download will complete and
+    ///     re-add the row + file
+    /// The net effect: an Undo during downloads is
+    /// partially honored — tracks that already
+    /// completed are removed, in-flight ones stick
+    /// around. This is the same behavior as the
+    /// "deleted a track from the library while it was
+    /// still downloading" edge case elsewhere in the
+    /// app. Fixing it properly would require hooking
+    /// into BackgroundDownloadService to cancel active
+    /// tasks by videoId, which is out of scope for v1.
+    @discardableResult
+    func undoLastCycle() async -> Bool {
+        guard let summary = lastCycleSummary else { return false }
+        guard !summary.addedVideoIds.isEmpty else { return false }
+        for videoId in summary.addedVideoIds {
+            DownloadManager.shared.deleteDownload(videoId: videoId)
+        }
+        lastCycleSummary = nil
+        return true
+    }
+
+    /// Format bytes as a human-readable string (e.g.
+    /// "24 MB"). Used by the post-run toast and the
+    /// Settings status line.
+    private func byteString(_ bytes: Int64) -> String {
+        let formatter = ByteCountFormatter()
+        formatter.allowedUnits = [.useMB, .useKB]
+        formatter.countStyle = .file
+        return formatter.string(fromByteCount: bytes)
     }
 
     /// v1.9.0: cancel a pending cycle. Clears
