@@ -716,6 +716,45 @@ struct SettingsView: View {
                     }
                     .listRowBackground(Theme.cyberSurface)
 
+                    // v1.9.0 (r4): Per-cycle candidate count.
+                    // Distinct from "Library limit" above —
+                    // that one caps the TOTAL number of
+                    // downloaded tracks (default 50). This
+                    // one caps how many candidates the card
+                    // offers in a SINGLE cycle (default 20).
+                    // A user with a 50-track library might
+                    // still want only 10 candidates per cycle
+                    // to keep the review lightweight, or
+                    // 50 to fill quickly.
+                    HStack {
+                        Image(systemName: "tray.full")
+                            .foregroundColor(Theme.cyberCyan)
+                            .frame(width: 24)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Candidates per cycle")
+                                .foregroundColor(.white)
+                            Text("Up to \(smartLibrary.autoDownloadMaxPerCycle) per auto-download")
+                                .font(.system(size: 12, design: .monospaced))
+                                .foregroundColor(Theme.cyberTextSecondary)
+                                .lineLimit(2)
+                        }
+                        Spacer()
+                        Picker("", selection: $smartLibrary.autoDownloadMaxPerCycle) {
+                            // v1.9.0 (r4): 10/20/30/50/100.
+                            // Default 20. Power users can
+                            // bump to 100 to fill fast; 10
+                            // is for the "I want a tiny
+                            // top-up batch" use case.
+                            ForEach([10, 20, 30, 50, 100], id: \.self) { cap in
+                                Text("\(cap)").tag(cap)
+                            }
+                        }
+                        .labelsHidden()
+                        .pickerStyle(.menu)
+                        .tint(Theme.cyberCyan)
+                    }
+                    .listRowBackground(Theme.cyberSurface)
+
                     // v1.9.0: Auto-confirm window. How long
                     // the Smart Library card waits before
                     // auto-committing the candidates if the
