@@ -93,6 +93,18 @@ struct HomeView: View {
                                 .padding(.top, 24)
                         }
 
+                        // 2026-08-30: v1.9.0 Smart Library
+                        // card. Appears only when
+                        // SmartLibraryManager.pendingCandidates
+                        // is non-nil (the manager is the source
+                        // of truth — the card self-hides when
+                        // there's nothing to show). Placed
+                        // above the "Your Library" section so
+                        // the user sees the actionable surface
+                        // first.
+                        SmartLibraryCard()
+                            .padding(.top, Spacing.lg)
+
                         // 2026-08-12: replaced the broken nested-List
                         // recently played section (which couldn't
                         // scroll past the bottom) with a "Your

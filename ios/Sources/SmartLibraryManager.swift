@@ -549,6 +549,35 @@ final class SmartLibraryManager: ObservableObject {
     /// The cycle's `id` is matched against the current
     /// `pendingCandidates.id` — a stale cycle (e.g., the
     /// user backed out and re-prepared) is silently
+    /// v1.9.0: replace the current pending cycle with a
+    /// user-edited version and commit it in one step.
+    /// Called from SmartLibraryReviewSheet when the user
+    /// taps "Download N" with a modified candidate list.
+    ///
+    /// The flow:
+    ///   1. Match against the current pendingCandidates.id
+    ///      (stale-cycle guard, same as commitCycle).
+    ///   2. Replace pendingCandidates with the modified
+    ///      cycle (new id, new candidates).
+    ///   3. Commit immediately.
+    ///
+    /// Why a separate method: commitCycle's stale-cycle
+    /// guard would reject a modified cycle because the
+    /// id doesn't match. replaceAndCommit deliberately
+    /// bypasses the guard by writing the modified cycle
+    /// to pendingCandidates first, then committing. The
+    /// user has explicitly chosen this list — the
+    /// "stale" cycle check doesn't apply.
+    func replaceAndCommit(_ cycle: PendingCycle, source: CycleSummary.CommitSource) async {
+        // Stale guard: only allow replacement if there's
+        // an active pending cycle. If the auto-confirm
+        // already fired and a commit is in flight, this
+        // is a no-op.
+        guard pendingCandidates != nil else { return }
+        pendingCandidates = cycle
+        await commitCycle(cycle, source: source)
+    }
+
     /// rejected. This prevents the "I cancelled but it
     /// downloaded anyway" bug if the auto-confirm timer
     /// fires just as the user re-prepares.
