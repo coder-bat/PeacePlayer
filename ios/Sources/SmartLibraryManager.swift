@@ -208,9 +208,12 @@ final class SmartLibraryManager: ObservableObject {
 
     /// v1.9.0: user-configurable auto-confirm window.
     /// Stored in seconds. 0 = off (no auto-confirm, user
-    /// must explicitly tap Download). Default 300 (5 min).
+    /// must explicitly tap Download). Default 0 (Off) —
+    /// the user requested the "library ready" auto-fire
+    /// behavior to be opt-in rather than default-on. The
+    /// previous v1.8.2 default was 300 (5 min).
     /// Surfaced in Settings as a Picker: Off / 1m / 5m / 15m / 30m.
-    @AppStorage("smartLibrary.autoConfirmSeconds") var autoConfirmSeconds: Int = 300
+    @AppStorage("smartLibrary.autoConfirmSeconds") var autoConfirmSeconds: Int = 0
 
     // MARK: - Tier marker (UserDefaults)
 
@@ -254,6 +257,18 @@ final class SmartLibraryManager: ObservableObject {
         if let data = defaults.data(forKey: Keys.autoDownloadedIds),
            let decoded = try? decoder.decode(Set<String>.self, from: data) {
             autoDownloadedVideoIds = decoded
+        }
+        // v1.9.0 (r2) migration: existing users on v1.8.2
+        // have autoConfirmSeconds = 300 (the old default)
+        // persisted. The new default is 0 (Off) per
+        // user request — "only download if the user
+        // confirms". A one-time reset for the old default
+        // value ensures the migration is invisible;
+        // users who explicitly set a custom value are
+        // left alone.
+        let storedAutoConfirm = defaults.integer(forKey: "smartLibrary.autoConfirmSeconds")
+        if storedAutoConfirm == 300 {
+            defaults.set(0, forKey: "smartLibrary.autoConfirmSeconds")
         }
         let interval = Date().timeIntervalSince1970
         if let ts = defaults.object(forKey: Keys.lastAutoDownloadAt) as? Date {

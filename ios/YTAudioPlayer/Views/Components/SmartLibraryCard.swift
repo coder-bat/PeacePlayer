@@ -31,11 +31,6 @@ import SwiftUI
 struct SmartLibraryCard: View {
     @ObservedObject var smartLibrary = SmartLibraryManager.shared
     @State private var showReviewSheet: Bool = false
-    // Drives a 1Hz re-render of the auto-confirm countdown
-    // text. The actual commit-on-deadline logic lives in
-    // SmartLibraryManager (scheduleAutoConfirm) — this
-    // timer is purely for the visual countdown.
-    @State private var now: Date = Date()
 
     var body: some View {
         Group {
@@ -54,11 +49,6 @@ struct SmartLibraryCard: View {
                 SmartLibraryReviewSheet(originalCycle: cycle, isPresented: $showReviewSheet)
             }
         }
-        .onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) { date in
-            // Cheap 1Hz tick. The view re-renders so the
-            // countdown text updates. No side effects.
-            now = date
-        }
     }
 
     // MARK: - Pending card
@@ -66,12 +56,14 @@ struct SmartLibraryCard: View {
     @ViewBuilder
     private func pendingCard(for cycle: PendingCycle) -> some View {
         VStack(alignment: .leading, spacing: Spacing.md) {
-            headerRow(cycle: cycle)
+            // v1.9.0 (r2): combined header — the X dismiss
+            // lives in the top-right of the title row, so
+            // we drop the separate "headerRow" and put the
+            // dismiss in the title block instead. Saves a
+            // row + the "SMART LIBRARY" eyebrow was
+            // requested to be removed.
             titleBlock(cycle: cycle)
             artworkRow(cycle: cycle)
-            if let countdown = smartLibrary.autoConfirmRemainingFormatted {
-                countdownRow(text: countdown)
-            }
             actionRow(cycle: cycle)
         }
         .padding(Spacing.md)
@@ -94,43 +86,48 @@ struct SmartLibraryCard: View {
         .padding(.horizontal, Spacing.md)
     }
 
-    private func headerRow(cycle: PendingCycle) -> some View {
-        HStack(spacing: Spacing.xs) {
-            Image(systemName: "sparkles")
-                .font(.system(size: 12, weight: .bold))
-                .foregroundColor(Theme.cyberCyan)
-            Text("SMART LIBRARY")
-                .font(Typography.eyebrow)
-                .foregroundColor(Theme.cyberCyan)
-            Spacer()
-            // Live status: "WiFi · 12:32 PM" — context for
-            // when this cycle was prepared. The time is
-            // refreshed every 1s by the parent onReceive.
-            HStack(spacing: 4) {
-                Image(systemName: "wifi")
-                    .font(.system(size: 10))
-                Text(timestampString)
-                    .font(.system(size: 11, weight: .medium, design: .monospaced))
-            }
-            .foregroundColor(Theme.cyberTextSecondary)
-        }
-    }
-
     private func titleBlock(cycle: PendingCycle) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("Ready to top up your library")
-                .font(Typography.title3)
-                .foregroundColor(.white)
-            HStack(spacing: 6) {
-                Text("\(cycle.candidates.count) \(cycle.candidates.count == 1 ? "track" : "tracks")")
-                    .font(Typography.subheadline)
-                    .foregroundColor(Theme.cyberCyan)
-                Text("·")
-                    .foregroundColor(Theme.cyberTextSecondary)
-                Text(byteEstimateString(bytes: cycle.estimatedBytes))
-                    .font(Typography.subheadline)
-                    .foregroundColor(Theme.cyberTextSecondary)
+        // v1.9.0 (r2): top row is "Title — N tracks · ~X MB
+        // · WiFi time" with the X dismiss on the right.
+        // The X is a standard dismiss control for a card —
+        // same visual weight as a sheet's close button.
+        HStack(alignment: .top, spacing: Spacing.sm) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Ready to top up your library")
+                    .font(Typography.title3)
+                    .foregroundColor(.white)
+                    .lineLimit(2)
+                HStack(spacing: 6) {
+                    Text("\(cycle.candidates.count) \(cycle.candidates.count == 1 ? "track" : "tracks")")
+                        .font(Typography.subheadline)
+                        .foregroundColor(Theme.cyberCyan)
+                    Text("·")
+                        .foregroundColor(Theme.cyberTextSecondary)
+                    Text(byteEstimateString(bytes: cycle.estimatedBytes))
+                        .font(Typography.subheadline)
+                        .foregroundColor(Theme.cyberTextSecondary)
+                }
             }
+            Spacer(minLength: Spacing.xs)
+            // X dismiss button — same affordance as Skip
+            // (cancels the cycle) but visually less prominent
+            // than the primary actions. Hides the card
+            // entirely.
+            Button {
+                HapticManager.light()
+                smartLibrary.cancelPendingCycle(reason: "user dismissed card")
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundColor(Theme.cyberTextSecondary)
+                    .frame(width: 28, height: 28)
+                    .background(
+                        Circle()
+                            .fill(Theme.cyberBackground.opacity(0.5))
+                    )
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Dismiss Smart Library card")
         }
     }
 
@@ -186,42 +183,37 @@ struct SmartLibraryCard: View {
     }
 
     private func moreChip(remaining: Int) -> some View {
+        // v1.9.0 (r2): widen the chip so "+N more" doesn't
+        // get clipped at narrow card widths. The artwork
+        // thumbs are 56pt wide; this chip auto-sizes to its
+        // text (min 56pt, expands to fit). Bumped the
+        // horizontal padding so the text breathes.
         ZStack {
             RoundedRectangle(cornerRadius: CornerRadius.sm)
                 .fill(Theme.cyberBackground)
             Text("+\(remaining) more")
-                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                .font(.system(size: 10, weight: .bold, design: .monospaced))
                 .foregroundColor(Theme.cyberCyan)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+                .padding(.horizontal, 8)
         }
-        .frame(width: 56, height: 56)
+        .frame(width: 76, height: 56)
         .overlay(
             RoundedRectangle(cornerRadius: CornerRadius.sm)
                 .stroke(Theme.cyberBackground, lineWidth: 2)
         )
     }
 
-    @ViewBuilder
-    private func countdownRow(text: String) -> some View {
-        HStack(spacing: 6) {
-            Image(systemName: "clock")
-                .font(.system(size: 11))
-            Text("Auto-confirming in ")
-                .font(.system(size: 12, design: .monospaced))
-            // The countdown text. Animated digit transitions
-            // would be over-engineering for 1Hz — SwiftUI's
-            // Text diff handles the visual update fine.
-            Text(text)
-                .font(.system(size: 12, weight: .bold, design: .monospaced))
-                .foregroundColor(Theme.cyberCyan)
-                .contentTransition(.numericText(countsDown: true))
-            Spacer()
-        }
-        .foregroundColor(Theme.cyberTextSecondary)
-    }
-
     private func actionRow(cycle: PendingCycle) -> some View {
+        // v1.9.0 (r2): just two buttons now — Download all +
+        // Review. The Skip button is gone; the X on the top
+        // right of the card handles the "don't do anything"
+        // intent. Two buttons means each gets ~50% width
+        // instead of ~33%, so "Download all (N)" fits on a
+        // single line.
         HStack(spacing: Spacing.sm) {
-            // Primary action: Download all (commits the cycle)
+            // Primary action: Download all
             Button {
                 HapticManager.medium()
                 Task {
@@ -230,11 +222,15 @@ struct SmartLibraryCard: View {
             } label: {
                 HStack(spacing: 6) {
                     Image(systemName: "arrow.down.circle.fill")
-                    Text("Download all")
-                        .fontWeight(.bold)
-                    Text("(\(cycle.candidates.count))")
-                        .fontWeight(.medium)
-                        .foregroundColor(Theme.cyberCyan.opacity(0.8))
+                    // Single Text with inline count — the
+                    // v1 split into 2 Text views wrapped
+                    // on narrow widths. Concatenating into
+                    // one string lets SwiftUI break the
+                    // line as a whole if it must, instead
+                    // of breaking inside the label.
+                    Text("Download all (\(cycle.candidates.count))")
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
                 }
                 .font(.system(size: 14, weight: .bold))
                 .foregroundColor(.black)
@@ -255,6 +251,8 @@ struct SmartLibraryCard: View {
                 HStack(spacing: 6) {
                     Image(systemName: "list.bullet.rectangle")
                     Text("Review")
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
                 }
                 .font(.system(size: 14, weight: .medium))
                 .foregroundColor(Theme.cyberCyan)
@@ -266,32 +264,10 @@ struct SmartLibraryCard: View {
                 )
             }
             .buttonStyle(.plain)
-
-            // Tertiary action: Skip (cancels the cycle)
-            Button {
-                HapticManager.light()
-                smartLibrary.cancelPendingCycle(reason: "user skipped")
-            } label: {
-                Text("Skip")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundColor(Theme.cyberTextSecondary)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, Spacing.sm)
-            }
-            .buttonStyle(.plain)
         }
     }
 
     // MARK: - Formatting helpers
-
-    private var timestampString: String {
-        // Use the cycle's createdAt if available — tells
-        // the user how long ago the cycle was prepared.
-        guard let cycle = smartLibrary.pendingCandidates else { return "" }
-        let formatter = DateFormatter()
-        formatter.dateFormat = "h:mm a"
-        return formatter.string(from: cycle.createdAt)
-    }
 
     private func byteEstimateString(bytes: Int64) -> String {
         let formatter = ByteCountFormatter()

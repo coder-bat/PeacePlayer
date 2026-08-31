@@ -65,15 +65,31 @@ struct SmartLibraryReviewSheet: View {
                     commitBar
                 }
             }
-            .navigationTitle("Review auto-download")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Cancel") {
-                        isPresented = false
-                    }
-                    .foregroundColor(Theme.cyberCyan)
+            // v1.9.0 (r2): drop the system nav title + the
+            // system Cancel button — they read as "iOS
+            // settings" not "PeacePlayer". The custom
+            // header summary at the top of the content
+            // already shows the cycle count + bytes; the
+            // close affordance lives in a custom X button
+            // matching the card's X.
+            .navigationBarHidden(true)
+            .overlay(alignment: .topTrailing) {
+                Button {
+                    HapticManager.light()
+                    isPresented = false
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundColor(Theme.cyberTextSecondary)
+                        .frame(width: 32, height: 32)
+                        .background(
+                            Circle()
+                                .fill(Theme.cyberSurface)
+                        )
                 }
+                .buttonStyle(.plain)
+                .padding(.top, Spacing.md)
+                .padding(.trailing, Spacing.md)
             }
         }
         .onAppear {
@@ -103,7 +119,19 @@ struct SmartLibraryReviewSheet: View {
     // MARK: - Header
 
     private var headerSummary: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        // v1.9.0 (r2): custom title row + count summary.
+        // The system nav title is hidden (see body); the
+        // title is rendered inline so the X close button
+        // has room to live at the top-right.
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: "list.bullet.rectangle")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundColor(Theme.cyberCyan)
+                Text("REVIEW AUTO-DOWNLOAD")
+                    .font(Typography.eyebrow)
+                    .foregroundColor(Theme.cyberCyan)
+            }
             HStack(spacing: 6) {
                 Text("\(workingCandidates.count) \(workingCandidates.count == 1 ? "track" : "tracks")")
                     .font(.system(size: 14, weight: .bold, design: .monospaced))
@@ -114,15 +142,10 @@ struct SmartLibraryReviewSheet: View {
                     .font(.system(size: 14, design: .monospaced))
                     .foregroundColor(Theme.cyberTextSecondary)
                 Spacer()
-                if smartLibrary.autoConfirmRemainingFormatted != nil {
-                    Text("Auto-confirm in \(smartLibrary.autoConfirmRemainingFormatted!)")
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundColor(Theme.cyberTextSecondary)
-                }
             }
         }
         .padding(.horizontal, Spacing.md)
-        .padding(.top, Spacing.sm)
+        .padding(.top, Spacing.md)
     }
 
     // MARK: - Source filter
