@@ -1847,9 +1847,19 @@ struct ListTrackRow: View {
                 // in Liked mode (placeholder item has
                 // empty fileSizeFormatted).
                 if mode == .downloaded {
-                    Text(track.fileSizeFormatted.uppercased())
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundColor(Theme.cyberTextSecondary)
+                    HStack(spacing: 6) {
+                        Text(track.fileSizeFormatted.uppercased())
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(Theme.cyberTextSecondary)
+                        // v1.9.0: Smart Library tier badge
+                        // for auto-downloaded tracks.
+                        // Self-hides for .liked / .manual
+                        // tracks (per the plan decision:
+                        // "Auto only"). Color shifts
+                        // cyan → yellow → magenta as the
+                        // cleanup grace period runs down.
+                        LibraryTierBadge(videoId: track.videoId)
+                    }
                 }
 
                 if let memoryPreview {
