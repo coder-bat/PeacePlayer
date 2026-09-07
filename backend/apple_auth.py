@@ -98,7 +98,8 @@ def _get_jwks_client() -> PyJWKClient:
 
 # --- User storage (file-backed; swap for a real DB in prod) ---
 
-USERS_DIR = Path(__file__).parent / "data" / "users"
+DATA_DIR = Path(os.environ.get("PEACEPLAYER_DATA_DIR", Path(__file__).parent / "data"))
+USERS_DIR = DATA_DIR / "users"
 USERS_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -147,7 +148,7 @@ def find_user_by_apple_sub(apple_sub: str) -> Optional[dict]:
 
 # --- Sync storage ---
 
-SYNC_DIR = Path(__file__).parent / "data" / "sync"
+SYNC_DIR = DATA_DIR / "sync"
 SYNC_DIR.mkdir(parents=True, exist_ok=True)
 
 

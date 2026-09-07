@@ -28,6 +28,9 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import httpx
+from log_redaction import redact_sensitive, install_log_redaction
+
+install_log_redaction()
 
 # S17 (CV-3): load backend/.env at import time so dev runs
 # pick up PEACEPLAYER_JWT_SECRET (and other vars) from a file
@@ -36,7 +39,7 @@ import httpx
 # no-op (the file doesn't exist on the production host).
 from dotenv import load_dotenv
 _env_path = Path(__file__).parent / ".env"
-if _env_path.exists():
+if os.environ.get("PEACEPLAYER_LOAD_DOTENV", "1") != "0" and _env_path.exists():
     load_dotenv(_env_path, override=False)
 
 from ytm_client import YTMusicClient, get_client, reset_client
@@ -138,13 +141,13 @@ class JSONFormatter(logging.Formatter):
         log_data = {
             "timestamp": datetime.datetime.utcnow().isoformat(),
             "level": record.levelname,
-            "message": record.getMessage(),
+            "message": redact_sensitive(record.getMessage()),
             "logger": record.name,
         }
         if hasattr(record, 'request_id'):
             log_data["request_id"] = record.request_id
         if record.exc_info and record.exc_info[0]:
-            log_data["exception"] = self.formatException(record.exc_info)
+            log_data["exception"] = redact_sensitive(self.formatException(record.exc_info))
         return json.dumps(log_data)
 
 handler = logging.StreamHandler()
@@ -687,16 +690,9 @@ async def sync_upload(request: Request, body: SyncUploadRequest):
     user = current_user_from_request(request.headers.get("Authorization"))
     if not user:
         raise HTTPException(status_code=401, detail="unauthorized")
-    blob = {
-        "playlists": body.playlists,
-        "favorites": body.favorites,
-        "history": body.history,
-        "favoriteArtists": body.favoriteArtists,
-        "uploadedAt": int(time.time()),
-        "clientVersion": body.clientVersion,
-    }
-    save_sync_blob(user["user_id"], blob)
-    return {"ok": True, "uploadedAt": blob["uploadedAt"]}
+    # Legacy clients upload before restore, which can erase an existing library.
+    # Keep this route read-only until a client uses the conditional v2 protocol.
+    raise HTTPException(status_code=426, detail="legacy_sync_upgrade_required")
 
 
 @app.get("/sync/download", response_model=SyncBlobResponse)
