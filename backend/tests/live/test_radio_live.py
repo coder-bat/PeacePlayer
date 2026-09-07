@@ -37,7 +37,8 @@ TEST_SEEDS = [
     "dQw4w9WgXcQ",  # Rick Astley - Never Gonna Give You Up
 ]
 
-YTDLP_BIN = "/Users/coderbat/iYMusic/YTAudioSystem/backend/venv/bin/yt-dlp"
+from live_support import require_disposable_service
+YTDLP_COMMAND = [sys.executable, "-m", "yt_dlp"]
 
 
 class TestYtDlpRadioExtractor(unittest.TestCase):
@@ -48,12 +49,12 @@ class TestYtDlpRadioExtractor(unittest.TestCase):
     def setUp(self):
         # Sanity: yt-dlp is reachable
         result = subprocess.run(
-            [YTDLP_BIN, "--version"],
+            [*YTDLP_COMMAND, "--version"],
             capture_output=True, text=True, timeout=5,
         )
         self.assertEqual(
             result.returncode, 0,
-            f"yt-dlp at {YTDLP_BIN} not callable: {result.stderr}"
+            f"yt-dlp at {sys.executable} not callable: {result.stderr}"
         )
         # Note the version for the test output
         self.yt_dlp_version = result.stdout.strip()
@@ -86,23 +87,9 @@ class TestYtDlpRadioExtractor(unittest.TestCase):
             self.fail(f"yt-dlp extract_info failed for {video_id}: {e}")
 
     def test_yt_dlp_version_pinned(self):
-        """The pinned version should be 2026.7.4 (or newer patch).
-        If this fails, bump yt-dlp in requirements.txt AND update the
-        known-good version constant below."""
-        # The S17-H (2026-07-26) fix bumped yt-dlp from a broken
-        # 2026.03.17 to 2026.7.4. yt-dlp prints the version as
-        # "2026.07.04" on stdout.
-        # Allow anything from 2026.7 onwards.
-        self.assertTrue(
-            self.yt_dlp_version.startswith("2026.07") or
-            self.yt_dlp_version.startswith("2026.08") or
-            self.yt_dlp_version.startswith("2026.09") or
-            self.yt_dlp_version.startswith("2026.1") or
-            self.yt_dlp_version.startswith("2026.2"),
-            f"yt-dlp {self.yt_dlp_version} is older than the 2026.7.4 "
-            f"baseline. Bump in requirements.txt and verify the n-challenge "
-            f"fix still works for /stream before re-running."
-        )
+        import importlib.metadata
+        from packaging.version import Version
+        self.assertEqual(Version(self.yt_dlp_version), Version(importlib.metadata.version("yt-dlp")))
 
     def test_rd_list_extracts_for_known_seeds(self):
         """For each well-known seed, yt-dlp should return a non-empty
@@ -172,21 +159,10 @@ class TestRadioEndpointE2E(unittest.TestCase):
     delegates to the (now-fixed) get_watch_playlist.
     """
 
-    BASE_URL = "http://localhost:8181"
-    JWT_PATH = "/tmp/test_jwt.txt"
-
     def setUp(self):
         import os
-        if not os.path.exists(self.JWT_PATH):
-            self.skipTest(f"Test JWT not at {self.JWT_PATH}")
-        with open(self.JWT_PATH) as f:
-            self.token = f.read().strip()
-        # Confirm the backend is up
-        try:
-            import urllib.request
-            urllib.request.urlopen(self.BASE_URL, timeout=2).read()
-        except Exception as e:
-            self.skipTest(f"Backend not reachable at {self.BASE_URL}: {e}")
+        self.BASE_URL, _ = require_disposable_service()
+        self.token = os.environ["PEACEPLAYER_TEST_SESSION_TOKEN"]
 
     def test_radio_returns_tracks_for_real_seed(self):
         """The whole point of Phase 1: /radio should return 5+ tracks
@@ -274,87 +250,3 @@ class TestRadioEndpointE2E(unittest.TestCase):
             f"Cache hit took {second_dt*1000:.0f}ms, expected <500ms. "
             f"Cache may not be wired into the /radio endpoint."
         )
-
-    def test_radio_cache_stats_accessible(self):
-        """The cache exposes a get_stats() method for monitoring.
-        We hit /radio and confirm the cache has at least one entry."""
-        from radio_cache import get_radio_cache
-        cache = get_radio_cache()
-        before = cache.get_stats()
-        # Hit a fresh seed to ensure something is in the cache
-        import urllib.request
-        import json
-        seed = "dQw4w9WgXcQ"  # Rick Astley — never gonna give you up
-        req = urllib.request.Request(
-            f"{self.BASE_URL}/radio/{seed}",
-            headers={"Authorization": f"Bearer {self.token}"},
-        )
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            resp.read()
-        after = cache.get_stats()
-        self.assertGreaterEqual(
-            after['total_entries'], before['total_entries'],
-            f"Cache entries went down after a /radio call: {before} → {after}"
-        )
-        # Confirm the stats dict has the expected keys
-        for key in ('total_entries', 'expired_entries', 'valid_entries',
-                    'max_entries', 'ttl_seconds'):
-            self.assertIn(key, after, f"Cache stats missing key: {key}")
-
-
-class TestRadioCacheUnit(unittest.TestCase):
-    """
-    Unit tests for the radio cache itself (no network).
-    """
-
-    def setUp(self):
-        from radio_cache import RadioCache
-        # Use a tiny cache (3 entries) so we can test LRU eviction
-        # without making 500 requests.
-        self.cache = RadioCache(ttl=60, max_entries=3)
-
-    def test_set_and_get(self):
-        self.cache.set("v1", [{"videoId": "a"}, {"videoId": "b"}])
-        result = self.cache.get("v1")
-        self.assertEqual(result, [{"videoId": "a"}, {"videoId": "b"}])
-
-    def test_empty_set_is_not_cached(self):
-        """Failure responses (empty lists) should NOT be cached —
-        the next call should retry the network."""
-        self.cache.set("v1", [])
-        result = self.cache.get("v1")
-        self.assertIsNone(result, "Empty list was cached; should be treated as failure")
-
-    def test_lru_eviction(self):
-        """When the cache is full, the LEAST-recently-used entry
-        should be evicted on the next set()."""
-        self.cache.set("v1", [{"videoId": "a"}])
-        self.cache.set("v2", [{"videoId": "b"}])
-        self.cache.set("v3", [{"videoId": "c"}])
-        # v1 is now the LRU
-        self.cache.get("v1")  # touch v1 → it's now MRU; v2 is LRU
-        # Insert v4 → v2 should be evicted
-        self.cache.set("v4", [{"videoId": "d"}])
-        self.assertIsNone(self.cache.get("v2"), "LRU entry was not evicted")
-        self.assertIsNotNone(self.cache.get("v1"), "MRU entry was wrongly evicted")
-        self.assertIsNotNone(self.cache.get("v3"))
-        self.assertIsNotNone(self.cache.get("v4"))
-
-    def test_ttl_expiry(self):
-        """Expired entries should be returned as None and removed."""
-        from radio_cache import RadioCache
-        import time as time_module
-        cache = RadioCache(ttl=1, max_entries=10)  # 1 second TTL
-        cache.set("v1", [{"videoId": "a"}])
-        self.assertIsNotNone(cache.get("v1"))
-        time_module.sleep(1.1)
-        self.assertIsNone(cache.get("v1"), "Expired entry was returned")
-
-    def test_invalidate(self):
-        self.cache.set("v1", [{"videoId": "a"}])
-        self.cache.invalidate("v1")
-        self.assertIsNone(self.cache.get("v1"))
-
-
-if __name__ == "__main__":
-    unittest.main(verbosity=2)

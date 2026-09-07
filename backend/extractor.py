@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Optional, Dict, List
 import logging
 import requests
+from runtime_config import settings
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -32,14 +33,14 @@ class AudioExtractor:
     # 250: Opus 70kbps
     # 249: Opus 50kbps
     
-    def __init__(self, output_dir: str = "~/Music/YTAudio"):
+    def __init__(self, output_dir: Optional[str] = None):
         """
         Initialize extractor with output directory.
         
         Args:
             output_dir: Directory to save converted files
         """
-        self.output_dir = Path(output_dir).expanduser()
+        self.output_dir = Path(output_dir).expanduser() if output_dir is not None else settings.library_dir
         self.output_dir.mkdir(parents=True, exist_ok=True)
         
         # yt-dlp base options
@@ -425,7 +426,7 @@ class AudioExtractor:
             # First, convert audio to temporary M4A
             temp_audio = output_path.with_suffix('.tmp.m4a')
             cmd_audio = [
-                'ffmpeg',
+                settings.ffmpeg_bin,
                 '-y',
                 '-i', str(input_path),
                 '-vn',
@@ -442,7 +443,7 @@ class AudioExtractor:
 
             # Second, embed artwork
             cmd_embed = [
-                'ffmpeg',
+                settings.ffmpeg_bin,
                 '-y',
                 '-i', str(temp_audio),
                 '-i', artwork_path,
@@ -456,7 +457,7 @@ class AudioExtractor:
         else:
             # No artwork, single pass
             cmd_audio = [
-                'ffmpeg',
+                settings.ffmpeg_bin,
                 '-y',
                 '-i', str(input_path),
                 '-vn',
@@ -581,7 +582,7 @@ class AudioExtractor:
 
         try:
             cmd = [
-                'ffmpeg', '-i', str(audio_path),
+                settings.ffmpeg_bin, '-i', str(audio_path),
                 '-af', 'aresample=8000',
                 '-ac', '1',
                 '-f', 'f32le',

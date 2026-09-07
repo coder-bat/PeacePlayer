@@ -7,6 +7,7 @@ Without authentication, the app works in guest mode for search/streaming.
 
 import os
 from ytmusicapi import setup
+from runtime_config import settings
 
 
 def main():
@@ -28,7 +29,7 @@ def main():
     print("  ✅ Upload music to your library")
     print()
     
-    auth_file = "oauth.json"
+    auth_file = str(settings.oauth_file)
     
     if os.path.exists(auth_file):
         print(f"⚠️  {auth_file} already exists.")

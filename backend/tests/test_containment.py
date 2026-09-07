@@ -69,6 +69,8 @@ def test_rotated_key_rejects_old_sessions(isolated_server, monkeypatch):
     assert auth.verify_session_jwt(old)
     monkeypatch.setattr(auth, "SESSION_JWT_SECRET", secrets.token_urlsafe(48))
     assert auth.verify_session_jwt(old) is None
+    from types import SimpleNamespace
+    monkeypatch.setattr(server, "get_client", lambda: SimpleNamespace(get_stream_url=lambda _: None))
     fresh = auth.mint_session_jwt(user["user_id"], "fixture-sub")
     assert auth.verify_session_jwt(fresh)["sub"] == user["user_id"]
 

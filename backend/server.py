@@ -32,15 +32,10 @@ from log_redaction import redact_sensitive, install_log_redaction
 
 install_log_redaction()
 
-# S17 (CV-3): load backend/.env at import time so dev runs
-# pick up PEACEPLAYER_JWT_SECRET (and other vars) from a file
-# rather than requiring shell exports. In production the
-# launchd plist sets the env directly and this becomes a
-# no-op (the file doesn't exist on the production host).
-from dotenv import load_dotenv
-_env_path = Path(__file__).parent / ".env"
-if os.environ.get("PEACEPLAYER_LOAD_DOTENV", "1") != "0" and _env_path.exists():
-    load_dotenv(_env_path, override=False)
+from runtime_config import (
+    settings, AUDIO_CACHE_DIR, HLS_DIR, USERS_DIR, SYNC_DIR,
+    YTDLP_COMMAND, FFMPEG_BIN, DENO_BIN,
+)
 
 from ytm_client import YTMusicClient, get_client, reset_client
 from extractor import AudioExtractor, get_extractor
@@ -74,17 +69,7 @@ TRENDING_CACHE_TTL = int(os.environ.get("TRENDING_CACHE_TTL", "900"))
 MAX_WAVEFORM_CACHE_MB = int(os.environ.get("MAX_WAVEFORM_CACHE_MB", "100"))
 CACHE_TTL_HOURS = float(os.environ.get("CACHE_TTL_HOURS", "3.5"))
 
-# S17-H / S17-PLAY (Fix 1, 2026-07-29): Use absolute paths for
-# external binaries. The backend runs under launchd as a Background
-# process, which IGNORES the EnvironmentVariables.PATH override in the
-# plist — verified empirically (the running process PATH is just
-# /usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin, missing both
-# /Library/Frameworks/Python.framework/Versions/3.10/bin where yt-dlp
-# lives, and /opt/homebrew/bin where ffmpeg + deno live). Using
-# absolute paths is more robust than relying on PATH at all.
-YTDLP_BIN = os.environ.get("YTDLP_BIN", "/Library/Frameworks/Python.framework/Versions/3.10/bin/yt-dlp")
-FFMPEG_BIN = os.environ.get("FFMPEG_BIN", "/opt/homebrew/bin/ffmpeg")
-DENO_BIN = os.environ.get("DENO_BIN", "/opt/homebrew/bin/deno")
+# Runtime tools are resolved in runtime_config; Python extraction uses this interpreter.
 
 # S17-H / FORMAT-18-FAST (2026-08-07): in-memory cache of
 # YouTube's format 18 streaming URLs, keyed by video_id.
@@ -1018,7 +1003,7 @@ async def audio_stream(video_id: str, request: Request):
         # (~1-3s). Subsequent calls hit the disk cache. The
         # cache file is in major_brand=M4A, mp4a AAC LC 48kHz
         # stereo — what every iPhone plays.
-        cache_dir = Path('/Users/coderbat/iYMusic/YTAudioSystem/backend/data/audio_cache')
+        cache_dir = AUDIO_CACHE_DIR
         cache_dir.mkdir(parents=True, exist_ok=True)
         cache_path = cache_dir / f"{video_id}.m4a"
 
@@ -1144,7 +1129,7 @@ async def fast_stream(video_id: str, request: Request):
     # Warm path: 302 to /audio (the existing instant path). This is
     # the fast case — the user has played this track before, the
     # .m4a is on disk, iOS just plays it.
-    audio_cache_dir = Path('/Users/coderbat/iYMusic/YTAudioSystem/backend/data/audio_cache')
+    audio_cache_dir = AUDIO_CACHE_DIR
     audio_cache_path = audio_cache_dir / f"{video_id}.m4a"
     if audio_cache_path.exists() and audio_cache_path.stat().st_size > 50_000:
         if token_param:
@@ -1178,7 +1163,7 @@ async def fast_stream(video_id: str, request: Request):
         # to call yt-dlp fresh (the cache stores "best audio" not
         # format 18). For now, just call yt-dlp directly.
         proc = await asyncio.create_subprocess_exec(
-            YTDLP_BIN,
+            *YTDLP_COMMAND,
             "--js-runtimes", f"deno:{DENO_BIN}",
             "-f", "18",  # progressive mp4 (video+audio, AAC)
             "-g",  # --get-url, just print the URL
@@ -1243,7 +1228,7 @@ async def prefetch_stream(video_id: str, background_tasks: BackgroundTasks, requ
     """
     # Cache hit: stream URL + audio both already there
     cache = get_cache()
-    audio_cache_path = Path('/Users/coderbat/iYMusic/YTAudioSystem/backend/data/audio_cache') / f"{video_id}.m4a"
+    audio_cache_path = AUDIO_CACHE_DIR / f"{video_id}.m4a"
     if cache.get(video_id) and audio_cache_path.exists() and audio_cache_path.stat().st_size > 1000:
         return {"status": "already_cached"}
 
@@ -1287,7 +1272,7 @@ async def _transcode_to_cache(video_id: str, yt_url: str) -> None:
       Fix 2 (regular MP4 + re-mux): 14.8s
       Fix 4 Phase 1 (fMP4, single pass): ~7s
     """
-    cache_dir = Path('/Users/coderbat/iYMusic/YTAudioSystem/backend/data/audio_cache')
+    cache_dir = AUDIO_CACHE_DIR
     cache_dir.mkdir(parents=True, exist_ok=True)
     cache_path = cache_dir / f"{video_id}.m4a"
 
@@ -1346,7 +1331,7 @@ async def _do_transcode_pipeline(video_id: str, yt_url: str, cache_path: Path) -
     # and no more re-mux pass. The empty_moov flag handles the
     # "moov at start" requirement in one pass.
     pipe_cmd = (
-        f'{shlex.quote(YTDLP_BIN)} '
+        f'{shlex.join(YTDLP_COMMAND)} '
         f'--js-runtimes deno:{shlex.quote(DENO_BIN)} '
         f'-f "worstaudio[ext=webm]/worstaudio/bestaudio[ext=webm]/bestaudio/best" '
         f'-o - --no-playlist --no-part --no-progress --quiet '
@@ -1438,7 +1423,7 @@ async def _prefetch_worker(video_id: str, user_id: Optional[str] = None):
         yt_url = webm[0]['url']
 
         await _transcode_to_cache(video_id, yt_url)
-        cache_path = Path('/Users/coderbat/iYMusic/YTAudioSystem/backend/data/audio_cache') / f"{video_id}.m4a"
+        cache_path = AUDIO_CACHE_DIR / f"{video_id}.m4a"
         if cache_path.exists():
             logger.info(f"Prefetch transcoded: {video_id} ({cache_path.stat().st_size} bytes, user={user_id or 'unknown'})")
     except Exception as e:
@@ -2638,6 +2623,7 @@ async def health_check(request: Request):
         pass
     return {
         "status": "ok",
+        **({"testInstanceId": settings.test_instance_id} if settings.test_instance_id else {}),
         "youtube": youtube_ok,
         "uptime_seconds": int(uptime),
         "cache_sizes": {
@@ -2645,6 +2631,12 @@ async def health_check(request: Request):
             "trending": len(trending_cache._cache),
         }
     }
+
+
+@app.get("/ready")
+async def readiness_check():
+    """Local readiness and immutable release identity; never contacts YouTube."""
+    return {"status": "ready", "releaseCommit": os.environ.get("PEACEPLAYER_RELEASE_COMMIT", "development")}
 
 
 # --- Waveform cache cleanup ---
@@ -2677,6 +2669,8 @@ def cleanup_waveform_cache(cache_dir=None):
 @app.on_event("startup")
 async def startup_event():
     """Run startup tasks."""
+    settings.validate()
+    settings.prepare_directories()
     cleanup_waveform_cache()
     # S17 (CV-3): confirm at startup that the JWT secret is
     # configured. We don't log the secret itself (it's a
@@ -2789,7 +2783,6 @@ def _prewarm_thread_main():
 # The m3u8 served to AVPlayer is GENERATED (not the raw ffmpeg
 # output) so we can inject the auth token into each segment URL.
 
-HLS_DIR = Path('/Users/coderbat/iYMusic/YTAudioSystem/backend/data/hls')
 HLS_SEGMENT_TIME = 2  # seconds per segment — 2s gives ~3s TTFB
 # S17-H / HLS (Fix 4 Phase 3, 2026-07-30): bumped from 10s
 # after first device test. 10s wasn't enough when (a) the
@@ -2927,7 +2920,7 @@ async def _hls_transcode_worker(video_id: str, yt_url: str, done_event: asyncio.
         async with _transcode_semaphore:
             for attempt_idx, fmt in enumerate(format_attempts):
                 pipe_cmd = (
-                    f'{shlex.quote(YTDLP_BIN)} '
+                    f'{shlex.join(YTDLP_COMMAND)} '
                     f'--js-runtimes deno:{shlex.quote(DENO_BIN)} '
                     f'-f {shlex.quote(fmt)} '
                     f'-o - --no-playlist --no-part --no-progress --quiet '
@@ -3120,7 +3113,7 @@ async def play_hls_playlist(video_id: str, request: Request):
 
     # Cache hit: redirect to /audio. The token from this request
     # becomes the token in the redirect URL — same pattern.
-    cache_path = Path('/Users/coderbat/iYMusic/YTAudioSystem/backend/data/audio_cache') / f"{video_id}.m4a"
+    cache_path = AUDIO_CACHE_DIR / f"{video_id}.m4a"
     if cache_path.exists() and cache_path.stat().st_size > 1000:
         token_param = unquote(request.query_params.get('token', ''))
         if token_param:
@@ -3482,7 +3475,7 @@ async def _hls_concat_to_m4a(video_id: str):
     """
     hls_dir = _hls_dir_for(video_id)
     m3u8_path = hls_dir / "playlist.m3u8"
-    audio_cache_path = Path('/Users/coderbat/iYMusic/YTAudioSystem/backend/data/audio_cache') / f"{video_id}.m4a"
+    audio_cache_path = AUDIO_CACHE_DIR / f"{video_id}.m4a"
 
     if audio_cache_path.exists() and audio_cache_path.stat().st_size > 1000:
         return  # already cached
@@ -3596,7 +3589,7 @@ async def _hls_cleanup_cycle():
     if not HLS_DIR.exists():
         return
 
-    audio_cache_dir = Path('/Users/coderbat/iYMusic/YTAudioSystem/backend/data/audio_cache')
+    audio_cache_dir = AUDIO_CACHE_DIR
     now = time.time()
     removed = 0
     failed = 0
@@ -3714,7 +3707,7 @@ async def _prewarm_cycle():
     not exposed externally. No leak.
     """
     t0 = time.monotonic()
-    user_dir = Path('/Users/coderbat/iYMusic/YTAudioSystem/backend/data/users')
+    user_dir = USERS_DIR
     if not user_dir.exists():
         logger.info("Pre-warm: no users yet, skipping cycle")
         return
@@ -3725,7 +3718,7 @@ async def _prewarm_cycle():
         return
 
     cache = get_cache()
-    audio_cache_dir = Path('/Users/coderbat/iYMusic/YTAudioSystem/backend/data/audio_cache')
+    audio_cache_dir = AUDIO_CACHE_DIR
 
     # Collect (videoId, user_id) pairs to pre-warm. Dedup by
     # videoId — if two users have the same track, only
@@ -3764,7 +3757,7 @@ async def _prewarm_cycle():
         # file) has a "history" array of {videoId, playedAt, progress}
         # entries sorted ascending by playedAt — so the most-recent
         # is at the END. Take the last PREWARM_TOP_N.
-        sync_file = Path('/Users/coderbat/iYMusic/YTAudioSystem/backend/data/sync') / f"{user_id}.json"
+        sync_file = SYNC_DIR / f"{user_id}.json"
         if not sync_file.exists():
             continue
         try:
@@ -3772,7 +3765,7 @@ async def _prewarm_cycle():
         except (json.JSONDecodeError, OSError) as e:
             logger.warning(f"Pre-warm: couldn't read sync blob for {user_id}: {e}")
             continue
-        history = sync_blob.get("history") or []
+        history = sync_blob.get("snapshot", sync_blob).get("history") or []
         if not isinstance(history, list):
             continue
         # Sort by playedAt descending, take top N

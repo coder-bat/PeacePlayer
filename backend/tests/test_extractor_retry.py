@@ -63,16 +63,9 @@ class DownloadRetryTests(unittest.TestCase):
     """Pin the retry-on-403 behavior of download_and_convert."""
 
     def setUp(self):
-        # Build an AudioExtractor pointed at a FRESH temp output dir
-        # per test so the "file already exists" early-return path
-        # doesn't fire. The temp dir is removed entirely in setUp
-        # and recreated — this is the safest cleanup, and the test
-        # is fast enough that the rm + mkdir overhead is negligible.
-        import shutil
-        self.tmp = Path("/tmp/test_extractor_retry")
-        if self.tmp.exists():
-            shutil.rmtree(self.tmp)
-        self.tmp.mkdir(parents=True, exist_ok=True)
+        from tempfile import TemporaryDirectory
+        self.temp_directory = TemporaryDirectory(prefix="peaceplayer-extractor-")
+        self.tmp = Path(self.temp_directory.name)
         self.ext = AudioExtractor(output_dir=str(self.tmp))
         self.video_id = "dQw4w9WgXcQ"
         self.metadata = {
@@ -82,13 +75,7 @@ class DownloadRetryTests(unittest.TestCase):
         }
 
     def tearDown(self):
-        # Best-effort cleanup. The setUp wipes the dir fresh for
-        # the next test, so we don't strictly need to delete here,
-        # but it keeps the test from leaving junk in /tmp if the
-        # test crashes mid-run.
-        import shutil
-        if self.tmp.exists():
-            shutil.rmtree(self.tmp, ignore_errors=True)
+        self.temp_directory.cleanup()
 
     @patch("extractor.time.sleep")  # skip real backoff
     def test_retry_after_403_then_success(self, mock_sleep):

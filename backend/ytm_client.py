@@ -9,6 +9,7 @@ from typing import List, Dict, Optional
 import os
 import logging
 import yt_dlp
+from runtime_config import settings
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -76,13 +77,14 @@ class YTMusicClient:
     Works with or without authentication.
     """
     
-    def __init__(self, auth_file: str = "oauth.json"):
+    def __init__(self, auth_file: Optional[str] = None):
         """
         Initialize client with optional authentication.
         
         Args:
             auth_file: Path to auth credentials file. If not found, uses guest mode.
         """
+        auth_file = str(settings.oauth_file) if auth_file is None else auth_file
         self.auth_file = auth_file
         self.authenticated = False
         self.yt = None

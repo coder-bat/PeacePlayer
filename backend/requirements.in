@@ -1,0 +1,17 @@
+# Direct runtime dependencies. requirements.txt locks the complete resolved set.
+# Python 3.11. Changes must pass the offline suite and opt-in extraction smoke test.
+ytmusicapi==1.7.0
+yt-dlp==2026.8.19
+ffmpeg-python==0.2.0
+fastapi==0.109.0
+uvicorn==0.27.0
+python-multipart==0.0.6
+aiofiles==23.2.1
+requests==2.31.0
+tinydb==4.8.0
+pydantic==2.5.3
+PyJWT==2.13.0
+cryptography==50.0.1
+python-dotenv==1.2.3
+slowapi==0.1.9
+httpx==0.28.1

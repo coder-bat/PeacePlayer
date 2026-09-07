@@ -1,50 +1,21 @@
-name: Create Release
-
+name: Create source release
 on:
   push:
-    tags:
-      - 'v*'
-
+    tags: ['v*']
 permissions:
   contents: write
-
 jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        
-      - name: Generate changelog
-        id: changelog
-        run: |
-          # Get the previous tag
-          PREVIOUS_TAG=$(git describe --tags --abbrev=0 HEAD~1 2>/dev/null || echo "")
-          
-          if [ -z "$PREVIOUS_TAG" ]; then
-            # First release
-            CHANGELOG=$(git log --pretty=format:"- %s" --no-merges)
-          else
-            CHANGELOG=$(git log --pretty=format:"- %s" --no-merges ${PREVIOUS_TAG}..HEAD)
-          fi
-          
-          # Save to output
-          echo "changelog<<EOF" >> $GITHUB_OUTPUT
-          echo "$CHANGELOG" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
-          
-      - name: Create Release
-        uses: softprops/action-gh-release@v1
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Create source release
+        uses: softprops/action-gh-release@v2
         with:
           body: |
-            ## Changes in this Release
-            ${{ steps.changelog.outputs.changelog }}
-            
-            ## Deployment
-            This release has been automatically deployed to the production server.
-            
-            ## Docker Image
-            ```
-            docker pull ghcr.io/${{ github.repository }}/ytaudio-backend:${{ github.ref_name }}
-            ```
+            Source release for this tag. This does not indicate a production deployment.
+            No Docker image or signed iOS build is published by this workflow.
+            Validate and deploy the chosen commit separately using the production workflow.
           generate_release_notes: true

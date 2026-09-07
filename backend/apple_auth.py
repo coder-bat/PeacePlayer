@@ -98,8 +98,7 @@ def _get_jwks_client() -> PyJWKClient:
 
 # --- User storage (file-backed; swap for a real DB in prod) ---
 
-DATA_DIR = Path(os.environ.get("PEACEPLAYER_DATA_DIR", Path(__file__).parent / "data"))
-USERS_DIR = DATA_DIR / "users"
+from runtime_config import USERS_DIR, SYNC_DIR
 USERS_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -148,7 +147,6 @@ def find_user_by_apple_sub(apple_sub: str) -> Optional[dict]:
 
 # --- Sync storage ---
 
-SYNC_DIR = DATA_DIR / "sync"
 SYNC_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -169,12 +167,8 @@ def load_sync_blob(user_id: str) -> Optional[dict]:
 
 
 def save_sync_blob(user_id: str, blob: dict) -> None:
-    try:
-        with open(sync_path(user_id), "w") as f:
-            json.dump(blob, f, indent=2)
-    except Exception as e:
-        logger.error(f"Failed to write sync blob for {user_id}: {e}")
-        raise
+    """Unsafe unversioned writes remain disabled, including internal callers."""
+    raise RuntimeError("Legacy sync writes are disabled; use SyncStore.write with a revision")
 
 
 # --- Apple identity-token verification ---
