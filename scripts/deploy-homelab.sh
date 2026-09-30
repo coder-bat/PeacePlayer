@@ -55,7 +55,18 @@ docker compose version >/dev/null 2>&1 || { echo "docker compose plugin missing"
 avail_kb=$(df --output=avail / | tail -1)
 need_kb=$(( 2200 * 1024 ))
 [ "$avail_kb" -ge "$need_kb" ] || { echo "insufficient disk: need ~2.2G, have $((avail_kb/1024))G"; exit 1; }
-if ss -lnt 2>/dev/null | grep -q ':8181'; then echo "port 8181 is already in use"; exit 1; fi
+if ss -lnt 2>/dev/null | grep -q ':8181'; then
+  # A running container of ours legitimately holds this port during a redeploy.
+  # Only a *foreign* listener is a conflict -- a squatter would silently steal
+  # traffic from the new release while the deploy still reported success.
+  if docker ps --filter name=peaceplayer-backend --filter status=running -q 2>/dev/null | grep -q .; then
+    echo "  port   8181 held by the existing container (redeploy)"
+  else
+    echo "port 8181 is in use by something that is not this service"; exit 1
+  fi
+else
+  echo "  port   8181 free"
+fi
 # rsync is required on the *host* as well: the sender invokes the receiver's
 # rsync binary over ssh, and a minimal Debian image has none. Installing it here
 # keeps repeat deploys delta-transferred instead of re-sending 1.6G each time.
