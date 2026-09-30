@@ -10,11 +10,29 @@ import Foundation
 import UIKit
 import UserNotifications
 
-final class WalkDJAppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
+// 2026-09-26: iOS 27 enforces scene lifecycle adoption at runtime.
+// SwiftUI's WindowGroup handles window creation, but with
+// @UIApplicationDelegateAdaptor iOS still needs a real
+// UIWindowSceneDelegate to satisfy the check — without one, real
+// devices SIGTRAP at launch with NoSceneLifecycleAdoption. The
+// scene(_:willConnectTo:) body is intentionally empty: SwiftUI
+// creates and owns the window via WindowGroup.
+final class WalkDJAppDelegate: NSObject, UIApplicationDelegate, UIWindowSceneDelegate, UNUserNotificationCenterDelegate {
+
+    func scene(
+        _ scene: UIScene,
+        willConnectTo session: UISceneSession,
+        options connectionOptions: UIScene.ConnectionOptions
+    ) {
+        // SwiftUI's WindowGroup creates and owns the window; this
+        // method exists only so iOS 27's scene-adoption check has
+        // a UIWindowSceneDelegate to point at.
+    }
     func application(
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
+        guard !YTAudioPlayerApp.isRunningTests else { return true }
         UNUserNotificationCenter.current().delegate = self
         AdaptiveWalkDJManager.shared.configure()
 

@@ -74,6 +74,16 @@ class PlaylistManager: ObservableObject {
     }
     
     // MARK: - Playlist CRUD
+
+    /// The backup adapter uses this seam so restored data reaches the UI store.
+    func replaceFromBackup(playlists: [Playlist], favorites: [String]) throws {
+        let playlistData = try JSONEncoder().encode(playlists)
+        let favoritesData = try JSONEncoder().encode(Set(favorites))
+        defaults.set(playlistData, forKey: Keys.playlists)
+        defaults.set(favoritesData, forKey: Keys.likedTracks)
+        self.playlists = playlists
+        self.likedTracks = Set(favorites)
+    }
     
     @discardableResult
     func createPlaylist(name: String, description: String? = nil, thumbnailURL: String? = nil) -> Playlist {

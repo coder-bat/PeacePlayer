@@ -42,20 +42,7 @@ class APIService {
     // this, tapping "Save" in the backend-host row is enough —
     // no restart, and the "Test connection" button below the
     // text field sees the new URL on the same frame.
-    var baseURL: String {
-        if let override = UserDefaults.standard.string(forKey: APIService.baseURLOverrideDefaultsKey),
-           !override.isEmpty {
-            return override
-        }
-        #if targetEnvironment(simulator)
-        return "http://localhost:8181"
-        #else
-        // Default for device builds: Tailscale IP. Override
-        // with the UserDefaults key above if your Mac is on a
-        // different network.
-        return "http://100.77.213.42:8181"
-        #endif
-    }
+    var baseURL: String { BackendConfiguration.shared.identity.origin.absoluteString }
 
     // S17 (CV-3): the auth token is stored in Keychain by
     // AuthService under the same key both sides agree on. We
@@ -72,7 +59,7 @@ class APIService {
     static let authTokenKeychainKey = "peaceplayer.session_token"
     private let keychain = KeychainHelper.shared
     private var currentAuthToken: String? {
-        keychain.read(APIService.authTokenKeychainKey)
+        APIService.sessionToken(for: BackendConfiguration.shared.identity.origin)
     }
 
     private let session: URLSession
@@ -117,7 +104,19 @@ class APIService {
         for request: URLRequest,
         attempt: Int = 1
     ) -> AnyPublisher<(data: Data, response: URLResponse), URLError> {
+        let identity = BackendConfiguration.shared.identity
+        let token = APIService.sessionToken(for: identity.origin)
+        guard let url = request.url, (try? identity.resolve(url.absoluteString)) != nil,
+              request.value(forHTTPHeaderField: "Authorization") == token.map({ "Bearer " + $0 }) else {
+            return Fail(error: URLError(.cancelled)).eraseToAnyPublisher()
+        }
         return session.dataTaskPublisher(for: request)
+            .tryMap { output in
+                guard BackendConfiguration.shared.isCurrent(identity),
+                      APIService.sessionToken(for: identity.origin) == token else { throw URLError(.cancelled) }
+                return output
+            }
+            .mapError { ($0 as? URLError) ?? URLError(.unknown) }
             .catch { [weak self] error -> AnyPublisher<(data: Data, response: URLResponse), URLError> in
                 guard let self = self else {
                     return Fail(error: error).eraseToAnyPublisher()
@@ -132,7 +131,7 @@ class APIService {
         attempt: Int,
         originalError: URLError
     ) -> AnyPublisher<(data: Data, response: URLResponse), URLError> {
-        if attempt > maxRetries {
+        if attempt > maxRetries || originalError.code == .cancelled {
             return Fail(error: originalError).eraseToAnyPublisher()
         }
         let delay = retryDelay * pow(2.0, Double(attempt - 1))
@@ -162,10 +161,20 @@ class APIService {
     // case. This is what makes the header the source of truth
     // instead of the previous ad-hoc SyncService/AuthService
     // inline headers.
+    static let authOriginKeychainKey = "peaceplayer.session_origin"
+
+    static func sessionToken(for url: URL) -> String? {
+        let identity = BackendConfiguration.shared.identity
+        guard (try? identity.resolve(url.absoluteString)) != nil,
+              KeychainHelper.shared.read(authOriginKeychainKey) == identity.origin.absoluteString else { return nil }
+        return KeychainHelper.shared.read(authTokenKeychainKey)
+    }
+
     static func addAuthHeader(to request: inout URLRequest) {
-        if let token = KeychainHelper.shared.read(APIService.authTokenKeychainKey),
-           !token.isEmpty {
+        if let url = request.url, let token = sessionToken(for: url), !token.isEmpty {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        } else {
+            request.setValue(nil, forHTTPHeaderField: "Authorization")
         }
     }
 
@@ -313,7 +322,8 @@ class APIService {
         // FormatNotSupported) was because iOS's hardware
         // decoder can't handle YouTube's specific Opus
         // profile.
-        guard let url = URL(string: "\(baseURL)/stream/\(videoId)") else {
+        let identity = BackendConfiguration.shared.identity
+        guard let url = URL(string: "\(identity.origin.absoluteString)/stream/\(videoId)") else {
             return Fail(error: APIError.invalidURL).eraseToAnyPublisher()
         }
         var request = URLRequest(url: url)
@@ -344,12 +354,11 @@ class APIService {
                 }
                 do {
                     let info = try JSONDecoder().decode(StreamInfo.self, from: data)
-                    let resolved = self.resolveStreamURL(info.streamUrl)
-                    print("getStreamUrl " + videoId + " -> " + String(resolved.prefix(120)))
+                    let resolved = try identity.resolve(info.streamUrl).absoluteString
                     return Just(StreamInfo(
                         streamUrl: resolved,
                         mimeType: info.mimeType,
-                        bitrate: info.bitrate
+                        bitrate: info.bitrate, replayGain: info.replayGain
                     )).setFailureType(to: APIError.self).eraseToAnyPublisher()
                 } catch {
                     return Fail(error: APIError.decodingError(error)).eraseToAnyPublisher()
@@ -357,18 +366,6 @@ class APIService {
             }
             .receive(on: DispatchQueue.main)
             .eraseToAnyPublisher()
-    }
-
-    /// S17-H: resolve a path-only or path-with-query stream URL
-    /// returned by /stream against the current baseURL. /stream
-    /// returns e.g. "/audio/VIDEOID.m4a?token=..." which needs
-    /// the baseURL scheme + host prepended for AVPlayer.
-    private func resolveStreamURL(_ streamUrl: String) -> String {
-        if let abs = URL(string: streamUrl), abs.scheme != nil {
-            return abs.absoluteString
-        }
-        let base = baseURL.hasSuffix("/") ? String(baseURL.dropLast()) : baseURL
-        return base + streamUrl
     }
 
     func downloadTrack(_ track: Track) -> AnyPublisher<DownloadResponse, APIError> {

@@ -1329,7 +1329,7 @@ class PlayerState: ObservableObject {
         // Create player item
         print("🔊 Creating URL from streamUrl...")
         guard let url = URL(string: item.streamUrl) else {
-            print("❌ Failed to create URL from: \(item.streamUrl.prefix(50))...")
+            print("❌ Failed to create playback URL")
             // C-3 fix: surface the error to the user. Previously this
             // returned silently and the play button just sat in loading
             // state with no feedback.
@@ -1337,7 +1337,7 @@ class PlayerState: ObservableObject {
             ErrorHandler.shared.show(.playbackFailed("Invalid URL"))
             return
         }
-        print("✅ URL created: \(url.absoluteString.prefix(80))...")
+        print("✅ Playback URL created")
         
         print("🔊 Creating AVPlayerItem...")
         

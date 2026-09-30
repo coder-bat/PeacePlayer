@@ -1500,79 +1500,118 @@ struct GridTrackCell: View {
             Color.clear
                 .aspectRatio(1, contentMode: .fit)
                 .overlay(
-                    ZStack {
-                        RoundedRectangle(cornerRadius: CornerRadius.md)
-                            .fill(Theme.cyberSurface)
+                    // 2026-08-31 / S18-LIBRARY-GRID-OVERFLOW-6: the
+                    // previous approach (Color.clear + .overlay + a
+                    // ZStack with .frame(maxWidth: .infinity,
+                    // maxHeight: .infinity)) didn't actually cap
+                    // the artwork to the column-width square. The
+                    // .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    // is a *flexible* frame — it tells the child
+                    // "be as large as the parent allows", but the
+                    // child (the CachedAsyncImage, whose body is
+                    // a ZStack with no frame) still reports its
+                    // intrinsic content size (the image's natural
+                    // pixel size with `.resizable().aspectRatio(.fill)`
+                    // applied — e.g. 290×163 for a 16:9, 163×290
+                    // for a 9:16) as its preferred size. The frame
+                    // then takes that preferred size, and the
+                    // artwork overflows the cell. The clipShape on
+                    // the ZStack hides the visual bleed, but the
+                    // LAYOUT is still wrong.
+                    //
+                    // The fix that actually works (mirrors the
+                    // working SearchView ArtworkThumbnail at
+                    // line ~766 + PlaylistSearchRow's fixed
+                    // `.frame(width: 50, height: 50)` wrapper at
+                    // line ~657): a real FIXED-SIZE frame on the
+                    // artwork, based on the actual cell size, not
+                    // a flexible maxWidth: .infinity frame.
+                    //
+                    // We do that with a GeometryReader. The
+                    // GeometryReader takes the overlay's bounds
+                    // (= the column-width square, established by
+                    // the outer Color.clear.aspectRatio(1, .fit)),
+                    // and the ZStack inside gets a fixed
+                    // `.frame(width: height:)` that hard-caps it
+                    // to the cell. The CachedAsyncImage inside
+                    // is bounded to that, and `.clipped()` on
+                    // the ZStack enforces the visual cap. Result:
+                    // the artwork's LAYOUT frame is the cell
+                    // square, no overflow in any direction.
+                    GeometryReader { geo in
+                        ZStack {
+                            RoundedRectangle(cornerRadius: CornerRadius.md)
+                                .fill(Theme.cyberSurface)
 
-                        // Artwork image
-                        if let url = track.thumbnailURL {
-                            CachedAsyncImage(url: url) {
+                            // Artwork image
+                            if let url = track.thumbnailURL {
+                                CachedAsyncImage(url: url) {
+                                    Image(systemName: "music.note")
+                                        .font(.system(size: 40))
+                                        .foregroundColor(Theme.cyberDim)
+                                }
+                                // Fixed-size frame, not maxWidth:
+                                // .infinity. The CachedAsyncImage is
+                                // now hard-capped to the cell's actual
+                                // width/height (the GeometryReader's
+                                // size = the overlay's size = the
+                                // column-width square). .clipped()
+                                // is belt-and-suspenders against any
+                                // drawing outside the frame.
+                                .frame(width: geo.size.width, height: geo.size.height)
+                                .clipped()
+                            } else {
                                 Image(systemName: "music.note")
                                     .font(.system(size: 40))
                                     .foregroundColor(Theme.cyberDim)
                             }
-                        } else {
-                            Image(systemName: "music.note")
-                                .font(.system(size: 40))
-                                .foregroundColor(Theme.cyberDim)
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        }
 
-                        // Cyberpunk border
-                        RoundedRectangle(cornerRadius: CornerRadius.md)
-                            .stroke(isPlaying ? Theme.cyberCyan.opacity(0.5) : Theme.cyberCyan.opacity(0.1), lineWidth: 1)
+                            // Cyberpunk border
+                            RoundedRectangle(cornerRadius: CornerRadius.md)
+                                .stroke(isPlaying ? Theme.cyberCyan.opacity(0.5) : Theme.cyberCyan.opacity(0.1), lineWidth: 1)
 
-                        if memoryPreview != nil {
-                            SongMemoryBadge(text: nil)
-                                .padding(8)
-                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                        }
+                            if memoryPreview != nil {
+                                SongMemoryBadge(text: nil)
+                                    .padding(8)
+                                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                            }
 
-                        // Playing indicator overlay
-                        if isPlaying {
-                            Color.black.opacity(0.3)
+                            // Playing indicator overlay
+                            if isPlaying {
+                                Color.black.opacity(0.3)
 
-                            CyberPlayingBars()
-                                .frame(width: 30, height: 30)
-                        }
+                                CyberPlayingBars()
+                                    .frame(width: 30, height: 30)
+                            }
 
-                        if !isEditing && !isPlaying {
-                            Button(action: onPlay) {
-                                Image(systemName: "play.fill")
-                                    .font(.system(size: 24))
-                                    .foregroundColor(.white)
-                                    .frame(width: 50, height: 50)
-                                    .background(Theme.cyberCyan.opacity(0.8))
-                                    .clipShape(Circle())
-                                    .shadow(color: Theme.cyberCyan.opacity(0.5), radius: 10, x: 0, y: 0)
+                            if !isEditing && !isPlaying {
+                                Button(action: onPlay) {
+                                    Image(systemName: "play.fill")
+                                        .font(.system(size: 24))
+                                        .foregroundColor(.white)
+                                        .frame(width: 50, height: 50)
+                                        .background(Theme.cyberCyan.opacity(0.8))
+                                        .clipShape(Circle())
+                                        .shadow(color: Theme.cyberCyan.opacity(0.5), radius: 10, x: 0, y: 0)
+                                }
+                            }
+
+                            if isEditing {
+                                Circle()
+                                    .fill(isSelected ? Theme.cyberCyan : Theme.cyberDim.opacity(0.3))
+                                    .frame(width: 28, height: 28)
+                                    .overlay(
+                                        Image(systemName: isSelected ? "checkmark" : "")
+                                            .font(.system(size: 14, weight: .bold))
+                                            .foregroundColor(Theme.cyberBackground)
+                                    )
+                                    .padding(8)
+                                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
                             }
                         }
-
-                        if isEditing {
-                            Circle()
-                                .fill(isSelected ? Theme.cyberCyan : Theme.cyberDim.opacity(0.3))
-                                .frame(width: 28, height: 28)
-                                .overlay(
-                                    Image(systemName: isSelected ? "checkmark" : "")
-                                        .font(.system(size: 14, weight: .bold))
-                                        .foregroundColor(Theme.cyberBackground)
-                                )
-                                .padding(8)
-                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-                        }
+                        .frame(width: geo.size.width, height: geo.size.height)
+                        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
                     }
-                    // 2026-08-14 / OVERFLOW-4: bound the
-                    // ZStack to the overlay's size. Without
-                    // this, the CachedAsyncImage's natural
-                    // 720×720 intrinsic size propagates up
-                    // and the whole cell overflows the
-                    // column. With this, the ZStack's
-                    // layout frame is the overlay's size
-                    // (column-width square) and the
-                    // CachedAsyncImage is constrained
-                    // inside it.
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
                 )
 
             VStack(alignment: .leading, spacing: 2) {

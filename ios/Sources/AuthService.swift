@@ -26,7 +26,8 @@ final class AuthService: NSObject, ObservableObject {
     @Published private(set) var isSigningIn: Bool = false
     @Published private(set) var lastError: String?
 
-    private let baseURL: URL
+    private var configurationObserver: NSObjectProtocol?
+    private(set) var sessionGeneration: UInt64 = 0
     private let keychain = KeychainHelper.shared
     private let sessionTokenKey = "peaceplayer.session_token"
     private let userIdKey = "peaceplayer.user_id"
@@ -37,18 +38,25 @@ final class AuthService: NSObject, ObservableObject {
     private var currentDelegate: AppleIDDelegate?
 
     private override init() {
-        // 2026-06-28: read the same baseURL as APIService. The
-        // previous hardcoded localhost was unreachable on real
-        // devices — `localhost` on an iPhone is the phone itself,
-        // not the Mac. The IP in APIService.baseURL is the
-        // Tailscale address of the backend host.
-        self.baseURL = URL(string: APIService.shared.baseURL) ?? URL(string: "http://localhost:8181")!
         super.init()
+        configurationObserver = NotificationCenter.default.addObserver(
+            forName: BackendConfiguration.didChange, object: BackendConfiguration.shared, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.invalidateSession()
+                StreamURLCache.shared.clear()
+            }
+        }
+
     }
 
     // MARK: - Lifecycle
 
     func bootstrap() {
+        guard keychain.read(APIService.authOriginKeychainKey) == BackendConfiguration.shared.identity.origin.absoluteString else {
+            invalidateSession()
+            return
+        }
         guard
             let _ = keychain.read(sessionTokenKey),
             let userId = keychain.read(userIdKey)
@@ -75,6 +83,8 @@ final class AuthService: NSObject, ObservableObject {
     }
 
     func signIn() async {
+        let startingBackend = BackendConfiguration.shared.identity
+        let startingGeneration = sessionGeneration
         isSigningIn = true
         lastError = nil
         defer { isSigningIn = false }
@@ -92,6 +102,7 @@ final class AuthService: NSObject, ObservableObject {
         }
 
         do {
+            guard BackendConfiguration.shared.isCurrent(startingBackend), sessionGeneration == startingGeneration else { return }
             try await postToBackend(result: result)
         } catch {
             lastError = "Server sign-in failed: \(error.localizedDescription)"
@@ -99,17 +110,22 @@ final class AuthService: NSObject, ObservableObject {
     }
 
     func signOut() async {
-        if keychain.read(sessionTokenKey) != nil {
-            _ = try? await postSignOut()
-        }
-        // 2026-06-28 (Phase 3): cancel any in-flight sync so we
-        // don't keep writing to a now-invalid session.
+        var request = URLRequest(url: BackendConfiguration.shared.identity.url(path: "/auth/signout"))
+        request.httpMethod = "POST"
+        APIService.addAuthHeader(to: &request)
+        invalidateSession()
+        _ = try? await URLSession.shared.data(for: request)
+    }
+
+    func invalidateSession() {
+        sessionGeneration &+= 1
         SyncService.shared.handleSignOut()
         clearSession()
         isAuthenticated = false
     }
 
     private func clearSession() {
+        keychain.delete(APIService.authOriginKeychainKey)
         keychain.delete(sessionTokenKey)
         keychain.delete(userIdKey)
         keychain.delete(emailKey)
@@ -161,7 +177,9 @@ final class AuthService: NSObject, ObservableObject {
     }
 
     private func postToBackend(result: AppleIDResult) async throws {
-        var request = URLRequest(url: baseURL.appendingPathComponent("/auth/apple"))
+        let identity = BackendConfiguration.shared.identity
+        let generation = sessionGeneration
+        var request = URLRequest(url: identity.url(path: "/auth/apple"))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
@@ -179,7 +197,11 @@ final class AuthService: NSObject, ObservableObject {
             throw AppleIDError.backend(detail)
         }
 
+        guard BackendConfiguration.shared.isCurrent(identity), sessionGeneration == generation else {
+            throw CancellationError()
+        }
         let decoded = try JSONDecoder().decode(AppleSignInResponse.self, from: data)
+        keychain.write(APIService.authOriginKeychainKey, identity.origin.absoluteString)
 
         keychain.write(sessionTokenKey, decoded.sessionToken)
         keychain.write(userIdKey, decoded.userId)
@@ -189,6 +211,12 @@ final class AuthService: NSObject, ObservableObject {
             keychain.delete(emailKey)
         }
         keychain.write(expiresAtKey, String(decoded.expiresAt))
+        guard keychain.read(sessionTokenKey) == decoded.sessionToken,
+              keychain.read(userIdKey) == decoded.userId,
+              keychain.read(APIService.authOriginKeychainKey) == identity.origin.absoluteString else {
+            invalidateSession()
+            throw AppleIDError.backend("Could not securely save sign-in. Please try again.")
+        }
 
         self.userId = decoded.userId
         self.email = decoded.email
@@ -205,7 +233,7 @@ final class AuthService: NSObject, ObservableObject {
         // S17 (CV-3): use the central APIService.addAuthHeader
         // helper so the Bearer-token construction is in one
         // place. The keychain read happens inside the helper.
-        var request = URLRequest(url: baseURL.appendingPathComponent("/auth/signout"))
+        var request = URLRequest(url: BackendConfiguration.shared.identity.url(path: "/auth/signout"))
         request.httpMethod = "POST"
         APIService.addAuthHeader(to: &request)
         let (data, _) = try await URLSession.shared.data(for: request)

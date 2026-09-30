@@ -50,14 +50,26 @@ final class NetworkMonitor: ObservableObject {
     // banner is technically correct, but the user reads it as
     // a false positive because the backend is actually fine.
     //
-    // The fix: don't show the banner on the FIRST failed
-    // probe. Schedule a quick retry 1.5s later. Only flip
-    // `isBackendReachable` to false after the SECOND
-    // consecutive failure. A successful probe resets the
-    // counter, so a healthy backend never triggers the
-    // banner at all.
+    // 2026-09-14 (Mavis race-condition fix): the 5s /health
+    // timeout was still racing Tailscale wakeup handshakes
+    // (the OS reports `path.status == .satisfied` as soon as
+    // the utun interface is up, but the tunnel routing isn't
+    // ready until the key exchange completes — typically
+    // 5–10s on cold launch, occasionally 15–20s). The banner
+    // would show even when the Mac + backend were fine. Fix:
+    //   1. Bump /health timeout to 30s to match APIService's
+    //      data-path timeout (both hit the same host — the
+    //      health probe was 6× more aggressive than the call
+    //      that actually mattered).
+    //   2. Lengthen the silent retry from 1.5s → 5s so we
+    //      give Tailscale more room to finish its handshake.
+    //   3. Require 3 consecutive failures (was 2) before
+    //      flipping the banner. A single healthy probe resets
+    //      the counter, so this only affects the wakeup
+    //      window — sustained outages still get caught in
+    //      ~10–15s, well within the 60s periodic cadence.
     private var consecutiveBackendFailures: Int = 0
-    private let backendRetryDelayNanos: UInt64 = 1_500_000_000  // 1.5s
+    private let backendRetryDelayNanos: UInt64 = 5_000_000_000  // 5s
     /// True while a retry is in flight, so the periodic
     /// timer doesn't cancel the retry and reset the user's
     /// grace window.
@@ -149,7 +161,9 @@ final class NetworkMonitor: ObservableObject {
     }
 
     private func runHealthCheck() async {
-        let baseURL = await MainActor.run { APIService.shared.baseURL }
+        guard !YTAudioPlayerApp.isRunningTests else { return }
+        let identity = BackendConfiguration.shared.identity
+        let baseURL = identity.origin.absoluteString
         guard let url = URL(string: "\(baseURL)/health") else {
             await MainActor.run {
                 self.recordFailure()
@@ -159,12 +173,18 @@ final class NetworkMonitor: ObservableObject {
         }
 
         var request = URLRequest(url: url)
-        // 5s timeout. The backend's /health is a tiny
-        // ~100-byte JSON response; on a healthy LAN it
-        // returns in <50ms. 5s is a generous ceiling for
-        // "Tailscale is up but the Mac is asleep and slow
-        // to wake the listener".
-        request.timeoutInterval = 5.0
+        // 30s timeout. Matches APIService's
+        // timeoutIntervalForRequest so the health probe and
+        // the actual data request have the same transport
+        // ceiling — they hit the same host, so the only
+        // reason one would fail while the other succeeds is
+        // a request-side timeout mismatch. The backend's
+        // /health is a tiny ~100-byte JSON response; on a
+        // healthy LAN it returns in <50ms. 30s is the
+        // ceiling for "Tailscale is still finishing its
+        // key exchange on wakeup" — empirically 5–20s on
+        // cold launch, occasionally longer.
+        request.timeoutInterval = 30.0
         request.httpMethod = "GET"
 
         let reachable: Bool
@@ -183,6 +203,7 @@ final class NetworkMonitor: ObservableObject {
         }
 
         await MainActor.run {
+            guard BackendConfiguration.shared.isCurrent(identity) else { return }
             self.lastBackendCheck = Date()
             if reachable {
                 self.recordSuccess()
@@ -214,17 +235,26 @@ final class NetworkMonitor: ObservableObject {
     /// backend is just slow to wake up.
     private func recordFailure() {
         consecutiveBackendFailures += 1
-        if consecutiveBackendFailures >= 2 {
+        if consecutiveBackendFailures >= 3 {
             // Genuine outage — the banner is fair signal.
+            // 3 consecutive failures means the retry (at
+            // 5s after the 1st failure, so ~5s + 30s + 5s +
+            // 30s = ~70s window for the 3rd failure to
+            // land) has also failed, which is well past any
+            // reasonable Tailscale wakeup time.
             retryInFlight = false
             isBackendReachable = false
         } else {
-            // First failure: silent retry.
+            // 1st or 2nd failure: silent retry. Banner
+            // stays hidden — Tailscale key exchange on
+            // wakeup can easily eat 5–20s, and we don't
+            // want a transient handshake blip to look
+            // like a real outage.
             isBackendReachable = true
             if !retryInFlight {
                 retryInFlight = true
                 Task { [weak self] in
-                    try? await Task.sleep(nanoseconds: self?.backendRetryDelayNanos ?? 1_500_000_000)
+                    try? await Task.sleep(nanoseconds: self?.backendRetryDelayNanos ?? 5_000_000_000)
                     await self?.retryProbe()
                 }
             }

@@ -240,7 +240,7 @@ final class QueueController {
 
         if nextIndex < state.queue.count {
             let nextItem = state.queue[nextIndex]
-            print("⏭️ Playing next: \(nextItem.track.title), streamUrl: \(nextItem.streamUrl.prefix(50))...")
+            print("⏭️ Playing next: \(nextItem.track.title)")
 
             // Check if we should use crossfade
             if useCrossfade && CrossfadeManager.shared.isEnabled {

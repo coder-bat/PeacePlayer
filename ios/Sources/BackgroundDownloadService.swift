@@ -67,6 +67,8 @@ class BackgroundDownloadService: NSObject {
         let videoId: String
         let track: Track
         let destinationURL: URL
+        let backend: BackendIdentity
+        let token: String?
         var progress: Double = 0
     }
 
@@ -95,6 +97,8 @@ class BackgroundDownloadService: NSObject {
     // MARK: - Public Methods
 
     func download(track: Track, streamUrl: String) {
+        let identity = BackendConfiguration.shared.identity
+        let token = APIService.sessionToken(for: identity.origin)
         downloadQueue.async { [weak self] in
             guard let self = self else { return }
 
@@ -103,7 +107,9 @@ class BackgroundDownloadService: NSObject {
                 return
             }
 
-            guard let url = URL(string: streamUrl) else {
+            guard BackendConfiguration.shared.isCurrent(identity),
+                  APIService.sessionToken(for: identity.origin) == token,
+                  let url = try? identity.resolve(streamUrl) else {
                 self.delegate?.downloadDidFail(videoId: track.videoId, error: DownloadError.invalidURL)
                 return
             }
@@ -116,7 +122,9 @@ class BackgroundDownloadService: NSObject {
             let task = DownloadTask(
                 videoId: track.videoId,
                 track: track,
-                destinationURL: destinationURL
+                destinationURL: destinationURL,
+                backend: identity,
+                token: token
             )
 
             self.activeDownloads[track.videoId] = task
@@ -265,6 +273,12 @@ extension BackgroundDownloadService: URLSessionDownloadDelegate {
     func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
         guard let videoId = downloadTask.taskDescription,
               let task = activeDownloads[videoId] else { return }
+        guard BackendConfiguration.shared.isCurrent(task.backend),
+              APIService.sessionToken(for: task.backend.origin) == task.token else {
+            activeDownloads.removeValue(forKey: videoId)
+            errorSubject.send((videoId, URLError(.cancelled)))
+            return
+        }
 
         // S17-H / DOWNLOAD-STATUS-CHECK (2026-08-08): URLSession
         // calls didFinishDownloadingTo for ANY 2xx-5xx response,

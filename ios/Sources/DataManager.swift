@@ -66,6 +66,14 @@ class DataManager: ObservableObject {
     }
     
     // MARK: - Recently Played
+
+    func replaceRecentFromBackup(_ entries: [RecentTrack]) throws {
+        let data = try encoder.encode(entries)
+        progressSaveTimer?.invalidate()
+        pendingProgressUpdates.removeAll()
+        defaults.set(data, forKey: Keys.recentlyPlayed)
+        recentlyPlayed = entries
+    }
     
     func addToRecentlyPlayed(_ track: Track, playbackProgress: Double = 0) {
         var updated = recentlyPlayed.filter { $0.videoId != track.videoId }

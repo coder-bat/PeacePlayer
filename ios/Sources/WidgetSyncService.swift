@@ -65,6 +65,7 @@ final class WidgetSyncService {
         setupDarwinObservers()
         observeLibraryChanges()
         observeDownloadChanges()
+        observePlaybackChanges()
     }
 
     // MARK: Darwin Observers
@@ -201,6 +202,102 @@ final class WidgetSyncService {
             return "\(firstTitle) +\(total - 1) more"
         }
         return firstTitle
+    }
+
+    // MARK: Playback Observation (2026-09-14)
+
+    /// Subscribe to PlayerState's published playback fields so the widget
+    /// snapshot stays in sync even when `playbackState` flips outside the
+    /// normal `updateRemoteControls()` callsites.
+    ///
+    /// ## Why
+    ///
+    /// `NowPlayingService.performNowPlayingWrite` (in
+    /// `Sources/NowPlayingService.swift:368`) writes the App Group
+    /// snapshot for the widget. It is called from the canonical play/
+    /// pause/track-change callsites in `PlayerState` (which all funnel
+    /// through `updateRemoteControls()` → `NowPlayingController` →
+    /// `NowPlayingService`). But two paths flip `playbackState`
+    /// WITHOUT going through `updateRemoteControls()`:
+    ///
+    /// 1. `audioSessionController.onInterruptionBegan` (phone call,
+    ///    Siri, alarm) — wired in `PlayerState.init` to just set
+    ///    `self?.playbackState = .paused`. The snapshot stays stale
+    ///    at `isPlaying: true`, so the widget keeps showing the
+    ///    pause button while no music is playing.
+    ///
+    /// 2. The `.podcastEpisode` branch of `handleTrackCompletion` —
+    ///    calls `clearNowPlaying()` (which only clears the Lock
+    ///    Screen / Control Center, NOT the App Group snapshot) and
+    ///    sets `playbackState = .paused`. Same stale-snapshot
+    ///    symptom.
+    ///
+    /// ## Pattern
+    ///
+    /// `LiveActivityManager.swift:62-66` already uses this exact
+    /// approach for the lock-screen Live Activity:
+    ///
+    ///     PlayerState.shared.$playbackState
+    ///         .sink { ... updateActivityState() }
+    ///
+    /// The widget sync layer was missing the mirror. Adding it here
+    /// covers both missing callsites plus any future code that flips
+    /// `playbackState` directly. `NowPlayingService.updateNowPlaying`
+    /// is still called from the existing callsites — the worst case
+    /// is two writes per transition (last write wins), which is
+    /// harmless.
+    ///
+    /// No debounce: `playbackState`, `currentItem`, and `volume` are
+    /// discrete user-driven events (pause tap, track change, volume
+    /// tap from the widget). The 1Hz progress tick is NOT subscribed
+    /// — progress updates are covered by the existing
+    /// `NowPlayingService.performNowPlayingWrite` path.
+    private func observePlaybackChanges() {
+        let ps = PlayerState.shared
+        let triggers: [AnyPublisher<Void, Never>] = [
+            ps.$playbackState.map { _ in () }.eraseToAnyPublisher(),
+            ps.$currentItem.map   { _ in () }.eraseToAnyPublisher(),
+            ps.$volume.map        { _ in () }.eraseToAnyPublisher(),
+        ]
+        Publishers.MergeMany(triggers)
+            .sink { [weak self] _ in self?.syncSnapshotFromPlayerState() }
+            .store(in: &cancellables)
+    }
+
+    /// Rebuild the App Group snapshot from the current PlayerState
+    /// and reload the nowPlayingFull widget timeline. Mirrors the
+    /// snapshot shape built by `NowPlayingService.performNowPlayingWrite`
+    /// so the two writers agree field-for-field.
+    ///
+    /// No `currentItem` → clear the snapshot to the empty state. The
+    /// widget renders `IdleContent` ("NOTHING PLAYING") instead of
+    /// `PlayingContent` with stale pause-button semantics.
+    private func syncSnapshotFromPlayerState() {
+        let ps = PlayerState.shared
+        guard let item = ps.currentItem else {
+            SharedNowPlayingState.update(snapshot: .empty)
+            WidgetCenter.shared.reloadTimelines(ofKind: WidgetKind.nowPlayingFull)
+            return
+        }
+
+        let track = item.track
+        let duration = Double(track.durationSeconds)
+        let nextIdx = ps.currentIndex + 1
+        let nextTrack = nextIdx < ps.queue.count ? ps.queue[nextIdx].track : nil
+
+        SharedNowPlayingState.update(snapshot: NowPlayingSnapshot(
+            title: track.title,
+            artist: track.displayArtist,
+            artworkURLString: track.artworkURL?.absoluteString ?? "",
+            isPlaying: ps.playbackState.isPlaying,
+            progress: duration > 0 ? ps.currentTime / duration : 0,
+            nextTitle: nextTrack?.title ?? "",
+            nextArtist: nextTrack?.displayArtist ?? "",
+            currentVolume: Float(ps.volume),
+            hasUnlockedCapsule: TimeCapsuleManager.shared.readyToOpen.count > 0,
+            downloadingTitle: snapshotDownloadingSummary()
+        ))
+        WidgetCenter.shared.reloadTimelines(ofKind: WidgetKind.nowPlayingFull)
     }
 
     // MARK: Reload All

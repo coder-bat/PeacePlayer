@@ -48,7 +48,7 @@ struct LibraryTierBadge: View {
     /// v1.9.0: only render for tracks in the .auto tier.
     /// Liked and manual tracks don't get a badge (per
     /// the plan: "Auto only (Recommended)").
-    private var tier: SmartLibraryManager.DownloadTier {
+    private var tier: DownloadTier {
         smartLibrary.tier(for: videoId)
     }
 

@@ -9,21 +9,27 @@ import CoreData
 @main
 struct YTAudioPlayerApp: App {
     @UIApplicationDelegateAdaptor(WalkDJAppDelegate.self) private var appDelegate
-    let persistenceController = PersistenceController.shared
+    private var persistenceController: PersistenceController { PersistenceController.shared }
     @Environment(\.scenePhase) private var scenePhase
 
     // Initialise singletons that must start with the app
-    private let widgetSync = WidgetSyncService.shared
-    private let adaptiveWalkDJ = AdaptiveWalkDJManager.shared
+    private var adaptiveWalkDJ: AdaptiveWalkDJManager { AdaptiveWalkDJManager.shared }
     // 2026-08-12: v1.8.0 — Smart Library (auto-download on
     // WiFi + auto-cleanup). Initialising here wires the
     // manager's NetworkMonitor + foreground observers
     // before the first view appears, so a cold launch on
     // WiFi gets an auto-download cycle within ~1s of the
     // UI rendering (subject to the 24h debounce).
-    private let smartLibrary = SmartLibraryManager.shared
+    static var isRunningTests: Bool {
+        ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil ||
+        NSClassFromString("XCTestCase") != nil
+    }
 
     init() {
+        guard !Self.isRunningTests else { return }
+        _ = WidgetSyncService.shared
+        _ = AdaptiveWalkDJManager.shared
+        _ = SmartLibraryManager.shared
         DataMigrationService.shared.performMigrationIfNeeded()
         // Sync library data immediately so widgets show correct state on launch
         WidgetSyncService.shared.syncLibraryData()
@@ -57,14 +63,19 @@ struct YTAudioPlayerApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            if Self.isRunningTests {
+                Color.clear
+            } else {
+                ContentView()
                 .environment(\.managedObjectContext, persistenceController.viewContext)
                 .ignoresSafeArea(.keyboard)
                 .onOpenURL { url in
                     handleDeepLink(url)
                 }
+            }
         }
         .onChange(of: scenePhase) { _, phase in
+            guard !Self.isRunningTests else { return }
             // UserDefaults fallback: execute any command written while app was suspended
             if phase == .active {
                 if let cmd = SharedNowPlayingState.readAndClearCommand() {

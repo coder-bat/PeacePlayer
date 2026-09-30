@@ -105,6 +105,27 @@ struct HomeView: View {
                         SmartLibraryCard()
                             .padding(.top, Spacing.lg)
 
+                        // 2026-09-08: v1.9.3 Cleanup banner.
+                        // Sits ABOVE the Smart Library card —
+                        // cleanup is the more urgent decision
+                        // (files are about to move) and the
+                        // banner shows a countdown. Both
+                        // components self-hide when their
+                        // respective pending state is nil, so
+                        // stacking them in this order is
+                        // free when neither is showing.
+                        //
+                        // 2026-09-14: v1.9.4 — added
+                        // `.padding(.top, Spacing.md)` so the
+                        // two cards read as separate surfaces
+                        // when both are showing. Without it,
+                        // they sat flush (the SmartLibraryCard
+                        // already owns Spacing.lg above it; the
+                        // cleanup banner had no top padding),
+                        // which read as one merged block.
+                        CleanupScheduledBanner()
+                            .padding(.top, Spacing.md)
+
                         // 2026-08-12: replaced the broken nested-List
                         // recently played section (which couldn't
                         // scroll past the bottom) with a "Your
@@ -117,11 +138,15 @@ struct HomeView: View {
                     }
                 }
                 .refreshable {
-                    viewModel.loadData()
-                    for _ in 0..<100 {
-                        if !viewModel.isLoading { break }
-                        try? await Task.sleep(nanoseconds: 100_000_000)
-                    }
+                    // 2026-09-14 (Mavis race-condition fix):
+                    // await the actual loadData() instead of
+                    // busy-polling isLoading. The previous poll
+                    // exited early if a previous in-flight
+                    // fetchLibrary completed first and flipped
+                    // isLoading=false — leaving the new request
+                    // running but the pull-to-refresh spinner
+                    // already dismissed.
+                    await viewModel.loadData()
                 }
 
                 if viewModel.isLoading {
@@ -223,7 +248,7 @@ struct HomeView: View {
         .task {
             guard !hasLoaded else { return }
             hasLoaded = true
-            viewModel.loadData()
+            await viewModel.loadData()
         }
         .sheet(isPresented: $showAvatarPicker) {
             AvatarPickerSheet()
@@ -704,8 +729,13 @@ struct HomeView: View {
                 // of the "cut at the bottom, can't scroll"
                 // bug. LazyVStack sizes to its content correctly
                 // and the parent ScrollView handles all scrolling.
+                // 2026-08-31: bumped from 15 to 50 so the Home
+                // "Downloaded" list shows enough tracks to be
+                // useful (most users have 20-40+ downloads;
+                // 15 felt like a teaser). LazyVStack lazy-loads
+                // rows, so the cost is bounded even at 50.
                 LazyVStack(spacing: 0) {
-                    ForEach(downloadedTracks.prefix(15)) { track in
+                    ForEach(downloadedTracks.prefix(50)) { track in
                         let isCurrentTrack = playerState.currentItem?.track.videoId == track.videoId
                         let isPlaying = isCurrentTrack && playerState.playbackState == .playing
                         let isLoading = isCurrentTrack && (playerState.playbackState == .loading || playerState.playbackState == .buffering)
@@ -753,8 +783,19 @@ struct HomeView: View {
                             }
                         )
                         .padding(.vertical, 4)
+                        // 2026-08-31: inset the rows by 20pt on each
+                        // side to align with the "Downloaded" header
+                        // above and other Home elements. The
+                        // TrackRow itself is edge-to-edge by design
+                        // (it's a shared component used in Library,
+                        // Queue, etc.), so the padding is applied at
+                        // this call site only. The divider below
+                        // already has `.padding(.horizontal, 20)` —
+                        // together they make the row content and the
+                        // separator span the same horizontal range.
+                        .padding(.horizontal, 20)
 
-                        if track.videoId != downloadedTracks.prefix(15).last?.videoId {
+                        if track.videoId != downloadedTracks.prefix(50).last?.videoId {
                             Divider()
                                 .background(Color.cyberDim.opacity(0.15))
                                 .padding(.horizontal, 20)
@@ -1672,6 +1713,16 @@ class HomeViewModel: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     private var vibeCancellables = Set<AnyCancellable>()
     private var suggestionCancellables = Set<AnyCancellable>()
+    // 2026-09-14 (Mavis race-condition fix): dedicated
+    // cancellable for the loadData fetch so re-entrant calls
+    // cancel the previous in-flight subscription cleanly
+    // (instead of leaking into the `cancellables` set).
+    // `AnyCancellable` has no `isFinished` property to prune
+    // with — so the set-based fix I tried first doesn't
+    // compile. A single cancellable reference is simpler and
+    // correctly handles the overlap case (cold-launch
+    // `.task` + quick pull-to-refresh).
+    private var librarySubscription: AnyCancellable?
 
     init() {
         favoriteArtists.$artists
@@ -1682,19 +1733,45 @@ class HomeViewModel: ObservableObject {
             .store(in: &cancellables)
     }
 
-    func loadData() {
+    func loadData() async {
         updateGreeting()
         lastPlayedTrack = dataManager.recentlyPlayed.first?.toTrack
         totalListeningTime = dataManager.totalListeningSeconds
 
-        APIService.shared.fetchLibrary()
-            .sink(receiveCompletion: { [weak self] _ in
-                self?.isLoading = false
-            },
-                  receiveValue: { [weak self] tracks in
-                self?.downloadCount = tracks.count
-            })
-            .store(in: &cancellables)
+        // 2026-09-14 (Mavis race-condition fix):
+        //   1. Cancel any previous in-flight fetch before
+        //      kicking off a new one. The previous code
+        //      stored every subscription in the
+        //      `cancellables` set, so cold launch + pull-to-
+        //      refresh in quick succession would have two
+        //      fetchLibrary publishers racing; whichever
+        //      completed first flipped isLoading=false, and
+        //      `.refreshable`'s busy-poll exited on that —
+        //      not on the actual completion of the
+        //      publisher the user just kicked off. Cancelling
+        //      the previous subscription means its receiveCompletion
+        //      fires immediately with .failure(.cancelled),
+        //      waking that call's continuation; the new call
+        //      then gets a fresh subscription and awaits its
+        //      own completion. Result: each `loadData()` is
+        //      fully isolated.
+        //   2. Convert to async/await so `.refreshable` no
+        //      longer needs the busy-poll. Pull-to-refresh
+        //      spinner now stays visible until THIS
+        //      fetchLibrary's actual completion.
+        librarySubscription?.cancel()
+
+        isLoading = true
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            librarySubscription = APIService.shared.fetchLibrary()
+                .sink(receiveCompletion: { [weak self] _ in
+                    self?.isLoading = false
+                    continuation.resume()
+                },
+                      receiveValue: { [weak self] tracks in
+                    self?.downloadCount = tracks.count
+                })
+        }
     }
 
     private func updateGreeting() {

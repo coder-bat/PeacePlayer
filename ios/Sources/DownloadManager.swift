@@ -393,6 +393,8 @@ class DownloadManager: ObservableObject {
     private let stallTickInterval: TimeInterval = 5
 
     private func performDownload(_ task: DownloadTask) {
+        let identity = BackendConfiguration.shared.identity
+        let token = APIService.sessionToken(for: identity.origin)
         // Start with a small progress to show activity
         updateProgress(for: task.id, progress: 0.05)
 
@@ -462,8 +464,14 @@ class DownloadManager: ObservableObject {
                     // Build the absolute URL. /library/{filename}
                     // is on the same backend as /stream, so we use
                     // baseURL to resolve it.
-                    let absoluteUrl = APIService.shared.baseURL + downloadUrl
-                    let urlWithToken = self.appendToken(to: absoluteUrl)
+                    guard BackendConfiguration.shared.isCurrent(identity),
+                          APIService.sessionToken(for: identity.origin) == token,
+                          let absolute = try? identity.resolve(downloadUrl) else {
+                        self.handleDownloadFailure(task.id, error: "Backend changed. Retry this download.")
+                        self.isDownloading = false
+                        return
+                    }
+                    let urlWithToken = self.appendToken(to: absolute.absoluteString)
 
                     // 2026-08-13: removed the legacy
                     //   `BackgroundDownloadService.shared.delegate = delegate`
@@ -500,7 +508,7 @@ class DownloadManager: ObservableObject {
         // {"detail":"unauthorized"}) and the iOS app saved it as
         // the audio file. BackgroundDownloadService now also checks
         // the HTTP status code and surfaces non-2xx as a failure.
-        guard let token = KeychainHelper.shared.read(APIService.authTokenKeychainKey) else {
+        guard let address = URL(string: url), let token = APIService.sessionToken(for: address) else {
             print("⚠️ appendToken: no session token in keychain (key=\(APIService.authTokenKeychainKey))")
             return url
         }
@@ -709,6 +717,19 @@ class DownloadManager: ObservableObject {
                     existingDownload.localPath = fileURL.path
                     existingDownload.fileSize = Int64((try? FileManager.default.attributesOfItem(atPath: fileURL.path)[.size] as? Int64) ?? 0)
                     existingDownload.downloadedAt = Date()
+                    // 2026-09-08: re-downloading a track that's
+                    // currently in the trash (or scheduled for
+                    // cleanup) means the new file is the
+                    // canonical one. Clear the trash + scheduled
+                    // flags so the row matches the on-disk state.
+                    // The old trashed file (if any) stays in
+                    // .trash/ and gets purged by the normal 7d
+                    // retention cycle — orphans are harmless and
+                    // the alternative (deleting on every
+                    // re-download) adds filesystem work to a
+                    // hot path.
+                    existingDownload.trashedAt = nil
+                    existingDownload.cleanupScheduledAt = nil
                     print("📀 Updated existing CDDownloadedTrack: \(track.title)")
                 } else {
                     let downloadedTrack = CDDownloadedTrack(context: context)

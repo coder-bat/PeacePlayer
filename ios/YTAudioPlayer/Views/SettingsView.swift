@@ -12,6 +12,7 @@ struct SettingsView: View {
     @StateObject private var smartLibrary = SmartLibraryManager.shared
     @State private var showClearCacheConfirmation = false
     @State private var showSignOutConfirmation = false
+    @State private var showBackendSettings = false
     @State private var showAudioSettings = false  // S13
     @State private var showEqualizer = false  // S15: real 10-band EQ
     // 2026-08-12: v1.8.2 — confirmation modal for the
@@ -357,6 +358,8 @@ struct SettingsView: View {
                         .foregroundColor(Theme.cyberCyan)
                         .textCase(.uppercase)
                 }
+
+                BackupStatusSection()
 
                 // MARK: - Audio Section (S13)
                 // S13: Audio settings (Crossfade, Gapless, Adaptive Walk
@@ -878,6 +881,35 @@ struct SettingsView: View {
                     .disabled(smartLibrary.isCleaningUp)
                     .listRowBackground(Theme.cyberSurface)
 
+                    // 2026-09-08: v1.9.3 Trash. The ask-
+                    // before-cleanup flow moves files here
+                    // (recoverable for 7d) instead of deleting
+                    // them outright. Surface a NavigationLink
+                    // whenever there's anything recoverable,
+                    // so the user can find their way back to
+                    // a "whoops I didn't mean to" track.
+                    NavigationLink {
+                        TrashView()
+                    } label: {
+                        HStack {
+                            Image(systemName: "trash")
+                                .foregroundColor(Theme.cyberMagenta)
+                            Text("Trash")
+                                .foregroundColor(.white)
+                            Spacer()
+                            if smartLibrary.trashBytes > 0 {
+                                Text(byteString(smartLibrary.trashBytes))
+                                    .font(.system(size: 12, weight: .bold, design: .monospaced))
+                                    .foregroundColor(Theme.cyberMagenta)
+                            } else {
+                                Text("Empty")
+                                    .font(.system(size: 12, design: .monospaced))
+                                    .foregroundColor(Theme.cyberTextSecondary)
+                            }
+                        }
+                    }
+                    .listRowBackground(Theme.cyberSurface)
+
                     // v1.8.2: Refresh downloads. Destructive
                     // action (deletes ALL current downloads,
                     // then re-derives from history). Gated by
@@ -953,138 +985,10 @@ struct SettingsView: View {
                     }
                 }
 
-                // MARK: - Backend Section (S15)
-                // S15: editable override for the backend host.
-                // Persisted via UserDefaults so a Mac on a different
-                // network doesn't require a rebuild. The default
-                // (Tailscale IP) is shown in the current value row
-                // when the field is empty.
-                Section {
-                    HStack {
-                        Label {
-                            Text("Backend Host")
-                        } icon: {
-                            Image(systemName: "server.rack")
-                                .foregroundColor(Theme.cyberCyan)
-                        }
-                        .foregroundColor(.white)
-
-                        Spacer()
-
-                        Text(APIService.shared.baseURL)
-                            .font(.system(size: 13, weight: .medium, design: .monospaced))
-                            .foregroundColor(Theme.cyberCyan.opacity(0.8))
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                            // S17-H: force re-render when savedTick bumps so
-                            // the display reflects the new override
-                            // immediately. .id() rebuilds the view when
-                            // its argument changes.
-                            .id("backend-host-display-\(savedTick)")
-                    }
-                    .listRowBackground(Theme.cyberSurface)
-
-                    HStack {
-                        Image(systemName: "pencil")
-                            .foregroundColor(Theme.cyberCyan)
-                            .frame(width: 22)
-                        TextField(
-                            "e.g. http://192.168.1.10:8181",
-                            text: $serverHostDraft
-                        )
-                        .textFieldStyle(.neon)
-                        .keyboardType(.URL)
-                        .autocapitalization(.none)
-                        .autocorrectionDisabled()
-                        if !serverHostDraft.isEmpty {
-                            Button {
-                                serverHostDraft = ""
-                            } label: {
-                                Image(systemName: "xmark.circle.fill")
-                                    .foregroundColor(.secondary)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                    .listRowBackground(Theme.cyberSurface)
-
-                    Button {
-                        let trimmed = serverHostDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-                        if trimmed.isEmpty {
-                            UserDefaults.standard.removeObject(forKey: APIService.baseURLOverrideDefaultsKey)
-                        } else {
-                            UserDefaults.standard.set(trimmed, forKey: APIService.baseURLOverrideDefaultsKey)
-                        }
-                        // S17-H: bump the tick so the read-only
-                        // "Backend Host" display at line 453 re-renders
-                        // and reflects the new value (it reads from
-                        // APIService.shared.baseURL on every body
-                        // evaluation; .id() ensures SwiftUI
-                        // actually re-evaluates the body).
-                        savedTick &+= 1
-                        HapticManager.success()
-                    } label: {
-                        HStack {
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundColor(Theme.cyberCyan)
-                            Text("Save")
-                                .foregroundColor(.white)
-                        }
-                    }
-                    .listRowBackground(Theme.cyberSurface)
-
-                    // S17-H (round 6): wire the "Test connection"
-                    // button into the view. The function
-                    // `runConnectionTest()` and computed
-                    // `connectionTestButtonTitle` were already
-                    // defined since S17-B but the actual Button
-                    // view was never added to the body. This
-                    // makes the helper accessible from the UI
-                    // for the first time. Pings the current
-                    // `APIService.shared.baseURL + "/health"` with
-                    // a 5s timeout (no auth) and shows the
-                    // latency / error inline.
-                    //
-                    // S17-H (round 7): when the test fails, make
-                    // the error message tappable so the user can
-                    // long-press → copy the full NSURLError text.
-                    // The 40-char cap was useless for diagnosis;
-                    // the new 200-char cap + tap-to-copy lets the
-                    // user actually paste the full error.
-                    Button {
-                        if case .error(let msg) = connectionTest {
-                            UIPasteboard.general.string = msg
-                        }
-                        runConnectionTest()
-                    } label: {
-                        HStack {
-                            Image(systemName: connectionTest.isTesting ? "hourglass" : "wifi")
-                                .foregroundColor(Theme.cyberCyan)
-                            Text(connectionTestButtonTitle)
-                                .foregroundColor(.white)
-                                .font(.system(size: 14, weight: .medium))
-                        }
-                    }
-                    .listRowBackground(Theme.cyberSurface)
-                    .disabled(connectionTest.isTesting)
-                    .contextMenu {
-                        if case .error(let msg) = connectionTest {
-                            Button {
-                                UIPasteboard.general.string = msg
-                            } label: {
-                                Label("Copy error to clipboard", systemImage: "doc.on.doc")
-                            }
-                        }
-                    }
-                } header: {
-                    Text("Backend")
-                        .font(Typography.sectionHeader)
-                        .foregroundColor(Theme.cyberCyan)
-                        .textCase(.uppercase)
-                } footer: {
-                    Text("Override the default backend host. Leave empty to use the built-in default.")
-                        .font(.caption)
-                        .foregroundColor(Theme.tertiaryText)
+                Section("Backend") {
+                    Button("Configure backend server") { showBackendSettings = true }
+                    Text(BackendConfiguration.shared.identity.origin.absoluteString)
+                        .font(.caption).foregroundStyle(.secondary)
                 }
 
                 // MARK: - About Section
@@ -1173,6 +1077,7 @@ struct SettingsView: View {
         // S13: Audio settings sheet (reuses AudioSettingsView defined in
         // FullPlayer.swift — default-internal struct, no extraction
         // needed).
+        .sheet(isPresented: $showBackendSettings) { BackendSettingsView() }
         .sheet(isPresented: $showAudioSettings) {
             AudioSettingsView()
                 .preferredColorScheme(.dark)
@@ -1209,6 +1114,13 @@ struct SettingsView: View {
         let formatter = ByteCountFormatter()
         formatter.countStyle = .file
         cacheSize = formatter.string(fromByteCount: Int64(size))
+    }
+
+    /// 2026-09-08: small helper for the Trash row's "X MB
+    /// recoverable" line. Same formatter style as the rest
+    /// of Settings.
+    private func byteString(_ bytes: Int64) -> String {
+        ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
     }
 
     private func clearCache() {

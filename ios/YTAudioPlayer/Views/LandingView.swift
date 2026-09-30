@@ -25,6 +25,7 @@ struct LandingView: View {
     @StateObject private var auth = AuthService.shared
     @State private var currentPage = 0
     @State private var buttonPressed = false
+    @State private var showBackendSettings = false
 
     /// The three onboarding pages. Add or remove freely — the
     /// pager and the page indicator re-derive from the array
@@ -65,6 +66,10 @@ struct LandingView: View {
                 brandHeader
                     .padding(.top, 24)
 
+                Button("Configure backend server") { showBackendSettings = true }
+                    .foregroundStyle(Theme.cyberCyan)
+                    .accessibilityIdentifier("preSignInBackendSettings")
+
                 Spacer(minLength: 12)
 
                 // Pager: one card visible at a time, swipe to
@@ -99,6 +104,7 @@ struct LandingView: View {
             }
             .padding(.horizontal, 16)
         }
+        .sheet(isPresented: $showBackendSettings) { BackendSettingsView() }
         .preferredColorScheme(.dark)
         .animation(.easeInOut(duration: 0.2), value: auth.lastError)
     }

@@ -1,6 +1,6 @@
 # Repair implementation evidence — 7 September 2026
 
-Status: containment implemented and tested; runtime cutover/rotation pending independent review. Full plan remains in progress.
+Status: containment reviewed, deployed from a private hashed release, and signing key rotated. Full plan remains in progress; normal device Apple sign-in remains pending.
 
 ## Baseline and preservation
 
@@ -24,3 +24,13 @@ Private evidence root: `/Users/coderbat/.codex/private-remediation/iy-music-2026
 ## Pending gates
 
 Independent containment review; verified private release copy; activate legacy guard before forcing reauthentication; credential rotation and old-session rejection against deployed service; normal Apple sign-in requires the device/user flow. Historical cleanup requires explicit shared-history authorization. Remaining phases and device acceptance remain open.
+
+## Phase 1 operational evidence
+
+Containment commit: `4a8f5f7`. Root and independent reviewer each passed the five-test suite. Private candidate contained eight modules copied from that commit and a SHA-256 manifest. Dedicated loopback HTTP preflight with an ephemeral fixture account/data root verified reads, 426 before exact-byte-preserving legacy writes, and access-log redaction.
+
+The initial service inventory was incomplete: `com.ytaudio.backend` was the actual listener using Python 3.10, while `com.peaceplayer.backend` was disabled. This duplicate blocked the first candidate startup. Strict listener-PID verification caught the mismatch. The legacy service is now disabled and unloaded; its plist is privately backed up. The enabled `com.peaceplayer.backend` is the sole port-8181 listener running the hashed candidate using the existing Python 3.11 runtime. Candidate path: `~/.local/share/peaceplayer/releases/containment-4a8f5f7`. Source hashes and launchd PID/listener ownership were checked after restart.
+
+A new random key was atomically installed into the original backend private `.env`, the candidate private `.env`, and `~/.local/share/peaceplayer/private/service.env` for future releases. No exposed-key fallback is configured. The service restarted with the guarded candidate and new configuration. Original users/sync bytes still match the protected backup. Logs now reside in a private directory. The future-release source pins the existing data and library directories; neither was moved.
+
+No existing legitimate session token was available, so live rejection of a previously issued token could not be demonstrated. Isolated old-key/new-key tests passed. Normal Apple sign-in requires the device flow and remains pending. The guard and key activated together at the final verified cutover; early unauthorized HTTP responses alone were not treated as proof of candidate activation.

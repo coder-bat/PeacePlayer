@@ -330,6 +330,13 @@ class LibraryViewModel: ObservableObject {
         isLoading = true
 
         let request: NSFetchRequest<CDDownloadedTrack> = CDDownloadedTrack.fetchRequest()
+        // 2026-09-08: filter out trashed rows. The ask-
+        // before-cleanup flow moves files to .trash/ but
+        // keeps the CoreData row (so it can be restored
+        // from Settings → Trash). The library view shouldn't
+        // show trashed tracks — they're in the trash
+        // section, not the active library.
+        request.predicate = NSPredicate(format: "trashedAt == nil")
         request.sortDescriptors = [NSSortDescriptor(keyPath: \CDDownloadedTrack.downloadedAt, ascending: false)]
         request.fetchBatchSize = 50
 

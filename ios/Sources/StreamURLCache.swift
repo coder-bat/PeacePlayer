@@ -111,7 +111,7 @@ class StreamURLCache {
     /// full reasoning — this is just the shared helper.
     private func cacheKey(for videoId: String) -> NSString {
         let baseURL = APIService.shared.baseURL
-        let token = KeychainHelper.shared.read(APIService.authTokenKeychainKey) ?? ""
+        let token = APIService.sessionToken(for: BackendConfiguration.shared.identity.origin) ?? ""
         let tokenHash = String(token.hashValue)
         return "\(baseURL)|\(tokenHash)|\(videoId)" as NSString
     }
@@ -144,6 +144,8 @@ class StreamURLCache {
         // string) so a logout doesn't leave a JWT in the file
         // system cache filenames.
         let keyRaw = self.cacheKey(for: videoId)
+        let identity = BackendConfiguration.shared.identity
+        let token = APIService.sessionToken(for: identity.origin)
 
         if let wrapper = memoryCache.object(forKey: keyRaw), !wrapper.isExpired {
             return Just(wrapper.streamInfo)
@@ -161,7 +163,7 @@ class StreamURLCache {
         activeFetchLock.lock()
         defer { activeFetchLock.unlock() }
 
-        if activeFetches[videoId] == nil {
+        if activeFetches[keyRaw as String] == nil {
             // S17 (CV-1): return the SHARED publisher, not a fresh
             // APIService call. The old code stored the cached
             // pipeline in `activeFetches` and then returned a brand
@@ -174,6 +176,13 @@ class StreamURLCache {
                 preferM4A: preferM4A,
                 quality: quality
             )
+            .tryMap { info in
+                guard BackendConfiguration.shared.isCurrent(identity), APIService.sessionToken(for: identity.origin) == token else {
+                    throw APIError.networkError(URLError(.cancelled))
+                }
+                return info
+            }
+            .mapError { ($0 as? APIError) ?? .networkError($0) }
             .handleEvents(
                 receiveOutput: { [weak self] info in
                     guard let self = self else { return }
@@ -184,7 +193,7 @@ class StreamURLCache {
                 receiveCompletion: { [weak self] _ in
                     guard let self = self else { return }
                     self.activeFetchLock.lock()
-                    self.activeFetches.removeValue(forKey: videoId)
+                    self.activeFetches.removeValue(forKey: keyRaw as String)
                     self.activeFetchLock.unlock()
                 }
             )
@@ -199,13 +208,22 @@ class StreamURLCache {
             // cancellable (to keep the upstream alive until the
             // publisher's `receiveCompletion` runs and removes it).
             let retainer = shared.sink(receiveCompletion: { _ in }, receiveValue: { _ in })
-            activeFetches[videoId] = ActiveFetch(publisher: shared, cancellable: retainer)
+            activeFetches[keyRaw as String] = ActiveFetch(publisher: shared, cancellable: retainer)
             return shared
         }
 
         // Cache miss but another caller is already in flight — return
         // the shared publisher so they get the result too.
-        return activeFetches[videoId]!.publisher
+        return activeFetches[keyRaw as String]!.publisher
+    }
+
+    func clear() {
+        memoryCache.removeAllObjects()
+        activeFetchLock.lock()
+        let running = Array(activeFetches.values)
+        activeFetches.removeAll()
+        activeFetchLock.unlock()
+        for fetch in running { fetch.cancellable.cancel() }
     }
 
     /// In-flight prefetch set. Prevents duplicate POST /prefetch

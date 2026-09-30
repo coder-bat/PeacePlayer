@@ -36,6 +36,14 @@ class TrackStore: ObservableObject {
     }
 
     /// Save multiple tracks' metadata
+    func importBackupMetadata(_ imported: [Track]) throws {
+        var merged = tracks
+        for track in imported { merged[track.videoId] = track }
+        let data = try JSONEncoder().encode(merged)
+        tracks = merged
+        defaults.set(data, forKey: tracksKey)
+    }
+
     func saveTracks(_ tracks: [Track]) {
         for track in tracks {
             self.tracks[track.videoId] = track

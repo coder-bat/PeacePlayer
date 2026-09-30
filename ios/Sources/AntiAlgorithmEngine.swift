@@ -249,7 +249,7 @@ final class AntiAlgorithmEngine: ObservableObject {
                 .sink(
                     receiveCompletion: { completion in
                         if case .failure(let err) = completion {
-                            os_log(.error, log: log, "AA: streamURL fetch failed for %{public}@: %{public}@", track.videoId, String(describing: err))
+                            os_log(.error, log: log, "AA: streamURL fetch failed for %{public}@ (code %d)", track.videoId, (err as NSError).code)
                         }
                     },
                     receiveValue: { [weak self] streamInfo in

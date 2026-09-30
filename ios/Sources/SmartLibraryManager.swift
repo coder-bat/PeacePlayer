@@ -168,6 +168,24 @@ final class SmartLibraryManager: ObservableObject {
     /// prioritises removing auto-downloaded tracks first.
     @AppStorage("smartLibrary.emergencyThresholdBytes") var emergencyThresholdBytes: Int = 1_000_000_000  // 1 GB
 
+    /// 2026-09-08: grace window between marking a track as
+    /// "scheduled for cleanup" and the actual file move. During
+    /// this window the track stays in the library, still
+    /// playable, and the banner shows the countdown. After the
+    /// window elapses, the next foreground moves the files to
+    /// trash (recoverable for the trash retention period).
+    /// Default 24h — long enough to notice, short enough that
+    /// "I forgot to deal with it" doesn't leave the device
+    /// gradually filling.
+    @AppStorage("smartLibrary.cleanupGraceSeconds") var cleanupGraceSeconds: Int = 86_400  // 24h
+
+    /// 2026-09-08: how long trashed files are kept before
+    /// permanent delete. During this window the user can restore
+    /// from Settings → Trash. Default 7d — matches iOS Photos
+    /// "Recently Deleted" expectation without making it a
+    /// "save anything forever" feature.
+    @AppStorage("smartLibrary.trashRetentionDays") var trashRetentionDays: Int = 7
+
     // MARK: - Published state (for the Settings status row)
 
     @Published private(set) var lastAutoDownloadAt: Date?
@@ -205,6 +223,24 @@ final class SmartLibraryManager: ObservableObject {
     /// `commitCycle(_:source:)` finishes, cleared by
     /// `dismissSummary()` or by the next commit.
     @Published private(set) var lastCycleSummary: CycleSummary? = nil
+
+    /// 2026-09-08: the currently-pending ask-before-cleanup
+    /// batch. Nil = nothing scheduled (or the 24h grace has
+    /// already been auto-committed and there's nothing new).
+    /// Non-nil = tracks are marked `cleanupScheduledAt`,
+    /// the banner is showing, and the user has until
+    /// `expiresAt` to review and decide.
+    @Published private(set) var pendingCleanup: PendingCleanup? = nil
+
+    /// 2026-09-08: the most recent committed cleanup. Set when
+    /// `commitPendingCleanup` (or the auto-grace path) finishes.
+    /// Drives the post-run toast with Undo (restore from trash).
+    /// Cleared by `dismissCleanupSummary()` or by the next commit.
+    @Published private(set) var lastCleanupSummary: CleanupSummary? = nil
+
+    /// 2026-09-08: total bytes currently held in trash. Drives
+    /// the Settings → Trash section's "X MB recoverable" line.
+    @Published private(set) var trashBytes: Int64 = 0
 
     /// v1.9.0: user-configurable auto-confirm window.
     /// Stored in seconds. 0 = off (no auto-confirm, user
@@ -251,6 +287,16 @@ final class SmartLibraryManager: ObservableObject {
     private init() {
         loadState()
         setupHooks()
+        // 2026-09-08: rebuild the pending-cleanup banner
+        // state on launch. If the user closed the app with
+        // a banner showing, the CoreData rows still have
+        // `cleanupScheduledAt` set — the banner just needs
+        // to be reconstructed from them. Same for trash
+        // bytes (the trash directory persists across
+        // launches; the in-memory `trashBytes` needs to be
+        // populated).
+        refreshPendingCleanup()
+        refreshTrashBytes()
     }
 
     private func loadState() {
@@ -426,15 +472,6 @@ final class SmartLibraryManager: ObservableObject {
     // MARK: - Public API: tier query
 
     /// Tier for a downloaded track, used by the cleanup logic
-    /// (and exposed for any future UI that wants to show a
-    /// tier badge). Liked is the highest tier and is checked
-    /// first; an auto-downloaded track that the user later
-    /// liked becomes .liked, never to be auto-removed.
-    enum DownloadTier: Equatable {
-        case liked
-        case auto
-        case manual
-    }
 
     func tier(for videoId: String) -> DownloadTier {
         if PlaylistManager.shared.likedTracks.contains(videoId) {
@@ -833,28 +870,97 @@ final class SmartLibraryManager: ObservableObject {
         autoConfirmTask = nil
     }
 
-    /// v1.8.2: drop the 24h debounce on the auto-cleanup
-    /// too. Cleanup is read-only and cheap; running it on
-    /// every foreground (instead of once per 7d) means
-    /// stale tracks are caught sooner. Storage emergency
-    /// still bypasses any internal checks. The 7d
-    /// debounce in v1.8.0/v1.8.1 was over-engineered —
-    /// nothing about the cleanup logic is expensive enough
-    /// to need that throttle.
+    /// 2026-09-08: v1.9.3 — ask-before-cleanup flow.
+    ///
+    /// On every foreground (and on storage emergency), the
+    /// cycle does one of two things:
+    ///
+    ///   - **Emergency** (free space < emergencyThresholdBytes):
+    ///     immediate delete with the same priority rules as
+    ///     before. No trash, no undo — this is a safety net
+    ///     to keep the device from filling up entirely. The
+    ///     post-run toast has no Undo button.
+    ///
+    ///   - **Normal**: the cycle (a) purges trash older than
+    ///     `trashRetentionDays`, (b) commits any previously-
+    ///     scheduled cleanups whose `cleanupGraceSeconds` has
+    ///     elapsed (moves files to trash), (c) re-computes
+    ///     the eligible candidates and either marks them
+    ///     `cleanupScheduledAt` (first time) or leaves them
+    ///     alone (already pending within the grace window),
+    ///     and (d) clears the flag on tracks that are no
+    ///     longer eligible (e.g. the user played them).
+    ///
+    /// The "re-compute on every foreground" model is
+    /// deliberate: a track the user just played shouldn't
+    /// still be scheduled. Re-running the cycle is cheap
+    /// (one CoreData fetch + a tier lookup per row).
     func runCleanupIfDue(emergency: Bool) {
         guard cleanupEnabled else { return }
         if !emergency, freeDiskSpace() < emergencyThresholdBytes {
+            // Promote to emergency: storage pressure wins
+            // over the ask-first UX. We still call
+            // runCleanupCycle but flag the emergency path
+            // so the post-run toast has no Undo button.
             Task { await runCleanupCycle(emergency: true) }
             return
         }
         Task { await runCleanupCycle(emergency: emergency) }
     }
 
-    /// Manual trigger from Settings → "Clean up now".
+    /// 2026-09-08: manual trigger from Settings → "Clean up now".
+    /// Goes through the same flow as the auto-cycle: marks
+    /// the current candidates as scheduled, then immediately
+    /// commits them (skipping the 24h grace) so the user
+    /// sees the trash move + post-run toast right away.
     /// Bypasses the storage-emergency check.
     func runCleanupNow() {
         guard cleanupEnabled else { return }
-        Task { await runCleanupCycle(emergency: false) }
+        Task { await runCleanupNowFlow() }
+    }
+
+    /// Internal: Settings "Clean up now" implementation.
+    /// Marks current candidates, then commits the resulting
+    /// batch immediately. Returns true if anything was
+    /// trashed.
+    private func runCleanupNowFlow() async {
+        isCleaningUp = true
+        defer { isCleaningUp = false }
+
+        // Step 1: purge expired trash from previous rounds
+        let purged = CleanupTrash.shared.purgeExpired(retentionDays: trashRetentionDays)
+        if purged > 0 {
+            print("🗑️ [SmartLibrary] manual: purged \(purged) bytes of expired trash")
+        }
+        refreshTrashBytes()
+
+        // Step 2: commit any past-grace items from a prior
+        // auto-cycle (e.g. user kept the app closed for 3
+        // days — the 24h-elapsed items would otherwise sit
+        // indefinitely).
+        let committedExpired = await commitExpiredScheduledCleanups()
+        if committedExpired > 0 {
+            print("🗑️ [SmartLibrary] manual: committed \(committedExpired) past-grace items to trash")
+        }
+
+        // Step 3: compute current candidates and mark them.
+        let candidates = await computeCleanupCandidates()
+        if candidates.isEmpty {
+            // Nothing to clean. Surface as a toast so the
+            // user knows the tap landed.
+            ErrorHandler.shared.showInfo("Library is already tidy — nothing to clean up.")
+            return
+        }
+
+        // Mark them (so the row state is consistent), then
+        // immediately commit (move to trash).
+        await markCandidatesForCleanup(candidates)
+        let count = await commitPendingCleanupNow()
+        if count > 0 {
+            // commitPendingCleanupNow already updates
+            // lastCleanupAt/Count/BytesFreed and posts the
+            // Undo toast.
+        }
     }
 
     // MARK: - Public API: refresh (v1.8.2)
@@ -893,9 +999,14 @@ final class SmartLibraryManager: ObservableObject {
     /// and by the Settings UI to show "X of N" status.
     /// Single CoreData fetch — O(n) in downloaded count,
     /// typically <100ms.
+    ///
+    /// 2026-09-08: excludes trashed rows so the count
+    /// matches what the user sees in the library (the
+    /// library view also filters trashed).
     func currentDownloadedTrackCount() -> Int {
         let context = PersistenceController.shared.viewContext
         let request: NSFetchRequest<CDDownloadedTrack> = CDDownloadedTrack.fetchRequest()
+        request.predicate = NSPredicate(format: "trashedAt == nil")
         return (try? context.count(for: request)) ?? 0
     }
 
@@ -915,6 +1026,7 @@ final class SmartLibraryManager: ObservableObject {
     func likedDownloadedCount() -> Int {
         let context = PersistenceController.shared.viewContext
         let request: NSFetchRequest<CDDownloadedTrack> = CDDownloadedTrack.fetchRequest()
+        request.predicate = NSPredicate(format: "trashedAt == nil")
         let rows = (try? context.fetch(request)) ?? []
         let likedIds = PlaylistManager.shared.likedTracks
         return rows.filter { row in
@@ -949,11 +1061,17 @@ final class SmartLibraryManager: ObservableObject {
 
     /// Auto-download candidates. Returns up to
     /// `autoDownloadMaxPerCycle` tracks to download, ordered
-    /// by "user likely wants this". The two tiers are
-    /// weighted: 1 new-release/top-track per liked artist
-    /// (up to 10 artists) first, then recently-played tracks
-    /// that aren't downloaded yet, filling the remainder of
-    /// the per-cycle cap.
+    /// by "user likely wants this".
+    ///
+    /// Tier weighting (2026-09-14, equal-weight split):
+    /// the per-cycle cap is split 50/50 between "liked
+    /// artists" and "recently played" so neither source
+    /// dominates. Tier 1 gets up to `halfCap` slots
+    /// (1 search result per liked artist, capped at halfCap
+    /// artists probed). Tier 2 gets the remaining slots
+    /// filled with recently-played tracks; if tier 1
+    /// underfills, tier 2 overflows into the unused tier-1
+    /// slots so we never waste capacity.
     ///
     /// v1.9.0: bumped the artist probe cap from 5 to 10.
     /// Users with 20+ liked artists were only seeing the
@@ -977,21 +1095,29 @@ final class SmartLibraryManager: ObservableObject {
     /// whether an empty cycle is worth publishing (it's
     /// not — empty cycles return early without publishing).
     private func computePendingCycle() async -> PendingCycle? {
+        let maxPerCycle = autoDownloadMaxPerCycle
+        // Equal-weight split: each tier gets up to halfCap.
+        // Tier 2 overflows into unused tier-1 slots so the
+        // total still approaches maxPerCycle when one tier
+        // is sparse. max(1, ...) avoids a degenerate 0-cap
+        // when maxPerCycle is configured very low.
+        let halfCap = max(1, maxPerCycle / 2)
+
         let likedArtists = FavoriteArtistsManager.shared.getArtists()
         let recentlyPlayedTracks = DataManager.shared.recentlyPlayed
             .map { $0.toTrack }
             .filter { !DownloadManager.shared.isAlreadyDownloaded($0) }
 
-        // Tier 1: 1 search result per liked artist (up to 10
-        // artists). search() returns the artist's top track
-        // (or newest, depending on backend ranking) which
-        // serves as a proxy for "new release or top track".
-        // We deduplicate across artists to avoid the same
-        // track appearing twice.
+        // Tier 1: 1 search result per liked artist (up to
+        // halfCap artists). search() returns the artist's
+        // top track (or newest, depending on backend
+        // ranking) which serves as a proxy for "new release
+        // or top track". We deduplicate across artists to
+        // avoid the same track appearing twice.
         var tier1Candidates: [Track] = []
         var seenVideoIds = Set<String>()
 
-        for artist in likedArtists.prefix(10) {
+        for artist in likedArtists.prefix(halfCap) {
             if let track = await firstSearchResult(for: artist, excluding: seenVideoIds) {
                 tier1Candidates.append(track)
                 seenVideoIds.insert(track.videoId)
@@ -999,10 +1125,15 @@ final class SmartLibraryManager: ObservableObject {
         }
 
         // Tier 2: recently-played tracks that aren't already
-        // downloaded, filled in until we hit the cap.
+        // downloaded. Cap is the remainder of maxPerCycle
+        // after tier 1, so tier 2 overflows into unused
+        // tier-1 slots (e.g. user has 2 liked artists and
+        // tier 1 only fills 2 → tier 2 gets up to
+        // maxPerCycle-2 slots).
+        let tier2Cap = maxPerCycle - tier1Candidates.count
         var tier2Candidates: [Track] = []
         for track in recentlyPlayedTracks {
-            if tier1Candidates.count + tier2Candidates.count >= autoDownloadMaxPerCycle { break }
+            if tier2Candidates.count >= tier2Cap { break }
             if seenVideoIds.contains(track.videoId) { continue }
             tier2Candidates.append(track)
             seenVideoIds.insert(track.videoId)
@@ -1211,165 +1342,608 @@ final class SmartLibraryManager: ObservableObject {
         ErrorHandler.shared.showInfo("Refreshed: \(downloadedCount) new tracks downloading")
     }
 
-    // MARK: - Private: cleanup cycle
+    // MARK: - Private: cleanup cycle (v1.9.3 ask-before-cleanup)
 
+    /// v1.9.3: dispatcher. Emergency path runs the old
+    /// immediate-delete logic (no trash, no undo). Normal
+    /// path runs the new scheduled flow.
     private func runCleanupCycle(emergency: Bool) async {
         guard cleanupEnabled else { return }
+        if emergency {
+            await runEmergencyCleanup()
+            return
+        }
+        await runScheduledCleanup()
+    }
+
+    /// 2026-09-08: emergency cleanup. Free space dropped
+    /// below `emergencyThresholdBytes` — delete immediately
+    /// with the same priority rules as v1.9.2. No trash,
+    /// no undo. Safety net, not a UX feature.
+    private func runEmergencyCleanup() async {
         isCleaningUp = true
         defer { isCleaningUp = false }
 
-        // Fetch all downloaded tracks from CoreData. We
-        // can't just use LibraryViewModel.tracks here
-        // because that requires a UI binding; we want
-        // a direct, model-level query. LibraryViewModel's
-        // loadLibrary() does the same fetch (NSFetchRequest
-        // over CDDownloadedTrack) but with extra formatting
-        // (DownloadedTrackItem wrapper). For the cleanup
-        // logic we only need videoId + fileSize, so do the
-        // fetch directly here.
         let downloaded = fetchDownloadedTracksFromCoreData()
-        guard !downloaded.isEmpty else {
-            // Nothing to clean up. Update the timestamp so
-            // the next foreground doesn't re-check.
-            lastCleanupAt = Date()
-            lastCleanupCount = 0
-            lastCleanupBytesFreed = 0
-            defaults.set(lastCleanupAt, forKey: Keys.lastCleanupAt)
-            defaults.set(0, forKey: Keys.lastCleanupCount)
-            defaults.set(0, forKey: Keys.lastCleanupBytesFreed)
-            return
-        }
-
-        // Build a quick lookup of lastPlayedAt per videoId
-        // from DataManager.recentlyPlayed. RecentlyPlayed
-        // is the same source the in-app play history uses;
-        // it stores playedAt per track. A track with no
-        // entry in recentlyPlayed → never played → unplayed
-        // since download → past any threshold.
-        let lastPlayedByVideoId: [String: Date] = Dictionary(
-            uniqueKeysWithValues: DataManager.shared.recentlyPlayed.map { ($0.videoId, $0.playedAt) }
-        )
-
-        // Find currently playing track + queue — never
-        // remove tracks the user is listening to or has
-        // queued. PlayerState.queue is [QueueItem]; build
-        // a Set of videoIds to skip.
-        let protectedVideoIds: Set<String> = Set(
-            PlayerState.shared.queue.map { $0.track.videoId } +
-            (PlayerState.shared.currentItem.map { [$0.track.videoId] } ?? [])
-        )
-
-        // Time Capsule tracks must never be auto-removed —
-        // they're the only offline copy of a song the user
-        // has sealed. We need a way to query "is this track
-        // sealed in a Time Capsule?" — for now, skip all
-        // tracks where the user has any Time Capsule entry.
-        // The list is tiny (the user only has a few capsules)
-        // so loading all capsules is cheap.
+        let protectedVideoIds = currentProtectedVideoIds()
         let timeCapsuleVideoIds = fetchTimeCapsuleVideoIds()
+        let lastPlayedByVideoId = lastPlayedLookup()
 
-        // Build the candidates: tracks that pass the
-        // tier + recency check AND aren't protected.
-        var toRemove: [(videoId: String, fileSize: Int64)] = []
-        for entry in downloaded {
-            if protectedVideoIds.contains(entry.videoId) { continue }
-            if timeCapsuleVideoIds.contains(entry.videoId) { continue }
+        // Tier check + recency check (same as before).
+        var toRemove = downloaded.filter { entry in
+            if protectedVideoIds.contains(entry.videoId) { return false }
+            if timeCapsuleVideoIds.contains(entry.videoId) { return false }
             let lastPlayed = lastPlayedByVideoId[entry.videoId]
-            if shouldAutoRemove(videoId: entry.videoId, lastPlayedAt: lastPlayed) {
-                toRemove.append((entry.videoId, entry.fileSize))
+            return shouldAutoRemove(videoId: entry.videoId, lastPlayedAt: lastPlayed)
+        }
+
+        // If the simple filter found nothing, drop the
+        // recency check (keep tier + protection) and take
+        // everything eligible so the device can breathe.
+        if toRemove.isEmpty {
+            toRemove = downloaded.filter { entry in
+                if protectedVideoIds.contains(entry.videoId) { return false }
+                if timeCapsuleVideoIds.contains(entry.videoId) { return false }
+                if tier(for: entry.videoId) == .liked { return false }
+                return true
             }
         }
 
-        // In emergency mode, if the simple filter didn't
-        // find anything, we still need to free space. Drop
-        // the recency check but keep the tier protection
-        // (never remove liked, never remove time capsule,
-        // never remove currently playing) and take the
-        // oldest entries.
-        if emergency && toRemove.isEmpty {
-            for entry in downloaded {
-                if protectedVideoIds.contains(entry.videoId) { continue }
-                if timeCapsuleVideoIds.contains(entry.videoId) { continue }
-                if tier(for: entry.videoId) == .liked { continue }
-                toRemove.append((entry.videoId, entry.fileSize))
-            }
+        // Sort: auto first, then largest.
+        toRemove.sort { lhs, rhs in
+            let lAuto = tier(for: lhs.videoId) == .auto ? 0 : 1
+            let rAuto = tier(for: rhs.videoId) == .auto ? 0 : 1
+            if lAuto != rAuto { return lAuto < rAuto }
+            return lhs.fileSize > rhs.fileSize
         }
 
-        // Sort: emergency mode removes auto-downloaded first
-        // (cheapest to lose, smallest grace period by design),
-        // then oldest-by-fileSize to maximize bytes freed
-        // quickly. Non-emergency mode removes in any order
-        // (the simple filter already enforced the recency
-        // check).
-        if emergency {
-            toRemove.sort { lhs, rhs in
-                let lAuto = tier(for: lhs.videoId) == .auto ? 0 : 1
-                let rAuto = tier(for: rhs.videoId) == .auto ? 0 : 1
-                if lAuto != rAuto { return lAuto < rAuto }
-                return lhs.fileSize > rhs.fileSize
-            }
-        }
-
-        // Don't remove more than needed to clear the
-        // emergency threshold. Walk the sorted list and
-        // stop once we're above emergencyThresholdBytes
-        // of free space.
-        if emergency {
-            var bytesFreed: Int64 = 0
-            var trimmed: [(videoId: String, fileSize: Int64)] = []
-            for entry in toRemove {
-                trimmed.append(entry)
-                bytesFreed += entry.fileSize
-                if freeDiskSpace() + bytesFreed > emergencyThresholdBytes {
-                    break
-                }
-            }
-            toRemove = trimmed
-        }
-
-        // Actually delete. DownloadManager.deleteDownload
-        // posts .downloadDeleted which our setupHooks
-        // listener handles (removes from the auto set).
-        var deletedCount = 0
+        // Cap to "just enough to clear the threshold".
         var bytesFreed: Int64 = 0
+        var trimmed: [DownloadedEntry] = []
         for entry in toRemove {
+            trimmed.append(entry)
+            bytesFreed += entry.fileSize
+            if freeDiskSpace() + bytesFreed > emergencyThresholdBytes {
+                break
+            }
+        }
+        toRemove = trimmed
+
+        // Hard delete. Clear scheduledAt first so the row
+        // isn't left in a weird half-state if delete fails.
+        var deletedCount = 0
+        var actualFreed: Int64 = 0
+        for entry in toRemove {
+            // Clear any pending scheduled-cleanup flag on the
+            // row before we delete it (defensive — the row is
+            // about to be deleted anyway, but a crash between
+            // here and the delete would leave a "scheduled"
+            // row pointing at a half-deleted file).
+            clearScheduledFlagIfPresent(videoId: entry.videoId)
             DownloadManager.shared.deleteDownload(videoId: entry.videoId)
             deletedCount += 1
-            bytesFreed += entry.fileSize
+            actualFreed += entry.fileSize
         }
 
         lastCleanupAt = Date()
         lastCleanupCount = deletedCount
-        lastCleanupBytesFreed = bytesFreed
-        defaults.set(lastCleanupAt, forKey: Keys.lastCleanupAt)
-        defaults.set(deletedCount, forKey: Keys.lastCleanupCount)
-        defaults.set(Int(bytesFreed), forKey: Keys.lastCleanupBytesFreed)
+        lastCleanupBytesFreed = actualFreed
+        persistLastCleanupStats()
 
-        // Surface the result as a toast if anything was
-        // removed. Use .info (not .parsing / .network) so
-        // the toast is informational, not error-framed.
+        // Post-run summary (no Undo — emergency is not
+        // recoverable). UI may still choose to show a toast
+        // without the button.
         if deletedCount > 0 {
-            let formatter = ByteCountFormatter()
-            formatter.allowedUnits = [.useMB, .useKB]
-            formatter.countStyle = .file
-            let mb = formatter.string(fromByteCount: bytesFreed)
+            let summary = CleanupSummary(
+                id: UUID(),
+                trashedVideoIds: toRemove.map { $0.videoId },
+                bytesFreed: actualFreed,
+                committedAt: Date(),
+                source: .emergency
+            )
+            lastCleanupSummary = summary
+
+            let mb = byteString(actualFreed)
             ErrorHandler.shared.showInfo(
-                "Cleaned up \(deletedCount) track\(deletedCount == 1 ? "" : "s") · freed \(mb)"
+                "Storage low · freed \(mb) (auto-cleanup)"
             )
         }
+    }
+
+    /// 2026-09-08: scheduled cleanup. Four steps:
+    ///   1. Purge trash older than `trashRetentionDays`
+    ///   2. Commit scheduled items whose grace has elapsed
+    ///   3. Compute fresh candidates and mark them
+    ///   4. Clear scheduledAt on tracks that are no longer
+    ///      eligible (e.g. the user played them since the
+    ///      last foreground)
+    /// The published `pendingCleanup` is updated to the
+    /// current state after every step so the banner can
+    /// react immediately.
+    private func runScheduledCleanup() async {
+        isCleaningUp = true
+        defer { isCleaningUp = false }
+
+        // 1. Purge expired trash from previous rounds.
+        let purged = CleanupTrash.shared.purgeExpired(retentionDays: trashRetentionDays)
+        if purged > 0 {
+            print("🗑️ [SmartLibrary] purged \(purged) bytes of expired trash")
+        }
+        refreshTrashBytes()
+
+        // 2. Commit any past-grace items to trash. This
+        // covers the "user ignored the banner for 24h" case
+        // — the next foreground picks them up and moves
+        // them to the recoverable trash bucket.
+        let committedCount = await commitExpiredScheduledCleanups()
+        refreshPendingCleanup()
+
+        // 3. Compute fresh candidates.
+        let candidates = await computeCleanupCandidates()
+
+        // 4. Reconcile: for every currently-eligible
+        // candidate, ensure cleanupScheduledAt is set (or
+        // re-set if it was cleared by a play). For every
+        // currently-ineligible track with a non-nil
+        // scheduledAt, clear the flag.
+        await reconcileScheduledFlags(candidates: candidates)
+        refreshPendingCleanup()
+
+        // 5. Update "last cleanup" timestamp. We update
+        // it every cycle (even if nothing was committed)
+        // because the cycle did work — it purged trash,
+        // it auto-committed past-grace items, it
+        // re-evaluated candidates. The Settings status
+        // line reads this as "the cycle ran at HH:MM",
+        // not "we deleted N tracks at HH:MM".
+        lastCleanupAt = Date()
+        lastCleanupCount = committedCount
+        lastCleanupBytesFreed = 0  // bytesFreed is per-commit, not per-cycle
+        persistLastCleanupStats()
+    }
+
+    /// 2026-09-08: find rows whose `cleanupScheduledAt` is
+    /// past the grace window and move them to trash. This
+    /// is the "auto-commit after 24h" path.
+    /// Returns the number of items committed.
+    @discardableResult
+    private func commitExpiredScheduledCleanups() async -> Int {
+        let now = Date()
+        let grace = TimeInterval(cleanupGraceSeconds)
+        let downloaded = fetchDownloadedTracksFromCoreData()
+        let expired = downloaded.filter { entry in
+            guard let scheduled = entry.scheduledAt else { return false }
+            return now.timeIntervalSince(scheduled) > grace
+        }
+        guard !expired.isEmpty else { return 0 }
+
+        var trashedVideoIds: [String] = []
+        var bytesFreed: Int64 = 0
+        for entry in expired {
+            // Move file to trash first. If the file is
+            // already gone (user deleted via Files.app),
+            // the move returns nil and we just clean up
+            // the row.
+            if let trashedURL = CleanupTrash.shared.moveToTrash(videoId: entry.videoId) {
+                bytesFreed += trashedURL.fileSizeIfExists() ?? 0
+            } else {
+                bytesFreed += entry.fileSize  // best-effort, file may be gone
+            }
+            markAsTrashed(videoId: entry.videoId, trashedURL: nil)
+            trashedVideoIds.append(entry.videoId)
+        }
+
+        let summary = CleanupSummary(
+            id: UUID(),
+            trashedVideoIds: trashedVideoIds,
+            bytesFreed: bytesFreed,
+            committedAt: Date(),
+            source: .graceExpired
+        )
+        lastCleanupSummary = summary
+        refreshTrashBytes()
+
+        if !trashedVideoIds.isEmpty {
+            registerCleanupUndoToast(summary: summary)
+        }
+        return trashedVideoIds.count
+    }
+
+    /// 2026-09-08: compute the current cleanup candidates
+    /// (eligible + not-protected, regardless of whether
+    /// they're already scheduled). Used by both the
+    /// scheduled flow (to know what to mark) and the
+    /// manual "Clean up now" flow (to know what to trash).
+    private func computeCleanupCandidates() async -> [DownloadedEntry] {
+        let downloaded = fetchDownloadedTracksFromCoreData()
+        let protectedVideoIds = currentProtectedVideoIds()
+        let timeCapsuleVideoIds = fetchTimeCapsuleVideoIds()
+        let lastPlayedByVideoId = lastPlayedLookup()
+
+        return downloaded.filter { entry in
+            if protectedVideoIds.contains(entry.videoId) { return false }
+            if timeCapsuleVideoIds.contains(entry.videoId) { return false }
+            let lastPlayed = lastPlayedByVideoId[entry.videoId]
+            return shouldAutoRemove(videoId: entry.videoId, lastPlayedAt: lastPlayed)
+        }
+    }
+
+    /// 2026-09-08: write `cleanupScheduledAt = Date()` on
+    /// every candidate row. Idempotent — re-marking an
+    /// already-scheduled row is a no-op (it just bumps the
+    /// scheduledAt forward, which is the wrong behavior
+    /// for the grace window — we want the original
+    /// scheduledAt to be the reference). So callers should
+    /// only invoke this for new (not-yet-scheduled) candidates.
+    private func markCandidatesForCleanup(_ candidates: [DownloadedEntry]) async {
+        let context = PersistenceController.shared.viewContext
+        let videoIds = candidates.map { $0.videoId }
+        guard !videoIds.isEmpty else { return }
+        let request: NSFetchRequest<CDDownloadedTrack> = CDDownloadedTrack.fetchRequest()
+        request.predicate = NSPredicate(
+            format: "track.videoId IN %@ AND cleanupScheduledAt == nil",
+            videoIds
+        )
+        let rows = (try? context.fetch(request)) ?? []
+        let now = Date()
+        for row in rows {
+            row.cleanupScheduledAt = now
+        }
+        try? context.save()
+    }
+
+    /// 2026-09-08: reconcile scheduled flags against the
+    /// current candidate set. Marks new candidates, clears
+    /// the flag on tracks that are no longer eligible.
+    /// Cheap (O(n) in downloaded count).
+    private func reconcileScheduledFlags(candidates: [DownloadedEntry]) async {
+        let context = PersistenceController.shared.viewContext
+        let candidateIds = Set(candidates.map { $0.videoId })
+
+        // 1. Clear scheduledAt on downloaded rows that are
+        //    not in the current candidate set.
+        let request: NSFetchRequest<CDDownloadedTrack> = CDDownloadedTrack.fetchRequest()
+        request.predicate = NSPredicate(format: "cleanupScheduledAt != nil")
+        let scheduledRows = (try? context.fetch(request)) ?? []
+        var cleared = 0
+        for row in scheduledRows {
+            guard let videoId = row.track?.videoId else { continue }
+            if !candidateIds.contains(videoId) {
+                row.cleanupScheduledAt = nil
+                cleared += 1
+            }
+        }
+        if cleared > 0 {
+            print("🧹 [SmartLibrary] cleared \(cleared) stale scheduledAt flags")
+        }
+
+        // 2. Mark new candidates that don't yet have a
+        //    scheduledAt. Reusing the same row from the
+        //    fetch above would require a follow-up; do a
+        //    fresh fetch for the un-marked candidates.
+        let unmarked = candidates.filter { entry in
+            !scheduledRows.contains { $0.track?.videoId == entry.videoId }
+        }
+        if !unmarked.isEmpty {
+            let markRequest: NSFetchRequest<CDDownloadedTrack> = CDDownloadedTrack.fetchRequest()
+            markRequest.predicate = NSPredicate(
+                format: "track.videoId IN %@",
+                unmarked.map { $0.videoId }
+            )
+            let rows = (try? context.fetch(markRequest)) ?? []
+            let now = Date()
+            for row in rows where row.cleanupScheduledAt == nil {
+                row.cleanupScheduledAt = now
+            }
+        }
+
+        try? context.save()
+    }
+
+    /// 2026-09-08: rebuild `pendingCleanup` from the
+    /// current CoreData state. Called after every
+    /// schedule/commit so the banner reflects reality.
+    func refreshPendingCleanup() {
+        let context = PersistenceController.shared.viewContext
+        let request: NSFetchRequest<CDDownloadedTrack> = CDDownloadedTrack.fetchRequest()
+        request.predicate = NSPredicate(format: "cleanupScheduledAt != nil AND trashedAt == nil")
+        request.sortDescriptors = [NSSortDescriptor(keyPath: \CDDownloadedTrack.cleanupScheduledAt, ascending: true)]
+        let rows = (try? context.fetch(request)) ?? []
+
+        let entries: [CleanupEntry] = rows.compactMap { row in
+            guard let videoId = row.track?.videoId,
+                  let scheduled = row.cleanupScheduledAt else { return nil }
+            return CleanupEntry(
+                videoId: videoId,
+                title: row.track?.title ?? "Unknown",
+                artist: row.track?.displayArtist ?? "Unknown",
+                thumbnailURL: row.track?.artworkURL,
+                fileSize: row.fileSize,
+                scheduledAt: scheduled,
+                tier: tier(for: videoId)
+            )
+        }
+        let bytes: Int64 = entries.reduce(0) { $0 + $1.fileSize }
+        if entries.isEmpty {
+            pendingCleanup = nil
+        } else {
+            // The grace countdown is anchored to the EARLIEST
+            // scheduledAt — that's the first item to expire.
+            // Plus cleanupGraceSeconds.
+            let earliest = entries.map { $0.scheduledAt }.min() ?? Date()
+            let expires = earliest.addingTimeInterval(TimeInterval(cleanupGraceSeconds))
+            pendingCleanup = PendingCleanup(
+                id: UUID(),
+                entries: entries,
+                estimatedBytesFreed: bytes,
+                expiresAt: expires
+            )
+        }
+    }
+
+    /// 2026-09-08: move all currently-scheduled tracks to
+    /// trash. Called from "Clean up now" in the banner or
+    /// the Settings button. Returns the count committed.
+    @discardableResult
+    func commitPendingCleanupNow() async -> Int {
+        guard let pending = pendingCleanup, !pending.isEmpty else { return 0 }
+        var trashedVideoIds: [String] = []
+        var bytesFreed: Int64 = 0
+        for entry in pending.entries {
+            if let trashedURL = CleanupTrash.shared.moveToTrash(videoId: entry.videoId) {
+                bytesFreed += trashedURL.fileSizeIfExists() ?? entry.fileSize
+            } else {
+                bytesFreed += entry.fileSize
+            }
+            markAsTrashed(videoId: entry.videoId, trashedURL: nil)
+            trashedVideoIds.append(entry.videoId)
+        }
+        let summary = CleanupSummary(
+            id: UUID(),
+            trashedVideoIds: trashedVideoIds,
+            bytesFreed: bytesFreed,
+            committedAt: Date(),
+            source: .userConfirmed
+        )
+        lastCleanupSummary = summary
+        pendingCleanup = nil
+        refreshTrashBytes()
+
+        lastCleanupAt = Date()
+        lastCleanupCount = trashedVideoIds.count
+        lastCleanupBytesFreed = bytesFreed
+        persistLastCleanupStats()
+
+        if !trashedVideoIds.isEmpty {
+            registerCleanupUndoToast(summary: summary)
+        }
+        return trashedVideoIds.count
+    }
+
+    /// 2026-09-08: cancel all scheduled cleanups (the
+    /// "Cancel all" button in the review sheet, or
+    /// Settings → "Cancel scheduled cleanups").
+    func cancelPendingCleanup() {
+        let context = PersistenceController.shared.viewContext
+        let request: NSFetchRequest<CDDownloadedTrack> = CDDownloadedTrack.fetchRequest()
+        request.predicate = NSPredicate(format: "cleanupScheduledAt != nil")
+        let rows = (try? context.fetch(request)) ?? []
+        for row in rows {
+            row.cleanupScheduledAt = nil
+        }
+        try? context.save()
+        pendingCleanup = nil
+    }
+
+    /// 2026-09-08: cancel a single scheduled track (the X
+    /// button on a row in the review sheet).
+    func cancelCleanupItem(videoId: String) {
+        let context = PersistenceController.shared.viewContext
+        let request: NSFetchRequest<CDDownloadedTrack> = CDDownloadedTrack.fetchRequest()
+        request.predicate = NSPredicate(format: "track.videoId == %@", videoId)
+        request.fetchLimit = 1
+        if let row = (try? context.fetch(request))?.first {
+            row.cleanupScheduledAt = nil
+            try? context.save()
+        }
+        refreshPendingCleanup()
+    }
+
+    /// 2026-09-08: restore a trashed track (from the
+    /// post-run Undo or from Settings → Trash). Returns
+    /// true on success.
+    @discardableResult
+    func restoreFromTrash(videoId: String) -> Bool {
+        // Find the trashed file in .trash/. We need the
+        // exact URL because the file is in a different
+        // directory from the active downloads.
+        guard let trashed = CleanupTrash.shared.listTrashed().first(where: { $0.videoId == videoId }) else {
+            return false
+        }
+        guard CleanupTrash.shared.restoreFromTrash(trashedURL: trashed.url) else {
+            return false
+        }
+        // Update the row: clear trashedAt, update localPath
+        // to the active downloads path.
+        let context = PersistenceController.shared.viewContext
+        let request: NSFetchRequest<CDDownloadedTrack> = CDDownloadedTrack.fetchRequest()
+        request.predicate = NSPredicate(format: "track.videoId == %@", videoId)
+        request.fetchLimit = 1
+        if let row = (try? context.fetch(request))?.first {
+            row.trashedAt = nil
+            row.localPath = AudioFileManager.shared.localFileURL(for: videoId).path
+            row.downloadedAt = Date()  // refresh so the user knows it's "fresh"
+            try? context.save()
+        }
+        refreshTrashBytes()
+        return true
+    }
+
+    /// 2026-09-08: permanently delete a single trashed
+    /// file + its row. Used by Settings → Trash → "Delete
+    /// now" (skip the 7d retention).
+    func permanentlyDeleteTrashed(videoId: String) {
+        guard let trashed = CleanupTrash.shared.listTrashed().first(where: { $0.videoId == videoId }) else {
+            return
+        }
+        CleanupTrash.shared.permanentlyDelete(trashedURL: trashed.url)
+        // Delete the CoreData row.
+        let context = PersistenceController.shared.viewContext
+        let request: NSFetchRequest<CDDownloadedTrack> = CDDownloadedTrack.fetchRequest()
+        request.predicate = NSPredicate(format: "track.videoId == %@", videoId)
+        request.fetchLimit = 1
+        if let row = (try? context.fetch(request))?.first {
+            context.delete(row)
+            try? context.save()
+        }
+        refreshTrashBytes()
+    }
+
+    /// 2026-09-08: list all currently-trashed files.
+    /// Public so Settings can render the trash section.
+    var trashedFiles: [TrashedFile] {
+        CleanupTrash.shared.listTrashed()
+    }
+
+    /// 2026-09-08: total bytes currently in trash.
+    /// Refreshed on every cycle + on every restore/delete
+    /// so the Settings row stays current.
+    func refreshTrashBytes() {
+        trashBytes = CleanupTrash.shared.totalTrashedSize()
+    }
+
+    /// 2026-09-08: dismiss the post-run cleanup summary
+    /// (e.g. when the user taps the X on the toast or
+    /// when a new cleanup cycle starts).
+    func dismissCleanupSummary() {
+        lastCleanupSummary = nil
+    }
+
+    // MARK: - Private: cleanup helpers
+
+    /// Set `trashedAt = Date()` on the row, optionally
+    /// update `localPath` if a specific trash URL is
+    /// provided. The `cleanupScheduledAt` flag is cleared
+    /// — the row is no longer "scheduled", it's "trashed".
+    private func markAsTrashed(videoId: String, trashedURL: URL?) {
+        let context = PersistenceController.shared.viewContext
+        let request: NSFetchRequest<CDDownloadedTrack> = CDDownloadedTrack.fetchRequest()
+        request.predicate = NSPredicate(format: "track.videoId == %@", videoId)
+        request.fetchLimit = 1
+        if let row = (try? context.fetch(request))?.first {
+            row.trashedAt = Date()
+            row.cleanupScheduledAt = nil
+            if let trashedURL = trashedURL {
+                row.localPath = trashedURL.path
+            }
+            try? context.save()
+        }
+    }
+
+    /// Clear the `cleanupScheduledAt` flag for a row, if
+    /// set. Used by the emergency-cleanup path right
+    /// before deletion.
+    private func clearScheduledFlagIfPresent(videoId: String) {
+        let context = PersistenceController.shared.viewContext
+        let request: NSFetchRequest<CDDownloadedTrack> = CDDownloadedTrack.fetchRequest()
+        request.predicate = NSPredicate(format: "track.videoId == %@", videoId)
+        request.fetchLimit = 1
+        if let row = (try? context.fetch(request))?.first, row.cleanupScheduledAt != nil {
+            row.cleanupScheduledAt = nil
+            try? context.save()
+        }
+    }
+
+    /// Build the post-run Undo toast for a successful
+    /// cleanup commit. The restore closure moves the
+    /// files back from trash and re-inserts the row's
+    /// `localPath` to the active downloads directory.
+    private func registerCleanupUndoToast(summary: CleanupSummary) {
+        let count = summary.trashedVideoIds.count
+        let bytesString = byteString(summary.bytesFreed)
+        UndoService.shared.registerUndo(
+            message: "Cleaned up \(count) \(count == 1 ? "track" : "tracks") · freed \(bytesString)",
+            restore: { [weak self] in
+                Task { [weak self] in
+                    await self?.undoLastCleanup(summaryId: summary.id)
+                }
+            },
+            showUndoButton: true
+        )
+    }
+
+    /// 2026-09-08: restore the tracks from a previous
+    /// cleanup commit. Walks the videoIds in the saved
+    /// summary, calls `restoreFromTrash` for each. Tracks
+    /// that were restored in the meantime (because the
+    /// user re-downloaded them) are silently skipped —
+    /// `restoreFromTrash` returns false for them and the
+    /// UI just shows a partial success.
+    @discardableResult
+    func undoLastCleanup(summaryId: UUID) async -> Bool {
+        guard let summary = lastCleanupSummary, summary.id == summaryId else { return false }
+        var restoredCount = 0
+        for videoId in summary.trashedVideoIds {
+            if restoreFromTrash(videoId: videoId) {
+                restoredCount += 1
+            }
+        }
+        if restoredCount > 0 {
+            ErrorHandler.shared.showInfo(
+                "Restored \(restoredCount) \(restoredCount == 1 ? "track" : "tracks") from trash"
+            )
+        }
+        lastCleanupSummary = nil
+        return restoredCount > 0
+    }
+
+    /// Set of videoIds currently protected from cleanup:
+    /// the playing track + queued tracks. Cheap (queue
+    /// size is bounded).
+    private func currentProtectedVideoIds() -> Set<String> {
+        Set(
+            PlayerState.shared.queue.map { $0.track.videoId } +
+            (PlayerState.shared.currentItem.map { [$0.track.videoId] } ?? [])
+        )
+    }
+
+    /// lastPlayedAt lookup from `DataManager.recentlyPlayed`.
+    private func lastPlayedLookup() -> [String: Date] {
+        Dictionary(
+            uniqueKeysWithValues: DataManager.shared.recentlyPlayed.map { ($0.videoId, $0.playedAt) }
+        )
+    }
+
+    /// Persist the "last cleanup" stats to UserDefaults.
+    private func persistLastCleanupStats() {
+        defaults.set(lastCleanupAt, forKey: Keys.lastCleanupAt)
+        defaults.set(lastCleanupCount, forKey: Keys.lastCleanupCount)
+        defaults.set(Int(lastCleanupBytesFreed), forKey: Keys.lastCleanupBytesFreed)
     }
 
     /// Direct CoreData fetch. Returns [(videoId, fileSize)].
     /// Avoids the LibraryViewModel UI wrapper since cleanup
     /// is a model-level concern.
-    private func fetchDownloadedTracksFromCoreData() -> [(videoId: String, fileSize: Int64)] {
+    ///
+    /// 2026-09-08: changed to return `DownloadedEntry` so
+    /// the new scheduled-cleanup flow can read
+    /// `cleanupScheduledAt` without a second fetch. Excludes
+    /// trashed rows — those are in the .trash/ directory
+    /// and shouldn't be considered "active downloads" for
+    /// candidate computation.
+    private func fetchDownloadedTracksFromCoreData() -> [DownloadedEntry] {
         let context = PersistenceController.shared.viewContext
         let request: NSFetchRequest<CDDownloadedTrack> = CDDownloadedTrack.fetchRequest()
+        request.predicate = NSPredicate(format: "trashedAt == nil")
         do {
             let rows = try context.fetch(request)
             return rows.compactMap { row in
                 guard let videoId = row.track?.videoId else { return nil }
-                return (videoId, row.fileSize)
+                return DownloadedEntry(
+                    videoId: videoId,
+                    fileSize: row.fileSize,
+                    scheduledAt: row.cleanupScheduledAt
+                )
             }
         } catch {
             print("⚠️ [SmartLibrary] CoreData fetch failed: \(error)")
@@ -1422,4 +1996,136 @@ extension UserDefaults {
         // the default here.
         bool(forKey: "smartLibrary.autoDownloadEnabled")
     }
+}
+
+// MARK: - 2026-09-08 internal types
+
+/// Internal value type for the cleanup pipeline. Bundles
+/// the few fields the cycle needs from each
+/// `CDDownloadedTrack` row so we can do one CoreData
+/// fetch per cycle instead of one per candidate.
+struct DownloadedEntry: Equatable {
+    let videoId: String
+    let fileSize: Int64
+    /// Non-nil if this row is currently scheduled for
+    /// cleanup and the 24h grace hasn't elapsed yet.
+    let scheduledAt: Date?
+}
+
+// MARK: - URL helpers
+
+extension URL {
+    /// Best-effort file size lookup. Returns nil if the
+    /// file doesn't exist (e.g. user deleted via Files.app
+    /// between scheduling and committing) or the stat fails
+    /// for any reason. Used by the trash-move path so a
+    /// missing source file doesn't poison the bytes-freed
+    /// accounting.
+    func fileSizeIfExists() -> Int64? {
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: path) else {
+            return nil
+        }
+        return attrs[.size] as? Int64
+    }
+}
+
+
+
+// MARK: - Download tier (file-scope)
+
+/// Tier for a downloaded track, used by the cleanup logic
+/// (and exposed for any future UI that wants to show a tier
+/// badge). Liked is the highest tier and is checked first;
+/// an auto-downloaded track that the user later liked becomes
+/// .liked, never to be auto-removed.
+///
+/// 2026-09-08: hoisted to file scope from inside
+/// `SmartLibraryManager` so cleanup-related structs declared
+/// at file scope (CleanupEntry, PendingCleanup, CleanupSummary)
+/// can reference it without being implicitly @MainActor-isolated
+/// via the enclosing class.
+enum DownloadTier: Equatable {
+    case liked
+    case auto
+    case manual
+}
+
+
+// MARK: - v1.9.3 cleanup types
+
+/// A single candidate for cleanup: the track info + the file
+/// metadata (size for the banner total, scheduledAt for the
+/// "elapses in 23h" countdown, tier for the per-row filter chips).
+struct CleanupEntry: Equatable, Identifiable {
+    let videoId: String
+    let title: String
+    let artist: String
+    let thumbnailURL: URL?
+    let fileSize: Int64
+    let scheduledAt: Date
+    let tier: DownloadTier
+
+    var id: String { videoId }
+
+}
+
+/// A prepared set of cleanup candidates waiting for the 24h
+/// grace to elapse (or for the user to tap "Clean up now").
+/// Computed every foreground from the current library state —
+/// the same way the auto-download cycle is.
+///
+/// Lifecycle:
+///   1. `runCleanupIfDue` marks eligible tracks with
+///      `cleanupScheduledAt` and publishes this struct.
+///   2. The banner binds to it; per-row cancel mutates the
+///      `cleanupScheduledAt` on the row and the published
+///      struct is rebuilt on the next foreground (or
+///      `refreshPendingCleanup()` for instant UI feedback).
+///   3. Either the user taps "Clean up now" (commits
+///      immediately) or the 24h grace elapses (auto-commits
+///      on the next foreground).
+struct PendingCleanup: Identifiable {
+    let id: UUID
+    let entries: [CleanupEntry]
+    let estimatedBytesFreed: Int64
+    let expiresAt: Date
+
+    /// The earliest scheduledAt + grace window. The banner's
+    /// "Cleanup in 23h" countdown reads from this.
+    var cleanupIn: TimeInterval {
+        max(0, expiresAt.timeIntervalSinceNow)
+    }
+
+    var isEmpty: Bool { entries.isEmpty }
+
+}
+
+/// What happened after a cleanup commit. Drives the post-run
+/// toast with Undo (restore from trash). The restore is real —
+/// the files were moved to `Library/Downloads/.trash/`, not
+/// deleted, so the undo has a 7-day window before `purgeExpired`
+/// permanently removes them.
+struct CleanupSummary: Identifiable {
+    let id: UUID
+    let trashedVideoIds: [String]
+    let bytesFreed: Int64
+    let committedAt: Date
+    let source: CommitSource
+
+    enum CommitSource: String, Equatable {
+        /// User tapped "Clean up now" in the banner or
+        /// Settings — explicit, intentional.
+        case userConfirmed
+        /// 24h grace elapsed and the next foreground auto-
+        /// committed. Still a real, recoverable cleanup.
+        case graceExpired
+        /// Storage emergency path (< 1GB free). No trash —
+        /// immediate delete for safety. No undo.
+        case emergency
+    }
+
+    var isRecoverable: Bool {
+        source != .emergency && !trashedVideoIds.isEmpty
+    }
+
 }

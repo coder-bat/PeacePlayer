@@ -17,6 +17,7 @@ public class CDPlayHistory: NSManagedObject {
     @NSManaged public var playedAt: Date
     @NSManaged public var progress: Double
     @NSManaged public var completed: Bool
+    @NSManaged public var syncEventID: String?
     @NSManaged public var track: CDTrack?
 }
 
@@ -28,6 +29,7 @@ extension CDPlayHistory {
         entity.playedAt = Date()
         entity.progress = progress
         entity.completed = completed
+        entity.syncEventID = UUID().uuidString.lowercased()
         return entity
     }
 }

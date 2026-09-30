@@ -40,6 +40,12 @@ class FavoriteArtistsManager: ObservableObject {
         artists
     }
 
+    func replaceFromBackup(_ artists: [String]) throws {
+        let data = try JSONEncoder().encode(artists)
+        defaults.set(data, forKey: Keys.favoriteArtists)
+        self.artists = artists
+    }
+
     func addArtist(_ artist: String) {
         let trimmed = artist.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
