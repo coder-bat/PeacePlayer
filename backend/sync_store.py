@@ -1,6 +1,7 @@
 """Versioned full-snapshot storage. One process owns all reads and conditional writes."""
 from __future__ import annotations
 
+import collections
 import hashlib
 import json
 import logging
@@ -133,9 +134,28 @@ def _canonical(value) -> bytes:
 def _legacy_snapshot(blob: dict) -> dict:
     snapshot = {key: blob.get(key, []) for key in empty_snapshot()}
     # Legacy events had no IDs/completed flag; expose stable IDs for every restore.
-    snapshot["history"] = [dict(event, id=event.get("id") or str(uuid.UUID(bytes=hashlib.sha256(
-        f"history|{event['videoId']}|{int(float(event['playedAt']) * 1_000_000)}".encode()).digest()[:16])),
-        completed=event.get("completed", False)) for event in snapshot["history"]]
+    #
+    # (videoId, playedAt) is NOT unique in real data. The same track appears at
+    # the same second more than once, so a digest of just those two fields is
+    # identical for both events and Snapshot.unique_identities rejects the whole
+    # snapshot -- which surfaced as a hard 503 on GET /sync/v2 and left the
+    # client with an unusable backup. Fold in a per-group occurrence counter so
+    # the derivation stays deterministic and lossless without inventing distinct
+    # events out of nothing.
+    seen: collections.Counter = collections.Counter()
+    history = []
+    for event in snapshot["history"]:
+        micros = int(float(event["playedAt"]) * 1_000_000)
+        key = (event["videoId"], micros)
+        occurrence = seen[key]
+        seen[key] += 1
+        history.append(dict(
+            event,
+            id=event.get("id") or str(uuid.UUID(bytes=hashlib.sha256(
+                f"history|{key[0]}|{key[1]}|{occurrence}".encode()).digest()[:16])),
+            completed=event.get("completed", False),
+        ))
+    snapshot["history"] = history
     ids = set(snapshot["favorites"])
     ids.update(event["videoId"] for event in snapshot["history"])
     for playlist in snapshot["playlists"]:

@@ -92,6 +92,38 @@ def test_legacy_metadata_migration_is_readonly_and_stable(store, upload):
     assert len(backups) == 1 and backups[0].read_bytes() == original
 
 
+def test_legacy_history_with_duplicate_timestamp_pairs_still_migrates(store):
+    # Real accounts contain the same track played at the same second more than
+    # once. Deriving an id from (videoId, playedAt) alone made those events
+    # collide, which failed Snapshot.unique_identities and turned every
+    # GET /sync/v2 into a 503 -- an unusable backup for the whole account.
+    storage, user = store
+    played = 1783119479.0
+    blob = {
+        "playlists": [],
+        "favorites": ["dup-track"],
+        "favoriteArtists": [],
+        "history": [
+            {"videoId": "dup-track", "playedAt": played, "progress": 1.0},
+            {"videoId": "dup-track", "playedAt": played, "progress": 1.0},
+            {"videoId": "dup-track", "playedAt": played, "progress": 1.0},
+            {"videoId": "other-track", "playedAt": played, "progress": 0.5},
+        ],
+    }
+    storage._path(user).write_bytes(json.dumps(blob).encode())
+
+    migrated = storage.read(user)
+    history = migrated["snapshot"]["history"]
+    assert len(history) == 4, "no event may be dropped or invented"
+    ids = [event["id"] for event in history]
+    assert len(set(ids)) == 4, f"ids collided: {ids}"
+    # The three identical listens stay distinguishable but deterministic.
+    assert ids[0] != ids[1] != ids[2]
+    assert migrated == storage.read(user)
+    # Referenced tracks are still backfilled, so the reference check passes.
+    assert {track["videoId"] for track in migrated["snapshot"]["tracks"]} == {"dup-track", "other-track"}
+
+
 @pytest.mark.parametrize("raw", [b"{broken", b"[]", b'{"history":false}', b'{"schemaVersion":99}',
                                     b'{"schemaVersion":2,"revision":0,"snapshot":{}}'])
 def test_corrupt_is_never_treated_as_missing(store, upload, raw):
