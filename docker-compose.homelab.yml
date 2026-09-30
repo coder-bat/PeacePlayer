@@ -24,7 +24,7 @@ services:
     restart: unless-stopped
 
     env_file:
-      - ./private/service.env
+      - ${PEACEPLAYER_HOST_ROOT:-.}/private/service.env
 
     environment:
       # Must be present *inside* the container, not just used to interpolate the
@@ -42,8 +42,8 @@ services:
       PEACEPLAYER_OAUTH_FILE: /data/oauth.json
 
     volumes:
-      - ./data:/data
-      - ./library:/library
+      - ${PEACEPLAYER_HOST_ROOT:-.}/data:/data
+      - ${PEACEPLAYER_HOST_ROOT:-.}/library:/library
 
     ports:
       - "8181:8181"

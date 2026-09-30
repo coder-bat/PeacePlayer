@@ -42,8 +42,10 @@ die() { printf '\n\033[31mFAIL: %s\033[0m\n' "$1" >&2; exit 1; }
 # commit either fails or, worse, silently checks out something else.
 git -C "$REPO" cat-file -e "${SHA}^{commit}" 2>/dev/null \
   || die "commit $SHA is not in this repository"
-git -C "$REPO" merge-base --is-ancestor "$SHA" "origin/${PEACEPLAYER_DEPLOY_BRANCH:-HEAD}" 2>/dev/null \
-  || say "WARNING: $SHA is not an ancestor of the remote branch; host clone may fail"
+BRANCH="${PEACEPLAYER_DEPLOY_BRANCH:-$(git -C "$REPO" rev-parse --abbrev-ref HEAD)}"
+git -C "$REPO" fetch --quiet origin "$BRANCH" 2>/dev/null || true
+git -C "$REPO" merge-base --is-ancestor "$SHA" "origin/${BRANCH}" 2>/dev/null \
+  || say "WARNING: $SHA is not on origin/${BRANCH}; the host clone may fail"
 
 say "Preflight on ${USER}@${HOST}"
 "${SSH[@]}" bash -s <<'REMOTE'
@@ -54,9 +56,18 @@ avail_kb=$(df --output=avail / | tail -1)
 need_kb=$(( 2200 * 1024 ))
 [ "$avail_kb" -ge "$need_kb" ] || { echo "insufficient disk: need ~2.2G, have $((avail_kb/1024))G"; exit 1; }
 if ss -lnt 2>/dev/null | grep -q ':8181'; then echo "port 8181 is already in use"; exit 1; fi
+# rsync is required on the *host* as well: the sender invokes the receiver's
+# rsync binary over ssh, and a minimal Debian image has none. Installing it here
+# keeps repeat deploys delta-transferred instead of re-sending 1.6G each time.
+if ! command -v rsync >/dev/null; then
+  echo "  installing rsync on the host ..."
+  sudo -n apt-get update -qq
+  sudo -n apt-get install -y -qq rsync >/dev/null
+fi
 echo "  docker $(docker --version | cut -d, -f1)"
-echo "  free    $((avail_kb/1024))G"
-echo "  port    8181 free"
+echo "  rsync  $(rsync --version | head -1 | awk '{print $NF}')"
+echo "  free   $((avail_kb/1024))G"
+echo "  port   8181 free"
 REMOTE
 
 say "Creating ${REMOTE_ROOT} and fetching the pinned commit"
@@ -72,9 +83,10 @@ fi
 git -C "$root/.src" fetch --all --tags --quiet
 git -C "$root/.src" checkout --quiet --detach "$sha"
 echo "  checked out $(git -C "$root/.src" rev-parse HEAD)"
-# Keep the compose file at the root so the build context is the repo.
-ln -sfn "$root/.src/docker-compose.homelab.yml" "$root/docker-compose.yml"
-ln -sfn "$root/.src/Dockerfile" "$root/Dockerfile"
+# The build context must be the repo checkout, because the Dockerfile copies
+# backend/*. A symlink from the deployment root would make the context
+# $root, which has no backend/ at all, and the build fails on the COPY.
+# PEACEPLAYER_HOST_ROOT is how compose finds data/ and private/ from in there.
 REMOTE
 
 say "Transferring secrets (scp; never echoed)"
@@ -84,13 +96,13 @@ say "Transferring secrets (scp; never echoed)"
 say "Copying data (this is the slow part)"
 if [ -d "$LOCAL_LIBRARY" ]; then
   "${SSH[@]}" "mkdir -p '${REMOTE_ROOT}/library'"
-  rsync -az --info=stats2 --delete-after -e "ssh -o BatchMode=yes" \
+  rsync -az --stats -e "ssh -o BatchMode=yes" \
     "${LOCAL_DATA}/" "${USER}@${HOST}:${REMOTE_ROOT}/data/"
-  rsync -az --info=stats2 -e "ssh -o BatchMode=yes" \
+  rsync -az --stats -e "ssh -o BatchMode=yes" \
     "${LOCAL_LIBRARY}/" "${USER}@${HOST}:${REMOTE_ROOT}/library/"
 else
   say "NOTE: library dir ${LOCAL_LIBRARY} absent; copying data only"
-  rsync -az --info=stats2 --delete-after -e "ssh -o BatchMode=yes" \
+  rsync -az --stats -e "ssh -o BatchMode=yes" \
     "${LOCAL_DATA}/" "${USER}@${HOST}:${REMOTE_ROOT}/data/"
 fi
 
@@ -98,10 +110,14 @@ say "Building image and starting the service"
 "${SSH[@]}" bash -s -- "$REMOTE_ROOT" "$SHA" <<'REMOTE'
 set -euo pipefail
 root="$1"; sha="$2"
-cd "$root"
+# Build from the checkout, not the deployment root: the context must contain
+# backend/ for the Dockerfile's COPY. Data and secrets are found through
+# PEACEPLAYER_HOST_ROOT, which the compose file interpolates into the mounts.
+cd "$root/.src"
 export PEACEPLAYER_RELEASE_COMMIT="$sha"
-docker compose build --pull
-docker compose up -d
+export PEACEPLAYER_HOST_ROOT="$root"
+docker compose -f docker-compose.homelab.yml build --pull
+docker compose -f docker-compose.homelab.yml up -d
 REMOTE
 
 say "Waiting for /ready to report ${SHA}"
