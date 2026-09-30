@@ -1,0 +1,14 @@
+{
+  "playlists": [],
+  "favorites": [
+    "fixture-track"
+  ],
+  "favoriteArtists": [],
+  "history": [
+    {
+      "videoId": "fixture-track",
+      "playedAt": 1720000000,
+      "progress": 0.5
+    }
+  ]
+}

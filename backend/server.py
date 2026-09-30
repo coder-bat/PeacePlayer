@@ -544,6 +544,10 @@ class SyncBlobResponse(BaseModel):
     serverTime: int
 
 
+# Versioned sync has its own storage/route boundary. Legacy writers remain blocked.
+from sync_routes import router as sync_router
+app.include_router(sync_router)
+
 # Root endpoint
 @app.get("/")
 @limiter.limit("15/minute")
@@ -686,7 +690,11 @@ async def sync_download(request: Request):
     user = current_user_from_request(request.headers.get("Authorization"))
     if not user:
         raise HTTPException(status_code=401, detail="unauthorized")
-    blob = load_sync_blob(user["user_id"])
+    from sync_store import SyncRecoveryError
+    try:
+        blob = load_sync_blob(user["user_id"])
+    except SyncRecoveryError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     if not blob:
         return SyncBlobResponse(serverTime=int(time.time()))
     return SyncBlobResponse(

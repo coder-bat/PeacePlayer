@@ -155,15 +155,10 @@ def sync_path(user_id: str) -> Path:
 
 
 def load_sync_blob(user_id: str) -> Optional[dict]:
-    p = sync_path(user_id)
-    if not p.exists():
-        return None
-    try:
-        with open(p, "r") as f:
-            return json.load(f)
-    except Exception as e:
-        logger.error(f"Failed to read sync blob for {user_id}: {e}")
-        return None
+    """Legacy reader backed by strict versioned storage; corruption is not absence."""
+    from sync_store import SyncStore
+    envelope = SyncStore(SYNC_DIR).read(user_id)
+    return envelope["snapshot"] if envelope["exists"] else None
 
 
 def save_sync_blob(user_id: str, blob: dict) -> None:

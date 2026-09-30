@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 2,
+  "baseRevision": 0,
+  "operationId": "fixture-operation-1",
+  "snapshot": {
+    "playlists": [{"id": "11111111-1111-1111-1111-111111111111", "name": "Saved songs", "trackIds": ["fixture-track"], "modifiedAt": 1720000000.0, "createdAt": 1710000000.0, "description": "Fixture playlist", "isSmart": false, "artworkSeed": 4}],
+    "favorites": ["fixture-track"],
+    "favoriteArtists": ["Fixture Artist"],
+    "tracks": [{"videoId": "fixture-track", "title": "Fixture Song", "artists": ["Fixture Artist"], "album": "Fixture Album", "durationSeconds": 180, "thumbnails": [], "isExplicit": false, "videoType": "MUSIC_VIDEO_TYPE_ATV"}],
+    "history": [{"id": "fixture-listen-1", "videoId": "fixture-track", "playedAt": 1720000000.125, "progress": 0.5, "completed": false}]
+  }
+}

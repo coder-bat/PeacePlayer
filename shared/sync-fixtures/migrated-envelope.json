@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 2,
+  "revision": 0,
+  "exists": true,
+  "snapshot": {
+    "playlists": [],
+    "favorites": [
+      "fixture-track"
+    ],
+    "favoriteArtists": [],
+    "tracks": [
+      {
+        "videoId": "fixture-track",
+        "title": "Recovered track",
+        "artists": [],
+        "album": "",
+        "durationSeconds": 0,
+        "thumbnails": [],
+        "thumbnailSmall": null,
+        "thumbnailLarge": null,
+        "isExplicit": false,
+        "videoType": ""
+      }
+    ],
+    "history": [
+      {
+        "id": "4df31c13-c6ff-9c2b-b75b-4a22a81faa09",
+        "videoId": "fixture-track",
+        "playedAt": 1720000000.0,
+        "progress": 0.5,
+        "completed": false
+      }
+    ]
+  },
+  "migratedFromSchemaVersion": 1
+}
