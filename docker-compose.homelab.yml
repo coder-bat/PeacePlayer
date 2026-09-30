@@ -1,0 +1,58 @@
+# Homelab deployment for the PeacePlayer backend.
+#
+# Mirrors the containment model the launchd setup uses on the Mac: the image is
+# tagged with the exact commit that was tested, and the health check refuses to
+# pass unless /ready reports that same commit. A container left over from a
+# previous deploy stays healthy-but-wrong otherwise, and you find out from a user
+# report rather than from the deploy.
+#
+#   cd /opt/peaceplayer && PEACEPLAYER_RELEASE_COMMIT=<sha> docker compose up -d
+#
+# Secrets are NOT in this file. private/service.env is loaded via env_file and
+# must stay mode 0600 on the host.
+
+name: peaceplayer
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    # Tagging by commit is what makes the health check meaningful.
+    image: peaceplayer:${PEACEPLAYER_RELEASE_COMMIT:-dev}
+    container_name: peaceplayer-backend
+    restart: unless-stopped
+
+    env_file:
+      - ./private/service.env
+
+    environment:
+      # Must be present *inside* the container, not just used to interpolate the
+      # image tag: server.py reads it to answer /ready, and the health check
+      # compares /ready against it. Without it the server reports "development"
+      # and the container is permanently unhealthy.
+      PEACEPLAYER_RELEASE_COMMIT: ${PEACEPLAYER_RELEASE_COMMIT:-development}
+      # Imported by runtime_config.validate(); forces data and library to live
+      # outside the release directory instead of inside the image.
+      PEACEPLAYER_REQUIRE_EXTERNAL_DATA: "1"
+      PEACEPLAYER_DATA_DIR: /data
+      PEACEPLAYER_LIBRARY_DIR: /library
+      # On a volume, not baked into the image, so re-auth survives a redeploy.
+      # This is the answer to "where does make auth put the file".
+      PEACEPLAYER_OAUTH_FILE: /data/oauth.json
+
+    volumes:
+      - ./data:/data
+      - ./library:/library
+
+    ports:
+      - "8181:8181"
+
+    security_opt:
+      - no-new-privileges:true
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

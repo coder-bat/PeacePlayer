@@ -1,0 +1,28 @@
+# The image only needs backend/requirements.txt and backend/*.py.
+# Everything below is either not runtime code or enormous: backend/data is 1.3G
+# of runtime state that must arrive as a bind mount, never baked into a layer.
+.git
+.gitignore
+.DS_Store
+.obsidian-memory
+.gstack
+.pytest_cache
+.test-artifacts
+
+# Not part of the service
+analysis
+docs
+ios
+scripts
+shared
+**/*.md
+
+# Runtime state and environments
+backend/data
+backend/venv
+backend/venv311
+.venv
+venv311
+backend/tests
+**/__pycache__
+**/*.pyc
