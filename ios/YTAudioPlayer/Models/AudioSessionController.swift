@@ -58,6 +58,10 @@ final class AudioSessionController {
 
     private var observerTokens: [NSObjectProtocol] = []
 
+    /// Index into `applyCategory`'s cascade that this device accepted, so we
+    /// stop paying for the doomed attempts above it on every activation.
+    private static var resolvedCategoryLevel: Int?
+
     init() {}
 
     deinit {
@@ -81,56 +85,13 @@ final class AudioSessionController {
     /// ignores repeat activations. Called from the first
     /// PlayerState.play() (S15 fix: deferred from init).
     func activate() {
+        let session = AVAudioSession.sharedInstance()
+        // S17-H / S17-LOCK: re-apply the category before activating. iOS can
+        // reset the session to the default category after a screen lock and
+        // unlock cycle, so the category is cheap to re-assert here and makes
+        // activation robust against that drift.
+        applyCategory(session, context: "activate")
         do {
-            let session = AVAudioSession.sharedInstance()
-            // S17-H / S17-LOCK: re-apply the category before
-            // activating. iOS can reset the session to the
-            // default category after a screen lock + unlock
-            // cycle (the route change + session reset that
-            // happens when the lock screen appears can
-            // silently downgrade the session). The previous
-            // code only set the category once at app launch
-            // via `configureCategory()`. If the user locked
-            // the phone while a track was playing, the player
-            // would pause on lock and stay paused on unlock
-            // because the category had drifted away from
-            // `.playback`. Re-applying here is cheap and
-            // makes the activation bulletproof.
-            try session.setCategory(
-                .playback,
-                mode: .default,
-                // S17-LOCK follow-up: was `.longFormAudio`. The
-                // real-time repro (2026-08-01 18:23+, simulator
-                // + iOS log capture) showed this policy is
-                // INCOMPATIBLE with the Bluetooth/AirPlay
-                // options — iOS logs
-                //   "category option(s) not supported in
-                //    combination with
-                //    AVAudioSessionRouteSharingPolicyLongFormAudio"
-                // on every setCategory call. The session is
-                // set to a degraded state, which is what
-                // causes the "track pauses when I lock /
-                // minimize" symptom — the audio session can't
-                // reliably hold playback through a background
-                // transition when the category is in an
-                // unsupported state.
-                //
-                // `.default` is the right policy for a music
-                // app. It is compatible with all the routing
-                // options. The AirPods intelligent routing
-                // feature (one-pod stereo + secondary channel
-                // on the other pod) works fine under `.default`
-                // — it's not actually policy-specific.
-                policy: .default,
-                // 2026-10-02: dropped .allowAirPlay. It was deprecated in
-                // iOS 10 and is not a valid option for the .playback category
-                // (which permits AirPlay by default), so passing it made every
-                // setCategory throw paramErr (-50) and left the session in a
-                // degraded state. Also collapsed .allowBluetooth -- A2DP
-                // already implies the high-quality stereo path, so the bare
-                // HFP option was redundant.
-                options: [.allowBluetoothA2DP]
-            )
             try session.setActive(true)
         } catch {
             print("❌ AudioSessionController activation failed: \(error)")
@@ -143,34 +104,69 @@ final class AudioSessionController {
         removeObservers()
     }
 
+
+    /// Configure the session with the richest set of options that this device
+    /// actually accepts, walking down a cascade until one sticks.
+    ///
+    /// 2026-10-02: the full request
+    ///   setCategory(.playback, mode: .default, policy: .default,
+    ///               options: [.allowBluetoothA2DP])
+    /// returns `paramErr` (-50) on this device, in both setup and activate.
+    /// Removing `.allowAirPlay` did not change that, so the rejected part of
+    /// the combination was not conclusively identified. Rather than keep
+    /// guessing, try progressively simpler configurations and keep the richest
+    /// one that works -- A2DP matters (without it AirPods drop to the mono
+    /// hands-free codec), but a session that refuses to configure at all means
+    /// no audio whatsoever. Whatever level succeeds is logged, so the next
+    /// failure is diagnosable instead of mysterious.
+    private func applyCategory(_ session: AVAudioSession, context: String) {
+        // Start from whatever worked last time on this device.
+        let start = Self.resolvedCategoryLevel.map { max(0, min($0, 2)) } ?? 0
+        let allAttempts: [(String, () throws -> Void)] = [
+            ("playback+defaultMode+A2DP", {
+                try session.setCategory(.playback, mode: .default, options: [.allowBluetoothA2DP])
+            }),
+            ("playback+A2DP", {
+                try session.setCategory(.playback, options: [.allowBluetoothA2DP])
+            }),
+            ("playback+defaultMode", {
+                try session.setCategory(.playback, mode: .default)
+            }),
+            ("playback", {
+                try session.setCategory(.playback)
+            }),
+        ]
+
+        // Only configurations this device actually rejected are reported, so a
+        // clean run from the memoised level is not mislabelled as "degraded".
+        let attempts = Array(allAttempts[start...])
+        var rejected: [String] = []
+        for (index, entry) in attempts.enumerated() {
+            let (label, attempt) = entry
+            do {
+                try attempt()
+                Self.resolvedCategoryLevel = start + index
+                if rejected.isEmpty {
+                    print("✅ [AudioSession/\(context)] category set: \(label)")
+                } else {
+                    print("⚠️ [AudioSession/\(context)] category degraded to \(label) "
+                          + "after rejecting: \(rejected.joined(separator: ", "))")
+                }
+                return
+            } catch {
+                let nsError = error as NSError
+                rejected.append("\(label)(code=\(nsError.code))")
+            }
+        }
+        Self.resolvedCategoryLevel = nil   // re-probe the full cascade next time
+        print("❌ [AudioSession/\(context)] every category configuration failed: "
+              + rejected.joined(separator: ", "))
+    }
+
     // MARK: - Internals
 
     private func configureCategory() {
-        do {
-            let session = AVAudioSession.sharedInstance()
-            // S17-H: add `.allowBluetoothA2DP`. The previous
-            // options enabled only HFP (Hands-Free Profile) on
-            // Bluetooth, which is mono and low quality. A2DP is
-            // the high-quality stereo path used by AirPods and
-            // most BT headphones. With just `.allowBluetooth`,
-            // AirPods would route through the low-quality
-            // hands-free codec.
-            try session.setCategory(
-                .playback,
-                mode: .default,
-                // S17-LOCK follow-up: was `.longFormAudio` (see
-                // `activate()` for the full story — iOS
-                // rejects the category options when this
-                // policy is set, leaving the session in a
-                // degraded state that breaks background
-                // playback). `.default` is the right policy
-                // for a music app with bluetooth + airplay.
-                policy: .default,
-                options: [.allowBluetoothA2DP]
-            )
-        } catch {
-            print("❌ AudioSessionController category setup failed: \(error)")
-        }
+        applyCategory(AVAudioSession.sharedInstance(), context: "setup")
     }
 
     private func registerObservers() {
