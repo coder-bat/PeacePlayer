@@ -114,7 +114,15 @@ enum ContentSource: Equatable {
 
 /// Represents an item in the playback queue
 struct QueueItem: Identifiable, Equatable {
-    let id = UUID()
+    /// Stable identity derived from the track, not a fresh UUID per instance.
+    ///
+    /// `let id = UUID()` gave every copy a different identity, which broke two
+    /// things at once: `==` compared ids and so was permanently false (a test
+    /// asserting two items for the same track were equal could never pass), and
+    /// any SwiftUI `ForEach` over queue items would treat every rebuilt row as
+    /// brand new, defeating diffing and animations. The track's videoId is
+    /// already unique within a queue and survives copies.
+    let id: String
     let track: Track
     let streamUrl: String
     let source: TrackSource
@@ -131,6 +139,7 @@ struct QueueItem: Identifiable, Equatable {
     }
 
     init(track: Track, streamUrl: String, source: TrackSource, contentSource: ContentSource = .youtube, createdAt: Date = Date(), replayGain: Double? = nil) {
+        self.id = track.videoId
         self.track = track
         self.streamUrl = streamUrl
         self.source = source

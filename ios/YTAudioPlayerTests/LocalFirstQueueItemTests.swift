@@ -130,31 +130,55 @@ final class LocalFirstQueueItemTests: XCTestCase {
         )
     }
 
-    private func seedDownloadedTrack(videoId: String) throws {
-        let context = PersistenceController.shared.viewContext
+    /// Seeds a CDTrack with every non-optional field populated.
+    ///
+    /// The previous helper set only `videoId`, leaving `title`, `album`,
+    /// `createdAt` etc. nil. Core Data rejects that on save with
+    /// NSCocoaErrorDomain 1560 "Multiple validation errors occurred", so both
+    /// tests were failing in `seedDownloadedRowOnly` before ever reaching the
+    /// assertion they exist to make. Production code always sets these; the
+    /// test was the only under-seeded caller.
+    private func makeCDTrack(videoId: String, context: NSManagedObjectContext) -> CDTrack {
         let track = CDTrack(context: context)
         track.videoId = videoId
-        let row = CDDownloadedTrack(context: context)
-        row.track = track
-        try context.save()
+        track.title = "Test Track \(videoId)"
+        track.artists = ["Test Artist"]
+        track.album = "Test Album"
+        track.durationSeconds = 180
+        track.thumbnailURLs = []
+        track.isExplicit = false
+        track.videoType = "MUSIC_VIDEO_TYPE_OMV"
+        track.createdAt = Date()
+        track.isLiked = false
+        return track
+    }
 
-        // Write a tiny placeholder file so isPlayable's
-        // reconciliation sees "row + file = playable".
+    private func seedDownloadedTrack(videoId: String) throws {
+        let context = PersistenceController.shared.viewContext
+        let track = makeCDTrack(videoId: videoId, context: context)
+
+        // Write the file first so the row can record its real size.
         let url = AudioFileManager.shared.localFileURL(for: videoId)
         try FileManager.default.createDirectory(
             at: url.deletingLastPathComponent(),
             withIntermediateDirectories: true
         )
-        try "test".data(using: .utf8)!.write(to: url)
+        let payload = Data("test".utf8)
+        try payload.write(to: url)
+
+        CDDownloadedTrack.create(for: track, localPath: url.path,
+                                 fileSize: Int64(payload.count), context: context)
+        try context.save()
     }
 
     private func seedDownloadedRowOnly(videoId: String) throws {
         let context = PersistenceController.shared.viewContext
-        let track = CDTrack(context: context)
-        track.videoId = videoId
-        let row = CDDownloadedTrack(context: context)
-        row.track = track
+        let track = makeCDTrack(videoId: videoId, context: context)
+        // Point at a path that does not exist -- this is the "stale row" case
+        // the helper exists for.
+        let url = AudioFileManager.shared.localFileURL(for: videoId)
+        CDDownloadedTrack.create(for: track, localPath: url.path, fileSize: 0, context: context)
         try context.save()
-        // No file write — this is the "stale row" case.
+        // No file write.
     }
 }
