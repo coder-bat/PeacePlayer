@@ -114,3 +114,68 @@ def test_access_and_exception_logs_redact_credentials(isolated_server):
     assert token not in logging.Formatter().format(record)
     assert token not in redact_sensitive(f"JWT={token} Authorization: Bearer {token}")
     assert redact_sensitive("/fast/a?%74oken=secret%2Fencoded&x=1") == "/fast/a?%74oken=[REDACTED]&x=1"
+
+
+def test_health_caches_its_youtube_probe(isolated_server, monkeypatch):
+    # /health used to make a live, blocking YouTube call under the global
+    # ytmusic_lock on every request, so a liveness probe competed with real
+    # streaming work. Five polls must now cost one probe.
+    server, _ = isolated_server
+    calls = []
+
+    def probe():
+        calls.append(1)
+        return True
+
+    monkeypatch.setattr(server, "_youtube_reachable", probe)
+    server._youtube_probe.update(checked_at=0.0, ok=False)
+
+    async def scenario():
+        transport = httpx.ASGITransport(app=server.app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            for _ in range(5):
+                response = await client.get("/health")
+                assert response.status_code == 200
+                assert response.json()["youtube"] is True
+
+    asyncio.run(scenario())
+    assert len(calls) == 1, f"five health checks should share one upstream probe, got {len(calls)}"
+
+    # Once the cached result expires, exactly one refresh happens for the batch.
+    server._youtube_probe["checked_at"] -= server._YOUTUBE_PROBE_TTL_SECONDS + 1
+    asyncio.run(scenario())
+    assert len(calls) == 2, f"expired cache should re-probe once, got {len(calls) - 1} extra"
+
+
+def test_fast_falls_back_to_transcoded_audio_when_format18_is_gone(isolated_server, monkeypatch):
+    # YouTube no longer offers progressive format 18 for most music, so "-f 18"
+    # fails and this endpoint used to hard 502 for essentially every track.
+    # A merged DASH pair is two URLs, so no format swap restores a single-file
+    # redirect: the fallback must serve the transcoded AAC path instead, and it
+    # must carry the token because /audio enforces the same auth.
+    server, auth = isolated_server
+    user, _ = auth.get_or_create_user("fallback-apple-sub", {})
+    token = auth.mint_session_jwt(user["user_id"], "fallback-apple-sub")
+
+    class UnavailableFormat:
+        returncode = 1
+
+        async def communicate(self):
+            return b"", b"ERROR: [youtube] abc: Requested format is not available."
+
+    async def fake_exec(*args, **kwargs):
+        return UnavailableFormat()
+
+    monkeypatch.setattr(server.asyncio, "create_subprocess_exec", fake_exec)
+    monkeypatch.setattr(server, "_format18_get", lambda _vid: None)
+
+    async def scenario():
+        transport = httpx.ASGITransport(app=server.app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            return await client.get(f"/fast/abc123.mp4?token={token}", follow_redirects=False)
+
+    response = asyncio.run(scenario())
+    assert response.status_code == 302, f"expected a playable redirect, got {response.status_code}"
+    location = response.headers["location"]
+    assert location.startswith("/audio/abc123.m4a"), location
+    assert f"token={token}" in location, "fallback must preserve auth or /audio will 401"

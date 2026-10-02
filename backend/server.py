@@ -736,7 +736,8 @@ async def search(query: SearchQuery, request: Request, user: dict = Depends(requ
     try:
         client = get_client()
         async with ytmusic_lock:
-            results = client.search_tracks(query.query, query.limit)
+            results = await asyncio.to_thread(client.search_tracks, query.query, query.limit)
+
 
         if not results:
             return []
@@ -758,7 +759,7 @@ async def search_playlists(query: SearchQuery, request: Request, user: dict = De
     try:
         client = get_client()
         async with ytmusic_lock:
-            results = client.search_playlists(query.query, query.limit)
+            results = await asyncio.to_thread(client.search_playlists, query.query, query.limit)
         return results
     except Exception as e:
         logger.error(f"search_playlists failed: {e}", exc_info=True)
@@ -773,7 +774,8 @@ async def get_playlist(playlist_id: str, request: Request, limit: int = Query(de
     try:
         client = get_client()
         async with ytmusic_lock:
-            playlist = client.get_playlist(playlist_id, limit=limit)
+            playlist = await asyncio.to_thread(client.get_playlist, playlist_id, limit=limit)
+
 
         if not playlist:
             raise HTTPException(status_code=404, detail="Playlist not found")
@@ -816,7 +818,8 @@ async def stream_audio(video_id: str, request: Request, user: dict = Depends(req
             logger.info(f"Cache miss for {video_id}, fetching from YouTube...")
             client = get_client()
             async with ytmusic_lock:
-                stream_data = client.get_stream_url(video_id)
+                stream_data = await asyncio.to_thread(client.get_stream_url, video_id)
+
 
             if not stream_data or not stream_data.get('audio_formats'):
                 raise HTTPException(status_code=404, detail="No audio stream found")
@@ -993,7 +996,7 @@ async def audio_stream(video_id: str, request: Request):
         if not stream_data:
             async with ytmusic_lock:
                 client = get_client()
-                stream_data = client.get_stream_url(video_id)
+                stream_data = await asyncio.to_thread(client.get_stream_url, video_id)
             if not stream_data or not stream_data.get('audio_formats'):
                 raise HTTPException(status_code=404, detail="No audio stream found")
             cache.set(video_id, stream_data)
@@ -1150,26 +1153,23 @@ async def fast_stream(video_id: str, request: Request):
             status_code=302,
         )
 
-    # Cold path: 302 to YouTube's format 18 URL. The URL is
-    # signed and expires ~6h after extraction; we cache it
-    # in-process for 5h so the first cold play per 5h pays the
-    # ~3-5s yt-dlp cost and subsequent cold plays pay <50ms.
+    # Cold path: 302 to YouTube's format 18 URL, if that format still exists.
+    #
+    # Format 18 is YouTube's legacy progressive video+audio stream. It is no
+    # longer offered for most music: the available list is now audio-only and
+    # video-only DASH streams, so "-f 18" returns
+    # "Requested format is not available" and this endpoint used to hard 502
+    # for essentially every track. Because a merged DASH pair is two URLs, no
+    # format swap can restore a single-file redirect either -- so on any
+    # extraction failure we serve the transcoded AAC path, which is a playable
+    # single URL and is what /stream already falls back to. The client gets
+    # audio either way; the difference is it no longer sees an error.
     cached_url = _format18_get(video_id)
     if cached_url:
-        logger.info(f"[fast] {video_id} → YouTube format 18 (cache hit)")
+        logger.info(f"[fast] {video_id} -> YouTube format 18 (cache hit)")
         return RedirectResponse(url=cached_url, status_code=302)
 
     try:
-        # Run yt-dlp in a thread to avoid blocking the event loop.
-        # The signature extraction takes ~3-5s — most of that is
-        # Python startup + the YouTube watch page fetch + n-challenge.
-        # The cache makes the typical cold play path much faster.
-        loop = asyncio.get_event_loop()
-        # Use the existing stream URL cache to avoid redundant
-        # yt-dlp calls — the cache already stores the per-format
-        # URL list. We need format 18 specifically, so we have
-        # to call yt-dlp fresh (the cache stores "best audio" not
-        # format 18). For now, just call yt-dlp directly.
         proc = await asyncio.create_subprocess_exec(
             *YTDLP_COMMAND,
             "--js-runtimes", f"deno:{DENO_BIN}",
@@ -1183,33 +1183,31 @@ async def fast_stream(video_id: str, request: Request):
         )
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=15.0)
         if proc.returncode != 0:
-            raise HTTPException(
-                status_code=502,
-                detail=f"yt-dlp failed for format 18: {stderr.decode(errors='replace')[:200]}"
-            )
+            raise RuntimeError(stderr.decode(errors="replace").strip()[:200] or "yt-dlp exited nonzero")
         yt_url = stdout.decode().strip()
         if not yt_url:
-            raise HTTPException(
-                status_code=502,
-                detail="yt-dlp returned empty URL for format 18"
-            )
-        logger.info(
-            f"[fast] {video_id} → YouTube format 18 (cold, "
-            f"{len(yt_url)}-byte URL)"
+            raise RuntimeError("yt-dlp returned an empty URL")
+    except Exception as exc:
+        logger.warning(
+            "[fast] %s: progressive format 18 unavailable (%s); serving transcoded audio",
+            video_id, exc,
         )
-        # Cache for the next 5h. Subsequent cold plays of the
-        # same track within that window skip the yt-dlp cost.
-        _format18_put(video_id, yt_url)
-        # 302 to YouTube. iOS's AVPlayer follows the redirect
-        # and starts fetching the progressive MP4 from YouTube's
-        # CDN. The URL is already signed (exp=...&sig=...); it's
-        # valid for ~6h.
-        return RedirectResponse(url=yt_url, status_code=302)
-    except asyncio.TimeoutError:
-        raise HTTPException(
-            status_code=504,
-            detail="yt-dlp timed out extracting format 18 URL"
+        # Carry the token through: /audio enforces the same auth as this
+        # endpoint, so dropping it would turn a working fallback into a 401.
+        return RedirectResponse(
+            url=f"/audio/{video_id}.m4a?token={quote(token_param)}",
+            status_code=302,
         )
+
+    logger.info(f"[fast] {video_id} -> YouTube format 18 (cold, {len(yt_url)}-byte URL)")
+    # Cache for the next 5h. Subsequent cold plays of the
+    # same track within that window skip the yt-dlp cost.
+    _format18_put(video_id, yt_url)
+    # 302 to YouTube. iOS's AVPlayer follows the redirect
+    # and starts fetching the progressive MP4 from YouTube's
+    # CDN. The URL is already signed (exp=...&sig=...); it's
+    # valid for ~6h.
+    return RedirectResponse(url=yt_url, status_code=302)
 
 
 # Prefetch endpoint - fire-and-forget cache warming
@@ -1408,7 +1406,7 @@ async def _prefetch_worker(video_id: str, user_id: Optional[str] = None):
         if not cache.get(video_id):
             async with ytmusic_lock:
                 client = get_client()
-                stream_data = client.get_stream_url(video_id)
+                stream_data = await asyncio.to_thread(client.get_stream_url, video_id)
             if stream_data and stream_data.get("audio_formats"):
                 cache.set(video_id, stream_data)
                 logger.info(f"Prefetch cached stream: {video_id} (user={user_id or 'unknown'})")
@@ -1752,7 +1750,8 @@ async def get_lyrics(video_id: str, request: Request, user: dict = Depends(requi
     try:
         client = get_client()
         async with ytmusic_lock:
-            lyrics = client.get_lyrics(video_id)
+            lyrics = await asyncio.to_thread(client.get_lyrics, video_id)
+
 
         if not lyrics:
             raise HTTPException(status_code=404, detail="Lyrics not available")
@@ -1796,7 +1795,7 @@ async def get_radio(video_id: str, request: Request, user: dict = Depends(requir
     try:
         client = get_client()
         async with ytmusic_lock:
-            tracks = client.get_watch_playlist(video_id)
+            tracks = await asyncio.to_thread(client.get_watch_playlist, video_id)
         response = [TrackResponse(**track).model_dump() for track in tracks]
 
         # 3) Cache the response (only if non-empty — empty means
@@ -1826,7 +1825,7 @@ async def get_liked_songs(request: Request, user: dict = Depends(require_session
 
     try:
         async with ytmusic_lock:
-            tracks = client.get_liked_songs()
+            tracks = await asyncio.to_thread(client.get_liked_songs, )
         return {"tracks": tracks}
     except Exception as e:
         logger.error(f"get_liked_songs failed: {e}", exc_info=True)
@@ -1848,7 +1847,7 @@ async def get_playlists(request: Request, user: dict = Depends(require_session_u
 
     try:
         async with ytmusic_lock:
-            playlists = client.get_library_playlists()
+            playlists = await asyncio.to_thread(client.get_library_playlists, )
         return {"playlists": playlists}
     except Exception as e:
         logger.error(f"get_playlists failed: {e}", exc_info=True)
@@ -1869,7 +1868,8 @@ async def get_charts(request: Request, user: dict = Depends(require_session_user
 
         try:
             async with ytmusic_lock:
-                charts = client.yt.get_charts(country=YOUTUBE_COUNTRY)
+                charts = await asyncio.to_thread(client.yt.get_charts, country=YOUTUBE_COUNTRY)
+
 
             # Parse trending songs if available
             if charts and 'songs' in charts:
@@ -1901,7 +1901,8 @@ async def get_charts(request: Request, user: dict = Depends(require_session_user
             query = random.choice(fallback_queries)
             # Use search_tracks which returns properly formatted data
             async with ytmusic_lock:
-                tracks = client.search_tracks(query, limit=20)
+                tracks = await asyncio.to_thread(client.search_tracks, query, limit=20)
+
 
         result = {"tracks": [TrackResponse(**track).model_dump() for track in tracks[:20]]}
         trending_cache.set("charts", result)
@@ -1924,7 +1925,8 @@ async def get_new_releases(request: Request, user: dict = Depends(require_sessio
 
         try:
             async with ytmusic_lock:
-                releases = client.yt.get_new_releases(country=YOUTUBE_COUNTRY)
+                releases = await asyncio.to_thread(client.yt.get_new_releases, country=YOUTUBE_COUNTRY)
+
 
             if releases:
                 # Parse new releases - they're albums, extract tracks
@@ -1933,7 +1935,7 @@ async def get_new_releases(request: Request, user: dict = Depends(require_sessio
                         album_id = album.get('browseId')
                         if album_id:
                             async with ytmusic_lock:
-                                album_data = client.yt.get_album(album_id)
+                                album_data = await asyncio.to_thread(client.yt.get_album, album_id)
                             for track in album_data.get('tracks', [])[:2]:  # Top 2 tracks per album
                                 track_data = {
                                     'videoId': track.get('videoId'),
@@ -1965,7 +1967,8 @@ async def get_new_releases(request: Request, user: dict = Depends(require_sessio
             query = random.choice(fallback_queries)
             # Use search_tracks which returns properly formatted data
             async with ytmusic_lock:
-                tracks = client.search_tracks(query, limit=20)
+                tracks = await asyncio.to_thread(client.search_tracks, query, limit=20)
+
 
         result = {"tracks": [TrackResponse(**track).model_dump() for track in tracks[:20]]}
         trending_cache.set("new-releases", result)
@@ -2616,23 +2619,41 @@ async def get_chords(request: Request, title: str = Query(...), artist: str = Qu
 
 
 # --- Health check ---
-@app.get("/health")
-@limiter.limit("15/minute")
-async def health_check(request: Request):
-    """Health check endpoint with YouTube connectivity test."""
-    uptime = (datetime.datetime.now() - _server_start_time).total_seconds()
-    youtube_ok = False
+# The client's NetworkMonitor polls /health continuously, and this used to make
+# a live, blocking YouTube round trip under the global ytmusic_lock every single
+# time. That turned a liveness probe into the main contender for the same lock
+# real streaming work needs: measured 0.8s idle, 4.5s under load, and 11-15s on
+# the previous host. A liveness probe must never compete with real work, so the
+# upstream reachability result is cached and refreshed at most every 30s.
+_YOUTUBE_PROBE_TTL_SECONDS = 30.0
+_youtube_probe = {"checked_at": 0.0, "ok": False}
+
+
+def _youtube_reachable() -> bool:
     try:
-        client = get_client()
-        async with ytmusic_lock:
-            client.yt.get_home()
-        youtube_ok = True
+        get_client().yt.get_home()
+        return True
     except Exception:
-        pass
+        return False
+
+
+@app.get("/health")
+@limiter.limit("60/minute")
+async def health_check(request: Request):
+    """Liveness plus cached upstream reachability. Never blocks on a cold client."""
+    uptime = (datetime.datetime.now() - _server_start_time).total_seconds()
+    now = time.monotonic()
+    if now - _youtube_probe["checked_at"] >= _YOUTUBE_PROBE_TTL_SECONDS:
+        # Only refresh when the lock is free, so a probe can never delay a
+        # request that actually needs to talk to YouTube.
+        if not ytmusic_lock.locked():
+            async with ytmusic_lock:
+                _youtube_probe["ok"] = await asyncio.to_thread(_youtube_reachable)
+            _youtube_probe["checked_at"] = time.monotonic()
     return {
         "status": "ok",
         **({"testInstanceId": settings.test_instance_id} if settings.test_instance_id else {}),
-        "youtube": youtube_ok,
+        "youtube": _youtube_probe["ok"],
         "uptime_seconds": int(uptime),
         "cache_sizes": {
             "search": len(search_cache._cache),
@@ -2816,7 +2837,7 @@ async def _get_or_fetch_stream_url(video_id: str) -> Optional[str]:
         if not stream_data:
             async with ytmusic_lock:
                 client = get_client()
-                stream_data = client.get_stream_url(video_id)
+                stream_data = await asyncio.to_thread(client.get_stream_url, video_id)
             if not stream_data or not stream_data.get('audio_formats'):
                 return None
             cache.set(video_id, stream_data)
