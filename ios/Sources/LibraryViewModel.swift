@@ -461,6 +461,17 @@ class LibraryViewModel: ObservableObject {
                     print("⚠️ Skipping download with no track relationship: \(download.localPath)")
                     return nil
                 }
+                // 2026-10-02: a row whose audio is gone cannot be played, and
+                // rendering it just shows a title that does nothing. This
+                // filter only skipped rows with no track relationship, so such
+                // rows were loaded and displayed. Left the row in place rather
+                // than deleting it -- the metadata may still be the only record
+                // of a track the user cares about, and the path can be repointed
+                // if the file comes back.
+                guard download.exists else {
+                    print("⚠️ Skipping download with no file on disk: \(download.track?.videoId ?? "nil")")
+                    return nil
+                }
                 return DownloadedTrackItem(from: download)
             }
 
