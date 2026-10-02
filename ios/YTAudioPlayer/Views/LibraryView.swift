@@ -264,6 +264,14 @@ struct LibraryContent: View {
         .toolbar(.hidden, for: .navigationBar)
         .onAppear {
             viewModel.loadLibrary()
+            // 2026-10-02: repair the placeholder metadata the sync v2
+            // migration wrote over the real local titles. Runs at most once
+            // per app launch -- it is a repair pass, not a refresh, and the
+            // server call is wasted once there is nothing left to fix.
+            if !LibraryViewModel.didReconcileLibrary {
+                LibraryViewModel.didReconcileLibrary = true
+                viewModel.reconcileWithServerLibrary()
+            }
         }
     }
 

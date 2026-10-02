@@ -326,6 +326,106 @@ class LibraryViewModel: ObservableObject {
             .store(in: &cancellables)
     }
 
+    /// 2026-10-02: one-shot latch for the server-library repair pass. Static so
+    /// it holds across view rebuilds but resets on relaunch, which is what
+    /// lets a future bad sync be repaired on the next open.
+    static var didReconcileLibrary = false
+
+    /// 2026-10-02: repair Core Data rows from the server's library.
+    ///
+    /// The sync v2 migration backfilled placeholder tracks titled "Recovered
+    /// track" (the legacy blob predates stored metadata, so the server invents
+    /// entries purely to keep the envelope valid). While /sync/v2 returned 503
+    /// the client never applied a snapshot; once that was fixed, those
+    /// placeholders were written over the real local titles. The server's
+    /// /library now returns accurate title/artist/album plus the videoId from
+    /// the .id sidecar, so it can heal those rows.
+    ///
+    /// This is deliberately a repair rather than a re-sync: the audio files are
+    /// never touched, only the metadata rows that describe them, and every
+    /// change is logged so the user can see exactly what moved.
+    func reconcileWithServerLibrary() {
+        APIService.shared.fetchLibrary()
+            .sink(receiveCompletion: { completion in
+                if case .failure(let error) = completion {
+                    print("🔧 Library reconcile: server library unavailable (\(error))")
+                }
+            }, receiveValue: { [weak self] remote in
+                guard let self else { return }
+                DispatchQueue.main.async { self.applyServerLibrary(remote) }
+            })
+            .store(in: &cancellables)
+    }
+
+    private func applyServerLibrary(_ remote: [LocalTrack]) {
+        var byVideoId: [String: LocalTrack] = [:]
+        for item in remote {
+            if let id = item.videoId, !id.isEmpty { byVideoId[id] = item }
+        }
+        guard !byVideoId.isEmpty else {
+            print("🔧 Library reconcile: server returned no videoIds; nothing to repair")
+            return
+        }
+
+        // Include trashed rows too: a restore should bring back a real title.
+        let request: NSFetchRequest<CDDownloadedTrack> = CDDownloadedTrack.fetchRequest()
+        let context = persistence.viewContext
+        guard let rows = try? context.fetch(request) else {
+            print("🔧 Library reconcile: fetch failed")
+            return
+        }
+
+        var repairedTitles = 0, repairedPaths = 0
+        for row in rows {
+            guard let track = row.track, let server = byVideoId[track.videoId] else { continue }
+
+            // 1. Metadata, only where ours is missing or a known placeholder.
+            let ours = track.title.trimmingCharacters(in: .whitespaces)
+            let isPlaceholder = ours.isEmpty || ours == "Unknown"
+                || ours.hasPrefix("Recovered track")
+            if isPlaceholder, let title = server.title, !title.isEmpty {
+                print("🔧 Library reconcile: \"\(videoId(track))\" title \(ours.isEmpty ? "(empty)" : ours) -> \(title)")
+                track.title = title
+                repairedTitles += 1
+                if let artist = server.artist, !artist.isEmpty, track.artists.isEmpty {
+                    track.artists = [artist]
+                }
+                if let album = server.album, !album.isEmpty,
+                   track.album.isEmpty || track.album == "Unknown" {
+                    track.album = album
+                }
+            }
+
+            // 2. Path. The row can point somewhere stale while the audio is
+            // sitting in Downloads under its videoId, which is why the library
+            // reported "File exists: false" for files that were plainly there.
+            let onDisk = AudioFileManager.shared.localFileURL(for: track.videoId)
+            if FileManager.default.fileExists(atPath: onDisk.path),
+               row.localPath != onDisk.path {
+                print("🔧 Library reconcile: \"\(videoId(track))\" path -> \(onDisk.lastPathComponent)")
+                let attributes = try? FileManager.default.attributesOfItem(atPath: onDisk.path)
+                row.localPath = onDisk.path
+                if let bytes = attributes?[.size] as? Int64 { row.fileSize = bytes }
+                repairedPaths += 1
+            }
+        }
+
+        guard repairedTitles > 0 || repairedPaths > 0 else {
+            print("🔧 Library reconcile: nothing to repair (\(rows.count) rows checked)")
+            return
+        }
+        do {
+            try context.save()
+            print("🔧 Library reconcile: repaired \(repairedTitles) title(s), \(repairedPaths) path(s)")
+            loadLibrary()
+        } catch {
+            context.rollback()
+            print("❌ Library reconcile: save failed, changes rolled back — \(error)")
+        }
+    }
+
+    private func videoId(_ track: CDTrack) -> String { track.videoId }
+
     func loadLibrary() {
         isLoading = true
 
