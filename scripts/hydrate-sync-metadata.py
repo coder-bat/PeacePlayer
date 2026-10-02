@@ -37,22 +37,51 @@ def referenced_ids(blob: dict) -> set:
     return {i for i in ids if i}
 
 
-def song_to_metadata(song: dict) -> dict:
-    video_details = song.get("videoDetails") or {}
-    thumbnails = [
-        {"url": t.get("url", ""), "width": int(t.get("width", 0)), "height": int(t.get("height", 0))}
-        for t in (video_details.get("thumbnails") or [])
-        if t.get("url")
-    ]
-    artists = [a.get("name", "") for a in (video_details.get("author") or {}).get("artists", []) if a.get("name")]
-    if not artists and video_details.get("author"):
-        artists = [video_details["author"]]
+def song_to_metadata(song) -> dict:
+    # get_song's shape is not uniform: `author` comes back as a plain string for
+    # most tracks but as {"name": ..., "artists": [...]} for some, and
+    # `thumbnails` can be a list of dicts or bare URLs. Normalise defensively
+    # rather than assume the shape that happened to show up in a test.
+    if not isinstance(song, dict):
+        return {}
+    video_details = song.get("videoDetails")
+    if not isinstance(video_details, dict):
+        video_details = {}
+
+    thumbnails = []
+    for entry in video_details.get("thumbnails") or []:
+        if isinstance(entry, dict) and entry.get("url"):
+            thumbnails.append({"url": entry["url"],
+                               "width": int(entry.get("width", 0)),
+                               "height": int(entry.get("height", 0))})
+        elif isinstance(entry, str) and entry:
+            thumbnails.append({"url": entry, "width": 0, "height": 0})
+
+    author = video_details.get("author")
+    if isinstance(author, dict):
+        artists = [a.get("name", "") for a in (author.get("artists") or [])
+                   if isinstance(a, dict) and a.get("name")]
+        if not artists and author.get("name"):
+            artists = [author["name"]]
+    elif isinstance(author, str) and author:
+        artists = [author]
+    else:
+        artists = []
+
+    album = video_details.get("album")
+    album_name = album.get("name", "") if isinstance(album, dict) else ""
+
     duration = video_details.get("lengthSeconds")
+    try:
+        duration = int(duration)
+    except (TypeError, ValueError):
+        duration = 0
+
     return {
         "title": video_details.get("title") or "",
         "artists": artists,
-        "album": ((video_details.get("album") or {}).get("name") or ""),
-        "durationSeconds": int(duration) if str(duration or "").isdigit() else 0,
+        "album": album_name,
+        "durationSeconds": duration,
         "thumbnails": thumbnails,
         "isExplicit": bool(video_details.get("musicVideoType") == "MUSIC_VIDEO_TYPE_ATV"),
         "videoType": video_details.get("musicVideoType") or "",
