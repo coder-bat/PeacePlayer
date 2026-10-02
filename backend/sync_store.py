@@ -131,7 +131,28 @@ def _canonical(value) -> bytes:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
 
 
-def _legacy_snapshot(blob: dict) -> dict:
+def _metadata_cache(directory: Path) -> dict:
+    """Load real per-track metadata hydrated out of band by
+    scripts/hydrate-sync-metadata.py.
+
+    The legacy blob predates stored track metadata, so the migration has to
+    invent *something* for every referenced videoId. Inventing "Recovered
+    track" for all of them is correct but useless, and those placeholders then
+    overwrite the user's real titles on the client. The cache lets the same
+    migration produce real credits once they have been fetched, without making
+    the request path talk to YouTube.
+    """
+    path = Path(directory) / "track-metadata.json"
+    if not path.is_file():
+        return {}
+    try:
+        loaded = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return {}
+    return loaded if isinstance(loaded, dict) else {}
+
+
+def _legacy_snapshot(blob: dict, cache: dict | None = None) -> dict:
     snapshot = {key: blob.get(key, []) for key in empty_snapshot()}
     # Legacy events had no IDs/completed flag; expose stable IDs for every restore.
     #
@@ -161,10 +182,22 @@ def _legacy_snapshot(blob: dict) -> dict:
     for playlist in snapshot["playlists"]:
         ids.update(playlist["trackIds"])
     known = {track["videoId"] for track in snapshot["tracks"]}
-    # Real metadata can hydrate these later; linked history remains available offline.
+    hydrated = cache or {}
+    # Prefer real metadata when scripts/hydrate-sync-metadata.py has fetched
+    # it; fall back to the self-identifying placeholder so an unhydrated id is
+    # still obviously not a real title to the client.
     for video_id in sorted(ids - known):
-        snapshot["tracks"].append(dict(videoId=video_id, title="Recovered track", artists=[], album="",
-                                       durationSeconds=0, thumbnails=[], isExplicit=False, videoType=""))
+        meta = hydrated.get(video_id) or {}
+        snapshot["tracks"].append(Track(
+            videoId=video_id,
+            title=meta.get("title") or "Recovered track",
+            artists=meta.get("artists") or [],
+            album=meta.get("album") or "",
+            durationSeconds=int(meta.get("durationSeconds") or 0),
+            thumbnails=meta.get("thumbnails") or [],
+            isExplicit=bool(meta.get("isExplicit", False)),
+            videoType=meta.get("videoType") or "",
+        ))
     return Snapshot.model_validate(snapshot).model_dump()
 
 
@@ -198,7 +231,8 @@ class SyncStore:
                         for receipt in receipts):
                     raise ValueError("invalid operation receipts")
                 return dict(schemaVersion=2, revision=blob["revision"], exists=True, snapshot=snapshot), blob
-            return dict(schemaVersion=2, revision=0, exists=True, snapshot=_legacy_snapshot(blob),
+            return dict(schemaVersion=2, revision=0, exists=True,
+                        snapshot=_legacy_snapshot(blob, _metadata_cache(self.directory)),
                         migratedFromSchemaVersion=1), blob
         except (ValueError, TypeError, KeyError, AttributeError) as exc:
             raise SyncRecoveryError("sync_snapshot_corrupt") from exc

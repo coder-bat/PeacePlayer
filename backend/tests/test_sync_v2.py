@@ -237,3 +237,44 @@ def test_http_contracts_and_legacy_reads(tmp_path, monkeypatch, upload):
             assert (await client.post("/sync/v2", headers=headers, json=upload.model_dump())).status_code == 503
             assert apple_auth.sync_path(user["user_id"]).read_text() == "broken"
     asyncio.run(scenario())
+
+
+def test_legacy_migration_uses_hydrated_metadata_when_available(store):
+    # Without a cache the migration can only invent "Recovered track" entries,
+    # and those overwrite the client's real titles. scripts/hydrate-sync-metadata
+    # .py fills a cache that the migration consults; this pins that contract.
+    storage, user = store
+    blob = {"playlists": [], "favorites": ["fav-track"], "favoriteArtists": [],
+            "history": [{"videoId": "fav-track", "playedAt": 1700000000.0, "progress": 1.0}]}
+    storage._path(user).write_bytes(json.dumps(blob).encode())
+
+    unhydrated = storage.read(user)["snapshot"]
+    placeholder = {t["videoId"]: t for t in unhydrated["tracks"]}["fav-track"]
+    assert placeholder["title"] == "Recovered track"
+    assert placeholder["artists"] == []
+
+    (storage.directory / "track-metadata.json").write_text(json.dumps({
+        "fav-track": {"title": "Blue Monday", "artists": ["New Order"],
+                      "album": "Power, Corruption & Lies", "durationSeconds": 448,
+                      "thumbnails": [{"url": "http://x/t.jpg", "width": 60, "height": 60}],
+                      "isExplicit": False, "videoType": "MUSIC_VIDEO_TYPE_ATV"},
+    }))
+
+    hydrated = storage.read(user)["snapshot"]
+    track = {t["videoId"]: t for t in hydrated["tracks"]}["fav-track"]
+    assert track["title"] == "Blue Monday"
+    assert track["artists"] == ["New Order"]
+    assert track["album"] == "Power, Corruption & Lies"
+    assert track["durationSeconds"] == 448
+    # Ids with no cache entry still degrade to the self-identifying placeholder.
+    assert placeholder["title"] == "Recovered track"
+
+
+def test_corrupt_metadata_cache_falls_back_to_placeholders(store):
+    # A truncated or half-written cache must not take sync down entirely.
+    storage, user = store
+    blob = {"playlists": [], "favorites": ["x"], "favoriteArtists": [],
+            "history": [{"videoId": "x", "playedAt": 1700000000.0, "progress": 1.0}]}
+    storage._path(user).write_bytes(json.dumps(blob).encode())
+    (storage.directory / "track-metadata.json").write_text("{not json")
+    assert storage.read(user)["snapshot"]["tracks"][0]["title"] == "Recovered track"
