@@ -40,7 +40,12 @@ final class BackendConfiguration {
         #if targetEnvironment(simulator)
         let defaultURL = URL(string: "http://localhost:8181")!
         #else
-        let defaultURL = URL(string: "http://100.77.213.42:8181")!
+        // The backend moved off the development Mac to the homelab box
+        // (batuniverse). Tailscale MagicDNS is preferred over the raw IP so a
+        // tailnet address change does not require a new build. A Settings
+        // override still wins over this fallback.
+        let defaultURL = URL(string: "http://batuniverse:8181")
+            ?? URL(string: "http://100.81.99.29:8181")!
         #endif
         self.fallback = fallback ?? defaultURL
         let configured = defaults.string(forKey: Self.defaultsKey)
