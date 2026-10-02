@@ -19,15 +19,34 @@ from pathlib import Path
 
 OUT = Path(sys.argv[1] if len(sys.argv) > 1 else "oauth.json")
 POLL_SECONDS = 5
-DEADLINE_SECONDS = 900
+DEADLINE_SECONDS = 3600
 
 
 def main():
-    from ytmusicapi.setup import setup_oauth  # noqa: F401  (import guard)
-    from ytmusicapi.auth.oauth import OAuthCredentials, RefreshingToken
+    import os
     import requests
+    from ytmusicapi.auth.oauth import OAuthCredentials, RefreshingToken
 
-    credentials = OAuthCredentials(session=requests.Session())
+    # Own OAuth client. ytmusicapi's built-in shared client authenticates fine
+    # at Google's token endpoint but every actual YouTube Music request comes
+    # back HTTP 400, so a personal client is required for real library access.
+    # Read from the environment rather than argv so the secret does not land in
+    # a process listing or shell history.
+    client_id = os.environ.get("YT_OAUTH_CLIENT_ID") or None
+    client_secret = os.environ.get("YT_OAUTH_CLIENT_SECRET") or None
+    if bool(client_id) != bool(client_secret):
+        print("Set BOTH YT_OAUTH_CLIENT_ID and YT_OAUTH_CLIENT_SECRET, or neither.",
+              flush=True)
+        return 2
+    if client_id:
+        print("using a personal OAuth client", flush=True)
+        credentials = OAuthCredentials(client_id, client_secret,
+                                       session=requests.Session())
+    else:
+        print("WARNING: no personal client supplied; falling back to ytmusicapi's "
+              "shared client, which is expected to be rejected at the API", flush=True)
+        credentials = OAuthCredentials(session=requests.Session())
+
     code = credentials.get_code()
     url = f"{code['verification_url']}?user_code={code['user_code']}"
 
@@ -62,9 +81,26 @@ def main():
             continue
 
         try:
-            token = RefreshingToken(credentials=credentials, **raw)
+            # Google returns fields ytmusicapi's RefreshingToken does not accept
+            # (e.g. refresh_token_expires_in). Passing the response through
+            # **raw loses the token entirely, because the device code is
+            # single-use -- you cannot go back and fetch it again. Filter to the
+            # constructor's accepted arguments instead of assuming the payload
+            # matches the signature.
+            import inspect
+            accepted = set(inspect.signature(RefreshingToken.__init__).parameters)
+            fields = {k: v for k, v in raw.items() if k in accepted and k != "self"}
+            missing = {"scope", "token_type", "access_token", "refresh_token"} - set(fields)
+            if missing:
+                raise ValueError(f"token response missing {sorted(missing)}")
+            token = RefreshingToken(credentials=credentials, **fields)
             OUT.parent.mkdir(parents=True, exist_ok=True)
-            OUT.write_text(json.dumps(token.as_dict(), indent=1))
+            payload = token.as_dict()
+            # Preserve anything extra Google sent that is not part of the
+            # token model, so nothing the server might need is discarded.
+            for key, value in raw.items():
+                payload.setdefault(key, value)
+            OUT.write_text(json.dumps(payload, indent=1))
             # 0600: this file is a live credential for the user's Google account.
             OUT.chmod(0o600)
             print(f"\nSuccess. Wrote {OUT}", flush=True)
