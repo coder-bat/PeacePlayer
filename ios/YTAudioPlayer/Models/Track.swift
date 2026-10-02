@@ -153,14 +153,28 @@ struct LocalTrack: Codable, Identifiable {
     let size: Int
     let sizeHuman: String
     let modified: TimeInterval
-    
+
+    // 2026-10-02: the backend reads these from the file's own embedded tags
+    // and its .id sidecar. They are optional so responses from an older backend
+    // still decode; the filename-derived values below remain the fallback.
+    let title: String?
+    let artist: String?
+    let album: String?
+    let videoId: String?
+
+    // Prefer the real embedded metadata. The filename convention is
+    // inconsistent -- "21 Guns - Green Day" is Title-Artist but
+    // "Coldplay - Paradise (Official Video) - Coldplay" is Artist-Title-Artist
+    // -- so parsing it is a guess that silently produces wrong credits.
     var parsedTitle: String {
+        if let title, !title.trimmingCharacters(in: .whitespaces).isEmpty { return title }
         let components = filename.replacingOccurrences(of: ".m4a", with: "")
             .components(separatedBy: " - ")
         return components.first ?? filename
     }
-    
+
     var parsedArtist: String {
+        if let artist, !artist.trimmingCharacters(in: .whitespaces).isEmpty { return artist }
         let components = filename.replacingOccurrences(of: ".m4a", with: "")
             .components(separatedBy: " - ")
         return components.count > 1 ? components[1] : "Unknown"

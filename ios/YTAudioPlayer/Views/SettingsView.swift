@@ -132,6 +132,17 @@ struct SettingsView: View {
         return "Last: \(formatRelative(last)) · \(smartLibrary.lastCleanupCount) · \(mb)"
     }
 
+    /// 2026-10-02: computed out of the ViewBuilder because the inline
+    /// ByteCountFormatter call made the expression too complex for the type
+    /// checker to resolve in reasonable time.
+    private var emergencyCleanupExplainer: String {
+        let threshold = ByteCountFormatter.string(
+            fromByteCount: Int64(smartLibrary.emergencyThresholdBytes), countStyle: .file)
+        return "Off: nothing is deleted until its trash period ends. "
+             + "On: below \(threshold) free, tracks are deleted permanently with "
+             + "no trash, no undo and no confirmation."
+    }
+
     /// v1.9.0: status line for the "Auto-confirm after"
     /// picker. Explains what the selected value means
     /// in user terms — "card auto-closes in 5 min" reads
@@ -720,6 +731,45 @@ struct SettingsView: View {
                 // picker, library-count status, and the
                 // "Refresh downloads" button with confirmation.
                 Section {
+                    // 2026-10-02: the control for cleanupEnabled. The flag was
+                    // readable in three guards and a status line that was itself
+                    // never rendered -- cleanup ran with no way to stop it.
+                    // Off by default; the emergency sub-toggle below is separate
+                    // because that path deletes permanently.
+                    Toggle(isOn: $smartLibrary.cleanupEnabled) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack(spacing: 6) {
+                                Image(systemName: "sparkles")
+                                    .foregroundColor(Theme.cyberCyan)
+                                Text("Auto-cleanup library")
+                                    .foregroundColor(.white)
+                            }
+                            Text(cleanupStatusLine)
+                                .font(.system(size: 12, design: .monospaced))
+                                .foregroundColor(Theme.cyberTextSecondary)
+                        }
+                    }
+                    .tint(Theme.cyberCyan)
+                    .listRowBackground(Theme.cyberSurface)
+
+                    if smartLibrary.cleanupEnabled {
+                        Toggle(isOn: $smartLibrary.emergencyCleanupEnabled) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "exclamationmark.triangle")
+                                        .foregroundColor(.orange)
+                                    Text("Delete immediately when storage is low")
+                                        .foregroundColor(.white)
+                                }
+                                Text(emergencyCleanupExplainer)
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .foregroundColor(Theme.cyberTextSecondary)
+                            }
+                        }
+                        .tint(.orange)
+                        .listRowBackground(Theme.cyberSurface)
+                    }
+
                     // Auto-download on WiFi
                     Toggle(isOn: $smartLibrary.autoDownloadEnabled) {
                         VStack(alignment: .leading, spacing: 2) {

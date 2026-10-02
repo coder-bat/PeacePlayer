@@ -211,10 +211,10 @@ class BackgroundDownloadService: NSObject {
     /// surface them. Called from AppDelegate on launch.
     ///
     /// Best-effort recovery: we can't fully reconstruct track metadata (title,
-    /// artist) from a bare .m4a, so this logs orphans for manual intervention
-    /// rather than fabricating Core Data rows. If the user opens the app while
-    /// the download is in flight, the new Combine-based completion path takes
-    /// over and writes the row normally.
+    /// artist) from a bare .m4a, so a file with no Core Data row is removed
+    /// rather than promoted into the library with fabricated metadata. If the
+    /// user opens the app while a download is in flight, the new Combine-based
+    /// completion path takes over and writes the row normally.
     func bootstrap() {
         downloadQueue.async { [weak self] in
             guard let self = self else { return }
@@ -233,7 +233,24 @@ class BackgroundDownloadService: NSObject {
                     let count = try context.count(for: request)
                     if count == 0 {
                         orphanCount += 1
-                        print("⚠️ Orphan download detected: \(file.videoId) (\(file.size) bytes) — re-download to register in Library")
+                        // 2026-10-02: this used to only log and leave the file
+                        // behind forever. An orphan has no Core Data row, so the
+                        // app cannot list it, cannot play it, and cannot show it
+                        // in the trash -- it is unreachable bytes that still cost
+                        // the user storage. Reap it here.
+                        //
+                        // Observed on device: 3 orphans totalling 74MB, one of
+                        // which was a 25-byte file whose entire contents were
+                        // {"detail":"unauthorized"} -- a failed download that had
+                        // saved its 401 body as audio. The status-code guard in
+                        // didFinishDownloadingTo stops new ones; this clears the
+                        // ones already on disk.
+                        print("⚠️ Orphan download: \(file.videoId) (\(file.size) bytes) — removing; it has no library entry so it cannot be played or restored")
+                        do {
+                            try FileManager.default.removeItem(at: file.url)
+                        } catch {
+                            print("❌ Failed to remove orphan \(file.videoId): \(error)")
+                        }
                     }
                 } catch {
                     print("❌ Bootstrap scan error for \(file.videoId): \(error)")

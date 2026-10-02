@@ -123,7 +123,19 @@ final class SmartLibraryManager: ObservableObject {
     /// tracks are never auto-removed. Manual removal (user
     /// tapping delete) is unaffected. The "Clean up now" button
     /// in Settings is also gated by this.
-    @AppStorage("smartLibrary.cleanupEnabled") var cleanupEnabled: Bool = true
+    // 2026-10-02: was `true`. Auto-cleanup deletes the user's downloaded audio
+    // and there was no control anywhere in the UI bound to this flag -- it was
+    // referenced only in its own declaration, three guards and a status string,
+    // so the feature ran with no way to turn it off. On first launch after an
+    // upgrade, every never-played download was also scheduled at once (because
+    // isPastThreshold(nil) is true), which is what filled .trash on device.
+    // Opt-in from now on: nothing is deleted until the user says so.
+    @AppStorage("smartLibrary.cleanupEnabled") var cleanupEnabled: Bool = false
+
+    /// Separate, default-off opt-in for the permanent low-disk deletion path.
+    /// See `runCleanupCycle(emergency:)` for why it must not ride along with
+    /// the scheduled cleanup switch.
+    @AppStorage("smartLibrary.emergencyCleanupEnabled") var emergencyCleanupEnabled: Bool = false
 
     /// Days an auto-downloaded track can sit unplayed before
     /// it's eligible for auto-removal. Liked tracks are never
@@ -1350,6 +1362,19 @@ final class SmartLibraryManager: ObservableObject {
     private func runCleanupCycle(emergency: Bool) async {
         guard cleanupEnabled else { return }
         if emergency {
+            // 2026-10-02: the emergency path is not the scheduled path with a
+            // shorter fuse. It deletes permanently -- no trash, no undo, no
+            // confirmation -- and when its recency filter finds nothing it
+            // drops the filter entirely and takes every non-protected track,
+            // including manual-tier downloads the user chose to keep. It fires
+            // on any foreground while free space is under the threshold, so
+            // merely filling the disk could silently cost you a library.
+            // Separate opt-in, default off: enabling scheduled cleanup must not
+            // quietly arm this.
+            guard emergencyCleanupEnabled else {
+                print("ℹ️ [SmartLibrary] emergency cleanup skipped (not enabled)")
+                return
+            }
             await runEmergencyCleanup()
             return
         }

@@ -22,6 +22,11 @@ import SwiftUI
 import CoreData
 
 struct TrashView: View {
+    // 2026-10-02: "Delete now" was a single-tap destructive button with no
+    // confirmation anywhere in this file, and it removes the file and the Core Data
+    // row permanently -- no trash, no undo. Destructive actions that cannot be
+    // undone get a confirmation.
+    @State private var pendingPermanentDelete: String?
     @ObservedObject var smartLibrary = SmartLibraryManager.shared
 
     var body: some View {
@@ -154,7 +159,7 @@ struct TrashView: View {
 
                 Button(role: .destructive) {
                     HapticManager.error()
-                    smartLibrary.permanentlyDeleteTrashed(videoId: file.videoId)
+                    pendingPermanentDelete = file.videoId
                 } label: {
                     HStack(spacing: 4) {
                         Image(systemName: "trash")
@@ -170,6 +175,23 @@ struct TrashView: View {
                     )
                 }
                 .buttonStyle(.plain)
+                .confirmationDialog(
+                    "Delete permanently?",
+                    isPresented: Binding(
+                        get: { pendingPermanentDelete != nil },
+                        set: { if !$0 { pendingPermanentDelete = nil } }),
+                    titleVisibility: .visible
+                ) {
+                    Button("Delete permanently", role: .destructive) {
+                        if let id = pendingPermanentDelete {
+                            smartLibrary.permanentlyDeleteTrashed(videoId: id)
+                        }
+                        pendingPermanentDelete = nil
+                    }
+                    Button("Cancel", role: .cancel) { pendingPermanentDelete = nil }
+                } message: {
+                    Text("This removes the file and its library entry for good. It cannot be undone.")
+                }
                 Spacer()
             }
         }
