@@ -6,6 +6,7 @@ Handles downloading and converting YouTube audio streams.
 import yt_dlp
 import ffmpeg
 import os
+import json
 import subprocess
 import tempfile
 import shutil
@@ -507,32 +508,85 @@ class AudioExtractor:
             if input_path.exists():
                 input_path.unlink()
     
+    def _read_tags(self, path: Path) -> Dict[str, str]:
+        """Read embedded title/artist/album from a media file.
+
+        2026-10-02: list_library() used to return filename/size only, so every
+        track reached the app with title=None and the library rendered as blank
+        rows. The files already carry correct tags (ffmpeg embeds them at
+        download time), so reading them back is exact, offline and instant --
+        far better than parsing the filename, whose convention is inconsistent
+        ("21 Guns - Green Day" is Title-Artist but "Coldplay - Paradise
+        (Official Video) - Coldplay" is Artist-Title-Artist).
+        """
+        try:
+            # ffprobe ships alongside ffmpeg; prefer the sibling binary so a
+            # custom FFMPEG_BIN is honoured, then fall back to PATH.
+            ffprobe = shutil.which("ffprobe")
+            sibling = Path(settings.ffmpeg_bin).with_name("ffprobe")
+            if sibling.is_file() and os.access(sibling, os.X_OK):
+                ffprobe = str(sibling)
+            if not ffprobe:
+                return {}
+            proc = subprocess.run(
+                [ffprobe,
+                 '-v', 'error', '-show_entries', 'format_tags=title,artist,album',
+                 '-of', 'json', str(path)],
+                capture_output=True, text=True, timeout=10,
+            )
+            if proc.returncode != 0:
+                return {}
+            tags = json.loads(proc.stdout or "{}").get("format", {}).get("tags", {})
+            return {k: v for k, v in tags.items() if isinstance(v, str) and v.strip()}
+        except (subprocess.SubprocessError, ValueError, OSError):
+            return {}
+
     def list_library(self) -> List[Dict]:
         """
         List all downloaded tracks in library.
-        
+
         Returns:
-            List of track info dictionaries
+            List of track info dictionaries, including embedded title/artist/album
+            and the videoId from the `.id` sidecar written at download time.
         """
         tracks = []
-        
+
         for f in self.output_dir.glob("*.m4a"):
             if f.name.startswith('.'):
                 continue
-                
+
             stat = f.stat()
-            tracks.append({
+            entry = {
                 'filename': f.name,
                 'path': str(f),
                 'size': stat.st_size,
                 'size_human': self._human_readable_size(stat.st_size),
                 'modified': stat.st_mtime
-            })
-        
+            }
+
+            tags = self._read_tags(f)
+            if tags:
+                entry['title'] = tags.get('title')
+                entry['artist'] = tags.get('artist')
+                entry['album'] = tags.get('album')
+
+            # The sidecar holds the YouTube id this file was extracted from.
+            # Without it the app cannot link the file back to a track.
+            sidecar = f.with_suffix('.id')
+            if sidecar.is_file():
+                try:
+                    video_id = sidecar.read_text().strip()
+                    if video_id:
+                        entry['video_id'] = video_id
+                except OSError:
+                    pass
+
+            tracks.append(entry)
+
         # Sort by modification time (newest first)
         tracks.sort(key=lambda x: x['modified'], reverse=True)
         return tracks
-    
+
     def delete_file(self, filename: str) -> bool:
         """
         Delete a file from the library.

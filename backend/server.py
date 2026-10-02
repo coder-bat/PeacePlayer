@@ -1502,14 +1502,22 @@ async def list_library(request: Request, user: dict = Depends(require_session_us
         # Convert snake_case to camelCase for iOS
         camel_tracks = []
         for track in tracks:
-            camel_tracks.append({
+            entry = {
                 "id": str(hash(track["path"])),
                 "filename": track["filename"],
                 "path": track["path"],
                 "size": track["size"],
                 "sizeHuman": track["size_human"],
                 "modified": track["modified"]
-            })
+            }
+            # 2026-10-02: these were omitted entirely, so the app received
+            # title=None for every library row. They come from the file's own
+            # embedded tags and the .id sidecar, so no extra network calls.
+            for source, target in (("title", "title"), ("artist", "artist"),
+                                   ("album", "album"), ("video_id", "videoId")):
+                if track.get(source):
+                    entry[target] = track[source]
+            camel_tracks.append(entry)
         return {"tracks": camel_tracks}
     except Exception as e:
         logger.error(f"list_library failed: {e}", exc_info=True)
