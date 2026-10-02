@@ -95,7 +95,7 @@ final class BackendConfiguration {
         case invalidURL, foreignOrigin
         var errorDescription: String? {
             switch self {
-            case .invalidURL: return "Enter a server address such as http://your-mac:8181, without a path or password."
+            case .invalidURL: return "Enter a server address such as http://batuniverse:8181, without a path or password."
             case .foreignOrigin: return "The server returned an address for a different backend. Please retry."
             }
         }

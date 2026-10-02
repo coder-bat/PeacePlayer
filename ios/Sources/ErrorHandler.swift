@@ -68,7 +68,7 @@ enum AppError: Error, Equatable {
             // (this case). The latter usually means the Mac
             // running the backend is asleep, the Tailscale IP
             // changed, or the backend was stopped.
-            return "Can't reach the PeacePlayer backend. Check that your Mac is awake and the backend host in Settings is correct."
+            return "Can't reach the PeacePlayer backend. Check that the server is running and the backend host in Settings is correct."
         case .notFound:
             return "The requested item could not be found."
         case .parsing:

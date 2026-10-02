@@ -1576,7 +1576,7 @@ class PlayerState: ObservableObject {
             print("⏰ [S17-H] Loading-state timeout reached for \(item.track.title) — surfacing error")
             self.playbackState = .error("Playback didn't start")
             ErrorHandler.shared.show(
-                .playbackFailed("\"\(item.track.title)\" didn't start playing. The stream may be unreachable — check that your Mac is awake and on the same network, then try again."),
+                .playbackFailed("\"\(item.track.title)\" didn't start playing. The stream may be unreachable — check that the backend server is reachable, then try again."),
                 retry: { [weak self] in
                     self?.play(item: item, addToQueue: false)
                 }

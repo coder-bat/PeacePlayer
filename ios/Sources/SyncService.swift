@@ -47,10 +47,10 @@ final class SyncService: ObservableObject {
     var statusText: String {
         switch state {
         case .idle: return "Backup is ready when you sign in."
-        case .uploading: return "Saving backup on your Mac…"
-        case .downloading: return "Checking your Mac’s backup…"
+        case .uploading: return "Saving backup to the server…"
+        case .downloading: return "Checking your backup…"
         case .merging: return "Restoring your library…"
-        case .completed: return "Your library is backed up on your Mac."
+        case .completed: return "Your library is backed up."
         case .failed(let message): return message
         }
     }
@@ -173,7 +173,7 @@ enum SyncNetworkError: LocalizedError {
         switch self {
         case .authentication: return "Sign in again to resume backup. Your local library is preserved."
         case .conflict: return "The backup changed on another device. Your library is preserved; retry when that device has finished."
-        case .unavailable: return "Could not reach a usable backup on your Mac. Your library is preserved. Try again later."
+        case .unavailable: return "Could not reach a usable backup. Your library is preserved. Try again later."
         }
     }
 }

@@ -1762,6 +1762,16 @@ class HomeViewModel: ObservableObject {
         librarySubscription?.cancel()
 
         isLoading = true
+        // 2026-10-02: the loader had no bound of its own. isLoading is only
+        // cleared from the publisher's receiveCompletion, so a request that
+        // stalled (or a continuation that never woke) left the spinner sitting
+        // on top of already-rendered Home content indefinitely. Race the wait
+        // against a ceiling so the UI can never be held hostage by a request.
+        let loaderDeadline = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 12_000_000_000)
+            guard !Task.isCancelled else { return }
+            self?.isLoading = false
+        }
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             librarySubscription = APIService.shared.fetchLibrary()
                 .sink(receiveCompletion: { [weak self] _ in
@@ -1772,6 +1782,7 @@ class HomeViewModel: ObservableObject {
                     self?.downloadCount = tracks.count
                 })
         }
+        loaderDeadline.cancel()
     }
 
     private func updateGreeting() {

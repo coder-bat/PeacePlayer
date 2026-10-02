@@ -118,7 +118,7 @@ struct ContentView: View {
             } else if !networkMonitor.isBackendReachable {
                 offlineBanner(
                     icon: "server.rack",
-                    message: "Can't reach music library — is your Mac awake?"
+                    message: "Can't reach the music library — check the backend server address in Settings."
                 )
                 .zIndex(2)
             }

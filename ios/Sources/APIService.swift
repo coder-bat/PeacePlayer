@@ -68,9 +68,19 @@ class APIService {
 
     private init() {
         let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 30
-        config.timeoutIntervalForResource = 60
-        config.waitsForConnectivity = true
+        // 2026-10-02: was 30s. Combined with waitsForConnectivity below and the
+        // 3-attempt retry policy, a single cold-launch request could hold the
+        // Home loader for well over a minute while the app was already showing
+        // content underneath it. The backend answers in ~15-30ms over Tailscale,
+        // so anything past ~12s is a real problem worth surfacing fast rather
+        // than sitting on.
+        config.timeoutIntervalForRequest = 12
+        config.timeoutIntervalForResource = 45
+        // Waiting for connectivity means a request issued before the network is
+        // up parks silently instead of failing. Over Tailscale that turns a
+        // brief blip into a long stall; fail fast and let the retry policy --
+        // which has backoff -- handle reconnection instead.
+        config.waitsForConnectivity = false
         config.requestCachePolicy = .reloadIgnoringLocalCacheData
         self.session = URLSession(configuration: config)
         print("🔗 APIService initialized with baseURL: \(baseURL)")

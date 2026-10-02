@@ -122,7 +122,14 @@ final class AudioSessionController {
                 // on the other pod) works fine under `.default`
                 // — it's not actually policy-specific.
                 policy: .default,
-                options: [.allowAirPlay, .allowBluetooth, .allowBluetoothA2DP]
+                // 2026-10-02: dropped .allowAirPlay. It was deprecated in
+                // iOS 10 and is not a valid option for the .playback category
+                // (which permits AirPlay by default), so passing it made every
+                // setCategory throw paramErr (-50) and left the session in a
+                // degraded state. Also collapsed .allowBluetooth -- A2DP
+                // already implies the high-quality stereo path, so the bare
+                // HFP option was redundant.
+                options: [.allowBluetoothA2DP]
             )
             try session.setActive(true)
         } catch {
@@ -159,7 +166,7 @@ final class AudioSessionController {
                 // playback). `.default` is the right policy
                 // for a music app with bluetooth + airplay.
                 policy: .default,
-                options: [.allowAirPlay, .allowBluetooth, .allowBluetoothA2DP]
+                options: [.allowBluetoothA2DP]
             )
         } catch {
             print("❌ AudioSessionController category setup failed: \(error)")

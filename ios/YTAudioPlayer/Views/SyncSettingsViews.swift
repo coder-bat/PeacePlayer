@@ -10,7 +10,7 @@ struct BackendSettingsView: View {
         NavigationStack {
             Form {
                 Section {
-                    TextField("http://your-mac:8181", text: $address)
+                    TextField("http://batuniverse:8181", text: $address)
                         .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
                         .accessibilityLabel("Backend server address")
                     Button(testing ? "Testing connection…" : "Test connection") {
@@ -18,9 +18,9 @@ struct BackendSettingsView: View {
                     }.disabled(testing)
                     if let message { Text(message).font(.callout).accessibilityIdentifier("backendConnectionStatus") }
                 } header: {
-                    Text("Your Mac’s server")
+                    Text("Your server")
                 } footer: {
-                    Text("Use an HTTP or HTTPS address. Your Mac must be reachable over Wi-Fi or your private network.")
+                    Text("Use an HTTP or HTTPS address. The server must be reachable over Wi-Fi or your private network.")
                 }
                 Section {
                     Button("Save server address") {
@@ -82,7 +82,7 @@ struct BackupStatusSection: View {
                 }.disabled(sync.isBusy)
             }
         } header: {
-            Text("Backup on your Mac")
+            Text("Cloud backup")
         } footer: {
             Text("A saved library from another account or an older installation is kept separately until you choose to import it.")
         }

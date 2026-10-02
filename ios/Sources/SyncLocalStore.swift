@@ -172,6 +172,18 @@ final class SyncLocalStore {
     static func applyLive(_ snapshot: SyncSnapshot, persistence: PersistenceController = .shared) throws {
         let playlists = try snapshot.playlists.map { try $0.playlist() }
         var metadata = Dictionary(snapshot.tracks.map { ($0.videoId, $0) }, uniquingKeysWith: { _, last in last })
+        // 2026-10-02: the server backfills placeholder metadata for any track it
+        // cannot describe -- the legacy blob predates stored track metadata, so
+        // its migration invents entries titled "Recovered track" purely to keep
+        // the envelope valid. Taking the snapshot's copy verbatim let those
+        // placeholders overwrite real local titles, artists and durations, and
+        // the library filled up with "Recovered track" rows. Prefer our own
+        // metadata whenever we have it; the placeholder is a last resort.
+        for (id, track) in metadata where track.title.hasPrefix("Recovered track") {
+            if let real = TrackStore.shared.getTrack(videoId: id) {
+                metadata[id] = real
+            }
+        }
         let ids = Set(snapshot.playlists.flatMap(\.trackIds) + snapshot.favorites + snapshot.history.map(\.videoId))
         for id in ids where metadata[id] == nil {
             metadata[id] = TrackStore.shared.getTrack(videoId: id) ?? Track(videoId: id,
