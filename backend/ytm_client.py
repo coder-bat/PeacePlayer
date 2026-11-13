@@ -397,17 +397,16 @@ class YTMusicClient:
         Resolve a video id to a CDN URL that can actually carry the whole
         track, for the server-side transcode.
 
-        Why this is not the InnerTube URL (measured 2026-11-14 on the
-        homelab, which is the machine that serves the iOS app):
-        YouTube's CDN serves at most the FIRST 1 MB of an InnerTube iOS
-        URL and answers 403 for anything larger. The same URL fetched
-        without a Range header is refused outright. The yt-dlp URL
-        (mediaconnect / visionOS client) serves the whole file - an
-        open-ended "Range: bytes=0-" returns all 5.8 MB in 0.24s.
+        Primary: InnerTube's visionOS client - one 0.135s player POST, a
+        pre-signed URL, no decipher, and (unlike the iOS client's URLs)
+        not preview-capped. Measured 2026-11-14 on the homelab: an
+        open-ended "Range: bytes=0-" returned the whole 2.2 MB in 0.23s.
 
-        So: InnerTube for search and metadata (fast), yt-dlp for the
-        bytes. AAC m4a is preferred over webm/Opus so the transcode can
-        remux instead of re-encoding.
+        Fallback: yt-dlp's mediaconnect client, which also works but
+        costs ~2.5s per resolve.
+
+        The iOS client's URLs are never used here: YouTube's CDN serves at
+        most the first 1 MB of them and 403s everything else.
 
         Args:
             video_id: YouTube video ID
@@ -419,29 +418,48 @@ class YTMusicClient:
         if cached and (time.time() - cached[0]) < _MEDIA_URL_TTL:
             return cached[1]
 
-        stream = self._get_stream_url_ytdlp(video_id)
-        if not stream:
-            return None
-        formats = stream.get('audio_formats') or []
-        if not formats:
-            return None
+        url = None
+        try:
+            media = innertube.get_client().resolve_media(video_id)
+            url = media.get("url")
+            if url:
+                logger.info(
+                    f"Media URL for {video_id}: itag {media.get('itag')} "
+                    f"({media.get('mime_type')}) via {media.get('_resolver')} "
+                    f"in {media.get('_t_total')}s"
+                )
+        except Exception as exc:
+            logger.warning(
+                f"Innertube media resolve failed for {video_id} ({exc}); "
+                f"falling back to yt-dlp"
+            )
 
-        def rank(fmt):
-            # m4a (AAC) first - it is what the remux path wants - then
-            # the highest bitrate of whatever else is on offer.
-            is_m4a = 1 if fmt.get('mime_type') in ('m4a', 'audio/mp4') else 0
-            return (is_m4a, fmt.get('bitrate') or 0)
+        if not url:
+            stream = self._get_stream_url_ytdlp(video_id)
+            if not stream:
+                return None
+            formats = stream.get('audio_formats') or []
+            if not formats:
+                return None
 
-        best = max(formats, key=rank)
-        url = best.get('url')
+            def rank(fmt):
+                # m4a (AAC) first - it is what the remux path wants -
+                # then the highest bitrate of whatever else is on offer.
+                is_m4a = 1 if fmt.get('mime_type') in ('m4a', 'audio/mp4') else 0
+                return (is_m4a, fmt.get('bitrate') or 0)
+
+            best = max(formats, key=rank)
+            url = best.get('url')
+            if url:
+                logger.info(
+                    f"Media URL for {video_id}: itag {best.get('itag')} "
+                    f"({best.get('mime_type')}) via yt-dlp"
+                )
         if not url:
             return None
         self._media_url_cache[video_id] = (time.time(), url)
-        logger.info(
-            f"Media URL for {video_id}: itag {best.get('itag')} "
-            f"({best.get('mime_type')}, {best.get('bitrate')} bps)"
-        )
         return url
+
 
     def _get_stream_url_ytdlp(self, video_id: str) -> Optional[Dict]:
         """

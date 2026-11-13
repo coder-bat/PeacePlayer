@@ -85,8 +85,8 @@ class FakeClient(innertube.InnerTubeClient):
         self._search_tracks = search_tracks or []
         self.calls = []
 
-    def _player_data(self, video_id):
-        self.calls.append(("player", video_id))
+    def _player_data(self, video_id, client="IOS"):
+        self.calls.append(("player", client, video_id))
         playability = self._player.get("playabilityStatus") or {}
         status = playability.get("status")
         if status and status != "OK":
@@ -470,6 +470,105 @@ def test_get_media_url_returns_none_when_nothing_resolves(monkeypatch):
     client._media_url_cache = {}
     monkeypatch.setattr(client, "_get_stream_url_ytdlp", lambda video_id: None)
     assert client.get_media_url("abc123") is None
+
+
+def test_resolve_media_uses_the_visionos_client_and_prefers_aac(monkeypatch):
+    """The media URL must come from the visionOS client.
+
+    Its URLs are pre-signed (no decipher) and, unlike the iOS client's,
+    NOT preview-capped - so they can carry a whole track.
+    """
+    client = FakeClient()
+    seen = {}
+
+    def fake_player_data(video_id, client="IOS"):
+        seen["client"] = client
+        return PLAYER_RESPONSE
+
+    monkeypatch.setattr(client, "_player_data", fake_player_data)
+    media = client.resolve_media("abc123")
+    assert seen["client"] == "VISIONOS"
+    assert media["url"].startswith("https://")
+    assert media["mime_type"] == "m4a"
+    assert media["itag"] == 140
+    assert media["_resolver"] == "innertube_visionos"
+
+
+def test_resolve_media_falls_back_to_another_audio_format(monkeypatch):
+    client = FakeClient()
+    payload = {
+        "playabilityStatus": {"status": "OK"},
+        "videoDetails": {"lengthSeconds": "100"},
+        "streamingData": {"adaptiveFormats": [
+            {"itag": 251, "url": "https://cdn/opus", "mimeType": 'audio/webm; codecs="opus"',
+             "bitrate": 133000},
+        ]},
+    }
+    monkeypatch.setattr(client, "_player_data", lambda video_id, client="IOS": payload)
+    media = client.resolve_media("abc123")
+    assert media["itag"] == 251
+    assert media["mime_type"] == "webm"
+
+
+def test_thumbnail_urls_are_pointed_at_our_proxy():
+    from server import _innertube_track_to_response, _proxy_thumbnails
+
+    track = {
+        "video_id": "FGBhQbmPwH8",
+        "title": "One More Time",
+        "artist": "Daft Punk",
+        "duration": "5:22",
+        "thumbnails": [
+            {"url": "https://i.ytimg.com/vi/FGBhQbmPwH8/default.jpg", "width": 120, "height": 90},
+            {"url": "https://i.ytimg.com/vi/FGBhQbmPwH8/hqdefault.jpg", "width": 480, "height": 360},
+        ],
+    }
+    mapped = _innertube_track_to_response(track, "http://batuniverse:8181")
+    urls = [t["url"] for t in mapped["thumbnails"]]
+    assert all(u.startswith("http://batuniverse:8181/thumb/") for u in urls)
+    assert "/thumb/FGBhQbmPwH8.jpg" in urls[0]
+    # the small thumbnail is still the small one
+    assert mapped["thumbnailSmall"]["width"] == 120
+    assert mapped["thumbnailLarge"]["width"] == 480
+
+
+def test_proxy_thumbnails_leaves_foreign_urls_alone():
+    from server import _proxy_thumbnails
+
+    out = _proxy_thumbnails([{"url": "https://example.com/art.jpg", "width": 100}], "http://x")
+    assert out == []
+
+
+def test_thumbnail_endpoint_caches_the_image(tmp_path, monkeypatch):
+    import asyncio
+    import server as server_module
+
+    monkeypatch.setattr(server_module, "THUMB_CACHE_DIR", tmp_path)
+
+    class FakeResp:
+        status_code = 200
+        content = b"x" * 500
+
+    calls = []
+
+    def fake_get(url, headers=None, timeout=None):
+        calls.append(url)
+        return FakeResp()
+
+    monkeypatch.setattr(server_module._requests, "get", fake_get)
+
+    async def scenario():
+        req = _fake_request(server_module.app)
+        first = await server_module.thumbnail("FGBhQbmPwH8", req, s="hqdefault")
+        second = await server_module.thumbnail("FGBhQbmPwH8", req, s="hqdefault")
+        return first, second
+
+    first, second = asyncio.run(scenario())
+    assert first.media_type == "image/jpeg"
+    assert len(first.body) == 500
+    assert second.body == first.body
+    # the second call was served from disk
+    assert len(calls) == 1
 
 
 def test_format18_probe_switches_itself_off(monkeypatch):

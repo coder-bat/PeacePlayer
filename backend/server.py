@@ -37,6 +37,10 @@ from runtime_config import (
     YTDLP_COMMAND, FFMPEG_BIN, DENO_BIN,
 )
 
+# Artwork cache: the phone loads thumbnails from here instead of from
+# i.ytimg.com, so they arrive from a nearby server and are cached on disk.
+THUMB_CACHE_DIR = AUDIO_CACHE_DIR.parent / "thumbs"
+
 from ytm_client import YTMusicClient, get_client, reset_client
 from extractor import AudioExtractor, get_extractor
 from stream_cache import get_cache
@@ -811,7 +815,33 @@ def _pick_thumbnail(thumbnails: List[dict], min_width: int, max_width: int) -> O
     }
 
 
-def _innertube_track_to_response(track: dict) -> dict:
+def _proxy_thumbnails(thumbnails: List[dict], base_url: str) -> List[dict]:
+    """Point artwork at our own thumbnail proxy.
+
+    The phone used to fetch every thumbnail straight from i.ytimg.com,
+    over whatever link it happened to be on. The homelab pulls the same
+    image in ~0.15s (measured 2026-11-14) and caches it, so the phone
+    gets it from a nearby server instead of from the open internet.
+    """
+    proxied = []
+    for thumb in thumbnails:
+        url = thumb.get("url") or ""
+        match = re.search(r"/vi/([^/]+)/", url)
+        if not match:
+            continue
+        video_id = match.group(1)
+        size = "hqdefault"
+        if int(thumb.get("width") or 0) <= 240:
+            size = "mqdefault"
+        proxied.append({
+            "url": f"{base_url.rstrip('/')}/thumb/{video_id}.jpg?s={size}",
+            "width": int(thumb.get("width") or 0),
+            "height": int(thumb.get("height") or 0),
+        })
+    return proxied
+
+
+def _innertube_track_to_response(track: dict, base_url: str = "") -> dict:
     """Map an InnerTube search hit onto the existing TrackResponse contract.
 
     The iOS app decodes [Track] strictly, so the shape must stay identical to
@@ -820,6 +850,8 @@ def _innertube_track_to_response(track: dict) -> dict:
     thumbnails = [
         thumb for thumb in (track.get("thumbnails") or []) if thumb.get("url")
     ]
+    if base_url:
+        thumbnails = _proxy_thumbnails(thumbnails, base_url)
     artist = (track.get("artist") or "").strip()
     return {
         "videoId": track.get("video_id", ""),
@@ -835,6 +867,51 @@ def _innertube_track_to_response(track: dict) -> dict:
         "isExplicit": False,
         "videoType": "MUSIC_VIDEO_TYPE_ATV",
     }
+
+
+@app.get("/thumb/{video_id}.jpg")
+@limiter.limit("300/minute")
+async def thumbnail(video_id: str, request: Request, s: str = "hqdefault"):
+    """Serve YouTube artwork from the backend, with a disk cache.
+
+    The iOS app used to load every thumbnail straight from i.ytimg.com,
+    over whatever link the phone was on. The homelab pulls the same image
+    in ~0.15s and keeps it on disk, so the phone gets artwork from a
+    nearby server (and instantly the second time).
+    """
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,32}", video_id):
+        raise HTTPException(status_code=400, detail="bad video id")
+    size = s if s in ("default", "mqdefault", "hqdefault", "sddefault", "maxresdefault") else "hqdefault"
+
+    cache_dir = THUMB_CACHE_DIR
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    path = cache_dir / f"{video_id}_{size}.jpg"
+    if not path.exists() or path.stat().st_size < 100:
+        url = f"https://i.ytimg.com/vi/{video_id}/{size}.jpg"
+        try:
+            response = await asyncio.to_thread(
+                _requests.get, url, headers={"User-Agent": "PeacePlayer/1.0"}, timeout=15
+            )
+            if response.status_code == 200 and len(response.content) > 100:
+                path.write_bytes(response.content)
+            else:
+                raise HTTPException(status_code=404, detail="thumbnail unavailable")
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.warning("thumbnail fetch failed for %s: %s", video_id, exc)
+            raise HTTPException(status_code=404, detail="thumbnail unavailable")
+
+    data = path.read_bytes()
+    return Response(
+        content=data,
+        media_type="image/jpeg",
+        headers={
+            "Content-Length": str(len(data)),
+            "Cache-Control": "public, max-age=604800",
+            "Access-Control-Allow-Origin": "*",
+        },
+    )
 
 
 @app.post("/search", response_model=List[TrackResponse])
@@ -856,13 +933,21 @@ async def search(query: SearchQuery, request: Request, user: dict = Depends(requ
     if cached is not None:
         return cached
 
+    # Artwork is served by our own /thumb endpoint so the phone does not
+    # fetch every image from i.ytimg.com over its own (slow) link. The
+    # base URL comes from the request, so the phone gets a host it can
+    # actually reach.
+    base_url = str(request.base_url).rstrip("/")
+
     # Fast path: InnerTube (same client as Musi).
     try:
         results = await asyncio.to_thread(
             innertube.get_client().search, query.query, query.limit
         )
         if results:
-            response = [_innertube_track_to_response(track) for track in results]
+            response = [
+                _innertube_track_to_response(track, base_url) for track in results
+            ]
             search_cache.set(cache_key, response)
             return response
         logger.info("Innertube search returned no results for %r", query.query)
@@ -880,6 +965,15 @@ async def search(query: SearchQuery, request: Request, user: dict = Depends(requ
             return []
 
         response = [TrackResponse(**track).model_dump() for track in results]
+        # The YouTube Music API also hands out i.ytimg.com URLs - point
+        # those at our proxy as well, so artwork behaves the same way
+        # whichever path answered the search.
+        for item in response:
+            proxied = _proxy_thumbnails(item.get("thumbnails") or [], base_url)
+            if proxied:
+                item["thumbnails"] = proxied
+                item["thumbnailSmall"] = _pick_thumbnail(proxied, 120, 240)
+                item["thumbnailLarge"] = _pick_thumbnail(proxied, 480, 720)
         search_cache.set(cache_key, response)
         return response
 

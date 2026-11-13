@@ -65,6 +65,19 @@ IOS_USER_AGENT = os.environ.get(
     "(KHTML, like Gecko) Mobile/15E148 Safari/604.1",
 )
 
+# The visionOS client - the same one yt-dlp calls "mediaconnect". Unlike
+# the iOS client its URLs are NOT preview-capped, so they can carry a whole
+# track. Measured 2026-11-14: player POST 0.135s, whole file over an
+# open-ended Range in 0.23s.
+VISIONOS_CLIENT_VERSION = os.environ.get(
+    "INNERTUBE_VISIONOS_CLIENT_VERSION", "1.02"
+)
+VISIONOS_USER_AGENT = os.environ.get(
+    "INNERTUBE_VISIONOS_USER_AGENT",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 15_7_3) AppleWebKit/605.1.15 "
+    "(KHTML, like Gecko) Version/26.0 Safari/605.1.15",
+)
+
 # Highest preference first.
 #  140/139 -> AAC m4a, pre-signed (what the IOS client returns)
 #  251/250/249 -> opus, only used if the AAC ladder is missing
@@ -204,8 +217,14 @@ class InnerTubeClient:
     # ------------------------------------------------------------------ #
     # playback
     # ------------------------------------------------------------------ #
-    def _visitor_for_video(self, video_id: str) -> Optional[str]:
-        """visitorData is session-scoped; the watch page always carries it."""
+    def _ensure_visitor(self, video_id: str) -> Optional[str]:
+        """visitorData is session-scoped and comes with the watch page.
+
+        It is cached for the life of the client, because the watch page
+        costs 0.2-1.0s and every player call needs it. A cached visitor
+        that YouTube has stopped accepting shows up as LOGIN_REQUIRED on
+        the player POST, and _player_response retries with a fresh one.
+        """
         if self._visitor_data:
             return self._visitor_data
         page = self._fetch_page(WATCH_URL.format(video_id=video_id))
@@ -214,7 +233,12 @@ class InnerTubeClient:
             self._visitor_data = visitor
         return visitor
 
-    def _player_response(self, video_id: str, visitor_data: Optional[str]) -> Dict[str, Any]:
+    def _player_response(
+        self,
+        video_id: str,
+        visitor_data: Optional[str],
+        client: str = "IOS",
+    ) -> Dict[str, Any]:
         headers = self._headers({
             "Content-Type": "application/json",
             "Origin": "https://www.youtube.com",
@@ -223,12 +247,40 @@ class InnerTubeClient:
             headers["X-Goog-Visitor-Id"] = visitor_data
         response = self.session.post(
             PLAYER_URL,
-            data=json.dumps(self._player_payload(video_id)),
+            data=json.dumps(self._payload_for(client, video_id)),
             headers=headers,
             timeout=self.timeout,
         )
         response.raise_for_status()
         return response.json()
+
+    def _payload_for(self, client: str, video_id: str) -> Dict[str, Any]:
+        if client == "VISIONOS":
+            return {
+                "context": {
+                    "client": {
+                        "hl": self.hl,
+                        "gl": "US",
+                        "clientName": "VISIONOS",
+                        "clientVersion": VISIONOS_CLIENT_VERSION,
+                        "deviceMake": "Apple",
+                        "deviceModel": "RealityDevice17,1",
+                        "userAgent": VISIONOS_USER_AGENT,
+                        "osName": "visionOS",
+                        "osVersion": "26.5.23O471",
+                    },
+                    "user": {"lockedSafetyMode": False},
+                    "request": {
+                        "useSsl": True,
+                        "internalExperimentFlags": [],
+                        "consistencyTokenJars": [],
+                    },
+                },
+                "contentCheckOk": True,
+                "racyCheckOk": True,
+                "videoId": video_id,
+            }
+        return self._player_payload(video_id)
 
     @staticmethod
     def _select_formats(streaming_data: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
@@ -292,27 +344,92 @@ class InnerTubeClient:
             "_title": details.get("title"),
         }
 
-    def _player_data(self, video_id: str) -> Dict[str, Any]:
-        """Raw InnerTube player response, cached briefly per video id."""
-        cached = self._player_cache.get(video_id)
+    def _player_data(self, video_id: str, client: str = "IOS") -> Dict[str, Any]:
+        """Raw InnerTube player response, cached briefly per client + video id.
+
+        The watch page is only fetched when there is no visitor yet: a
+        visitor is session-scoped, so one fetch serves every later call.
+        """
+        key = f"{client}:{video_id}"
+        cached = self._player_cache.get(key)
         if cached and (time.time() - cached[0]) < self._player_cache_ttl:
             return cached[1]
 
-        page = self._fetch_page(WATCH_URL.format(video_id=video_id))
-        visitor = self._extract_visitor_data(page) or self._visitor_data
-        if visitor:
-            self._visitor_data = visitor
-
-        data = self._player_response(video_id, visitor)
+        visitor = self._ensure_visitor(video_id)
+        data = self._player_response(video_id, visitor, client=client)
 
         playability = data.get("playabilityStatus") or {}
         status = playability.get("status")
         if status and status != "OK":
             reason = playability.get("reason") or status
-            raise InnerTubeError(reason, kind=self._classify(reason))
+            kind = self._classify(reason)
+            if kind == "needs_login" and self._visitor_data:
+                # The cached visitor was rejected - fetch a fresh one and
+                # try once more before giving up.
+                self._visitor_data = None
+                visitor = self._ensure_visitor(video_id)
+                data = self._player_response(video_id, visitor, client=client)
+                playability = data.get("playabilityStatus") or {}
+                status = playability.get("status")
+                if status and status != "OK":
+                    reason = playability.get("reason") or status
+                    raise InnerTubeError(reason, kind=self._classify(reason))
+            else:
+                raise InnerTubeError(reason, kind=kind)
 
-        self._player_cache[video_id] = (time.time(), data)
+        self._player_cache[key] = (time.time(), data)
         return data
+
+    def resolve_media(self, video_id: str) -> Dict[str, Any]:
+        """Resolve a video id to a CDN URL that can carry the whole track.
+
+        This uses the visionOS client - the same one yt-dlp's
+        "mediaconnect" client uses - over raw InnerTube. Measured
+        2026-11-14 on the homelab:
+
+          * the player POST takes 0.135-0.26s (no yt-dlp, no decipher:
+            the URLs are pre-signed, signatureCipher is absent)
+          * the URL serves the WHOLE file - an open-ended "Range: bytes=0-"
+            returned 2.2 MB in 0.23s
+
+        The iOS client's URLs, by contrast, are preview-capped: YouTube's
+        CDN serves at most the first 1 MB of them and answers 403 for
+        everything else, so they cannot be used to fetch a track.
+
+        Returns a dict with the url, itag, mime type and size.
+        """
+        started = time.time()
+        data = self._player_data(video_id, client="VISIONOS")
+        streaming = data.get("streamingData") or {}
+        formats = self._select_formats(streaming)
+        if not formats:
+            raise InnerTubeError(
+                "no directly playable audio format in streamingData",
+                kind="no_formats",
+            )
+        # AAC m4a first (140 = 128kbps, 139 = 48kbps): the transcode can
+        # then remux instead of re-encoding, which is 58x faster.
+        def rank(item):
+            itag = item[0]
+            preference = {"140": 2, "139": 1}.get(itag, 0)
+            return (preference, int(item[1].get("bitrate") or 0))
+
+        itag, best = sorted(formats.items(), key=rank, reverse=True)[0]
+        mime = best.get("mimeType") or ""
+        details = data.get("videoDetails") or {}
+        return {
+            "url": best.get("url"),
+            "itag": int(itag) if itag.isdigit() else itag,
+            "mime_type": "m4a" if "mp4" in mime else "webm",
+            "content_length": int(best.get("contentLength") or 0),
+            "bitrate": int(best.get("bitrate") or 0),
+            "duration": int(details.get("lengthSeconds") or 0),
+            "title": details.get("title") or "",
+            "expires_in_seconds": int(streaming.get("expiresInSeconds") or 21600),
+            "_resolver": "innertube_visionos",
+            "_pre_signed": "signatureCipher" not in best,
+            "_t_total": round(time.time() - started, 3),
+        }
 
     def resolve_stream(self, video_id: str) -> Dict[str, Any]:
         """Resolve a video id into the shape ytm_client.get_stream_url() returns.
