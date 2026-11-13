@@ -145,6 +145,14 @@ _FORMAT18_MISS_LIMIT = 3
 _format18_misses = 0
 _format18_probe_disabled = False
 
+# The verdict survives a restart: without it, every deploy would spend
+# three cold plays re-discovering that yt-dlp no longer offers itag 18.
+_FORMAT18_MARKER = settings.data_dir / "itag18_unavailable"
+try:
+    _format18_probe_disabled = _FORMAT18_MARKER.exists()
+except OSError:
+    _format18_probe_disabled = False
+
 
 def _format18_record_probe(success: bool, error: str = "") -> None:
     """Feed the probe result back into the adaptive switch."""
@@ -155,6 +163,11 @@ def _format18_record_probe(success: bool, error: str = "") -> None:
             logger.info("[fast] itag 18 probe works again - re-enabled")
         _format18_misses = 0
         _format18_probe_disabled = False
+        try:
+            if _FORMAT18_MARKER.exists():
+                _FORMAT18_MARKER.unlink()
+        except OSError:
+            pass
         return
 
     lowered = (error or "").lower()
@@ -167,6 +180,11 @@ def _format18_record_probe(success: bool, error: str = "") -> None:
                 "cold plays go straight to the transcoded AAC path",
                 _format18_misses,
             )
+            try:
+                _FORMAT18_MARKER.parent.mkdir(parents=True, exist_ok=True)
+                _FORMAT18_MARKER.write_text("yt-dlp no longer offers itag 18")
+            except OSError:
+                pass
     else:
         # transient: network hiccup, 429, timeout - not a verdict on itag 18
         logger.warning("[fast] itag 18 probe failed for a transient reason: %s",
@@ -1356,7 +1374,7 @@ async def audio_stream(video_id: str, request: Request):
 #     actual streaming URL opaque to the client
 @app.api_route("/fast/{video_id}.mp4", methods=["GET", "HEAD"])
 @limiter.limit("60/minute")
-async def fast_stream(video_id: str, request: Request):
+async def fast_stream(video_id: str, request: Request, background_tasks: BackgroundTasks = None):
     # Auth: same as /audio — accept Authorization header OR ?token= query
     from urllib.parse import unquote, quote
     auth_header = request.headers.get('Authorization') or ''
@@ -1433,6 +1451,28 @@ async def fast_stream(video_id: str, request: Request):
             status_code=302,
         )
 
+    # The itag-18 probe runs in the BACKGROUND. It costs a yt-dlp
+    # subprocess (~3s) and the production yt-dlp does not offer itag 18
+    # for music videos any more, so blocking the play on it cost every
+    # cold play 3 seconds for a redirect that was never going to
+    # happen. Now the play goes straight to the transcoded path and the
+    # probe fills the cache for later plays - if the format ever comes
+    # back, the next play of that track is the progressive video again.
+    if background_tasks is not None:
+        background_tasks.add_task(_probe_format18, video_id)
+    else:
+        asyncio.create_task(_probe_format18(video_id))
+
+    # Carry the token through: /audio enforces the same auth as this
+    # endpoint, so dropping it would turn a working fallback into a 401.
+    return RedirectResponse(
+        url=f"/audio/{video_id}.m4a?token={quote(token_param)}",
+        status_code=302,
+    )
+
+
+async def _probe_format18(video_id: str) -> None:
+    """Background: ask yt-dlp for the progressive itag 18 URL and cache it."""
     try:
         proc = await asyncio.create_subprocess_exec(
             *YTDLP_COMMAND,
@@ -1453,27 +1493,17 @@ async def fast_stream(video_id: str, request: Request):
             raise RuntimeError("yt-dlp returned an empty URL")
     except Exception as exc:
         _format18_record_probe(False, str(exc))
-        logger.warning(
-            "[fast] %s: progressive format 18 unavailable (%s); serving transcoded audio",
+        logger.info(
+            "[fast] %s: progressive format 18 unavailable (%s)",
             video_id, exc,
         )
-        # Carry the token through: /audio enforces the same auth as this
-        # endpoint, so dropping it would turn a working fallback into a 401.
-        return RedirectResponse(
-            url=f"/audio/{video_id}.m4a?token={quote(token_param)}",
-            status_code=302,
-        )
+        return
 
     _format18_record_probe(True)
-    logger.info(f"[fast] {video_id} -> YouTube format 18 (cold, {len(yt_url)}-byte URL)")
+    logger.info(f"[fast] %s -> YouTube format 18 (cold, %d-byte URL)", video_id, len(yt_url))
     # Cache for the next 5h. Subsequent cold plays of the
     # same track within that window skip the yt-dlp cost.
     _format18_put(video_id, yt_url)
-    # 302 to YouTube. iOS's AVPlayer follows the redirect
-    # and starts fetching the progressive MP4 from YouTube's
-    # CDN. The URL is already signed (exp=...&sig=...); it's
-    # valid for ~6h.
-    return RedirectResponse(url=yt_url, status_code=302)
 
 
 # Prefetch endpoint - fire-and-forget cache warming

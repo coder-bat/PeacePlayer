@@ -571,6 +571,43 @@ def test_thumbnail_endpoint_caches_the_image(tmp_path, monkeypatch):
     assert len(calls) == 1
 
 
+def test_fast_endpoint_does_not_block_on_the_itag18_probe(monkeypatch):
+    """/fast must answer immediately.
+
+    The itag-18 probe costs a yt-dlp subprocess (~3s) and the production
+    yt-dlp does not offer itag 18 for music videos, so it runs in the
+    background and the play goes straight to the transcoded path.
+    """
+    import asyncio
+    from fastapi import BackgroundTasks
+    import server as server_module
+
+    monkeypatch.setattr(server_module, "_format18_probe_disabled", False)
+    monkeypatch.setattr(server_module, "current_user_from_request",
+                        lambda header: {"user_id": "u1"})
+
+    spawned = []
+
+    async def fail_if_spawned(*args, **kwargs):
+        spawned.append(args)
+        raise AssertionError("the /fast endpoint must not spawn yt-dlp inline")
+
+    monkeypatch.setattr(server_module.asyncio, "create_subprocess_exec", fail_if_spawned)
+
+    async def scenario():
+        req = _fake_request(server_module.app)
+        tasks = BackgroundTasks()
+        response = await server_module.fast_stream("vid123", req, tasks)
+        return response, tasks
+
+    response, tasks = asyncio.run(scenario())
+    assert response.status_code == 302
+    assert "/audio/vid123.m4a" in response.headers["location"]
+    assert spawned == []
+    # the probe was scheduled as a background task instead
+    assert len(tasks.tasks) == 1
+
+
 def test_format18_probe_switches_itself_off(monkeypatch):
     """yt-dlp 2026.08.19 has no itag 18 for music videos.
 
