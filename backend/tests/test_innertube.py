@@ -264,23 +264,55 @@ class FakeSession:
         if rng == "bytes=0-0":
             return FakeResponse(206, b"x",
                                 {"Content-Range": f"bytes 0-0/{self.total}"})
-        start = int(rng.split("=")[1].split("-")[0])
+        # A real range request: bytes=start-end
+        bounds = rng.split("=", 1)[1]
+        start_text, end_text = bounds.split("-", 1)
+        start = int(start_text)
+        end = int(end_text) if end_text else min(start + innertube.CDN_CHUNK_SIZE - 1,
+                                                 self.total - 1)
         if self.fail_at is not None and start >= self.fail_at:
             return FakeResponse(403)
-        end = min(start + innertube.CDN_CHUNK_SIZE - 1, self.total - 1)
+        end = min(end, self.total - 1)
         return FakeResponse(206, b"a" * (end - start + 1))
 
 
-def test_download_audio_prefers_the_open_ended_range(tmp_path):
-    """One request, whole file - measured 0.24s for 5.8 MB on the homelab."""
+def test_download_audio_uses_parallel_ranges_for_a_large_file(tmp_path):
+    """The CDN throttles ONE connection, so a big file comes in parallel."""
     destination = tmp_path / "source.m4a"
-    session = FakeSession(total=1024 * 1024 + 4096)
+    total = 4 * 1024 * 1024
+    session = FakeSession(total=total)
+    written = innertube.InnerTubeClient.download_audio(
+        "https://example.com/v", str(destination), session=session,
+        session_factory=lambda: session)
+    assert written == total
+    assert destination.stat().st_size == total
+    # one size probe plus one request per parallel range
+    ranges = [r for r in session.requests if r and r.startswith("bytes=")]
+    assert "bytes=0-0" in ranges
+    parallel = [r for r in ranges if r not in ("bytes=0-0", "bytes=0-")]
+    assert len(parallel) == innertube.PARALLEL_CONNECTIONS
+    # the ranges cover the whole file exactly once
+    covered = []
+    for item in parallel:
+        start_text, end_text = item.split("=", 1)[1].split("-", 1)
+        covered.append((int(start_text), int(end_text)))
+    covered.sort()
+    assert covered[0][0] == 0
+    assert covered[-1][1] == total - 1
+    for previous, following in zip(covered, covered[1:]):
+        assert following[0] == previous[1] + 1
+
+
+def test_download_audio_uses_one_request_for_a_small_file(tmp_path):
+    """Below the parallel threshold a single open-ended range is instant."""
+    destination = tmp_path / "source.m4a"
+    session = FakeSession(total=64 * 1024)
     written = innertube.InnerTubeClient.download_audio(
         "https://example.com/v", str(destination), session=session)
-    assert written == 1024 * 1024 + 4096
+    assert written == 64 * 1024
     assert destination.stat().st_size == written
-    # one request, and it is the open-ended range
-    assert session.requests == ["bytes=0-"]
+    # size probe first, then the open-ended range
+    assert session.requests == ["bytes=0-0", "bytes=0-"]
 
 
 def test_download_audio_falls_back_when_the_open_ended_range_is_refused(tmp_path):
@@ -289,9 +321,10 @@ def test_download_audio_falls_back_when_the_open_ended_range_is_refused(tmp_path
     session = FakeSession(total=4 * 1024 * 1024, fail_at=1024 * 1024, capped=True)
     with pytest.raises(IOError):
         innertube.InnerTubeClient.download_audio(
-            "https://example.com/v", str(destination), session=session)
-    # it tried the open-ended range, then the plain GET, then the chunks
-    assert session.requests[0] == "bytes=0-"
+            "https://example.com/v", str(destination), session=session,
+            session_factory=lambda: session)
+    # it tried the parallel ranges, then the open-ended range, then the plain GET
+    assert "bytes=0-" in session.requests
     assert None in session.requests
 
 
@@ -301,7 +334,8 @@ def test_download_audio_raises_when_the_cdn_caps_the_file(tmp_path):
     session = FakeSession(total=4 * 1024 * 1024, fail_at=1024 * 1024, capped=True)
     with pytest.raises(IOError):
         innertube.InnerTubeClient.download_audio(
-            "https://example.com/v", str(destination), session=session)
+            "https://example.com/v", str(destination), session=session,
+            session_factory=lambda: session)
 
 
 # --------------------------------------------------------------------------

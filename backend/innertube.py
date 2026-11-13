@@ -39,8 +39,10 @@ Measured 2026-11-13 (this repo, live YouTube):
 """
 
 import ast
+import concurrent.futures
 import json
 import logging
+import math
 import os
 import re
 import time
@@ -90,6 +92,28 @@ PREFERRED_ITAGS = ("140", "139", "251", "250", "249")
 # header is refused outright. 512 KB keeps every chunk request inside the
 # window that does work.
 CDN_CHUNK_SIZE = 512 * 1024
+
+# --- Parallel range download (2026-11-14) ---------------------------------
+# YouTube's CDN throttles ONE connection to a track hard, and the throttle is
+# per connection. Measured on the homelab (the machine that serves the iOS
+# app), same URL, same file:
+#
+#   * one open-ended Range  ->  32 KB/s  (a 69 MB track = 36 MINUTES)
+#   * eight parallel Ranges ->  53 MB/s  (the same 69 MB in 1.3 s)
+#
+# A single-connection download is not "slow", it is a hang: the cold play of
+# a long track never finished and it held one of the two transcode slots
+# hostage the whole time. Eight connections is enough to escape the throttle
+# without looking like an attack.
+PARALLEL_CONNECTIONS = 8
+
+# Below this size one request is already instant, so the extra round trips
+# of a parallel fetch are not worth it.
+PARALLEL_MIN_BYTES = 512 * 1024
+
+# Hard wall-clock cap for one download. A throttled or wedged CDN must not
+# hold a transcode slot for minutes.
+DOWNLOAD_DEADLINE_SECONDS = 120.0
 
 # AVFoundation asks for the *whole* asset in a single Range request, which
 # YouTube's CDN 403s. That is why the backend keeps serving a local
@@ -481,15 +505,102 @@ class InnerTubeClient:
         }
 
     @staticmethod
-    def download_audio(url: str, destination: str, session: Optional[requests.Session] = None) -> int:
+    def _probe_total(http, url: str, headers: dict) -> int:
+        """Ask the CDN for the file size with a one-byte range request."""
+        try:
+            probe = http.get(url, headers={**headers, "Range": "bytes=0-0"}, timeout=20)
+        except Exception as exc:
+            logger.warning("size probe failed (%s)", exc)
+            return 0
+        if probe.status_code != 206:
+            return 0
+        content_range = probe.headers.get("Content-Range", "")
+        match = re.match(r"bytes (\d+)-(\d+)/(\d+)", content_range)
+        if match:
+            return int(match.group(3))
+        if probe.headers.get("Content-Length"):
+            return int(probe.headers["Content-Length"])
+        return 0
+
+    @staticmethod
+    def _download_parallel(url: str, destination: str, total: int, headers: dict,
+                           session_factory=None) -> int:
+        """Fetch `total` bytes over PARALLEL_CONNECTIONS ranges at once.
+
+        The ranges are written straight into the destination file at their
+        offsets, so the file is complete the moment the last worker finishes.
+        """
+        connections = min(
+            PARALLEL_CONNECTIONS, max(1, math.ceil(total / PARALLEL_MIN_BYTES))
+        )
+        span = math.ceil(total / connections)
+        ranges = []
+        for index in range(connections):
+            start = index * span
+            end = min(start + span, total) - 1
+            if start > end:
+                break
+            ranges.append((start, end))
+
+        deadline = time.monotonic() + DOWNLOAD_DEADLINE_SECONDS
+
+        def fetch(bounds):
+            start, end = bounds
+            # One session per worker: requests.Session is not meant to be
+            # shared across threads.
+            local = (session_factory or requests.Session)()
+            try:
+                response = local.get(
+                    url,
+                    headers={**headers, "Range": f"bytes={start}-{end}"},
+                    timeout=(10, 30),
+                    stream=True,
+                )
+                if response.status_code != 206:
+                    return None
+                buffer = bytearray()
+                for chunk in response.iter_content(256 * 1024):
+                    if chunk:
+                        buffer.extend(chunk)
+                    if time.monotonic() > deadline:
+                        break
+                return (start, bytes(buffer))
+            except Exception as exc:
+                logger.warning("parallel range %s-%s failed: %s", start, end, exc)
+                return None
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=len(ranges)) as pool:
+            results = list(pool.map(fetch, ranges))
+
+        if any(item is None for item in results):
+            raise IOError("parallel range download failed")
+
+        with open(destination, "wb") as handle:
+            handle.truncate(total)
+            for item, (start, end) in zip(results, ranges):
+                offset, payload = item
+                if len(payload) != end - start + 1:
+                    raise IOError(f"short range {start}-{end}: {len(payload)} bytes")
+                handle.seek(offset)
+                handle.write(payload)
+        return total
+
+    @staticmethod
+    def download_audio(url: str, destination: str, session: Optional[requests.Session] = None,
+                       session_factory=None) -> int:
         """Download a YouTube CDN URL to a local file.
 
-        Three strategies, fastest first, because YouTube's CDN treats
+        Four strategies, fastest first, because YouTube's CDN treats
         them very differently (all measured 2026-11-14 on the homelab,
         the machine that serves the iOS app):
 
+          0. PARALLEL ranges -> one 206 per range, all of them at once.
+             The CDN throttles a SINGLE connection to ~32 KB/s, so this
+             is the only strategy that is fast for a big file: 69 MB in
+             1.3 s, against 36 minutes on one connection.
           1. ``Range: bytes=0-`` (open ended) -> 206 with the WHOLE
-             body. 5.8 MB in 0.24s. This is what yt-dlp's URL allows.
+             body. 5.8 MB in 0.24s, but the same URL can be throttled to
+             32 KB/s, so it is only good for small files.
           2. plain GET (no Range) -> 200 with the whole body, but the
              same 5.8 MB took 180s, so it is a fallback, not a plan.
           3. fixed-size Range chunks -> only ever gets the first 1 MB
@@ -503,6 +614,29 @@ class InnerTubeClient:
         """
         http = session or requests.Session()
         headers = {"User-Agent": DOWNLOAD_USER_AGENT}
+
+        # 0. parallel ranges - the CDN throttles one connection, so use many.
+        total = InnerTubeClient._probe_total(http, url, headers)
+        if total >= PARALLEL_MIN_BYTES:
+            try:
+                written = InnerTubeClient._download_parallel(
+                    url, destination, total, headers, session_factory
+                )
+                if written >= 1000:
+                    logger.info(
+                        "parallel download: %d bytes over %d ranges",
+                        written,
+                        min(
+                            PARALLEL_CONNECTIONS,
+                            max(1, math.ceil(total / PARALLEL_MIN_BYTES)),
+                        ),
+                    )
+                    return written
+            except Exception as exc:
+                logger.warning(
+                    "parallel download failed (%s); falling back to a single request",
+                    exc,
+                )
 
         # 1. open-ended range - the whole body in one response
         try:
