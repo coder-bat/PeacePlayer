@@ -1130,31 +1130,26 @@ async def audio_stream(video_id: str, request: Request):
         cache = get_cache()
         stream_data = cache.get(video_id)
 
-        if not stream_data:
+        # INNERTUBE-PLAYBACK (2026-11-14): the source URL for the
+        # transcode comes from yt-dlp, not from the InnerTube metadata
+        # resolve. InnerTube's iOS URLs are preview-capped by YouTube's
+        # CDN - measured on the homelab: at most the first 1 MB of such
+        # a URL is served and everything larger is 403, while the
+        # yt-dlp URL serves the whole file (an open-ended Range returns
+        # all 5.8 MB in 0.24s). The InnerTube resolve stays in /stream,
+        # where only the metadata is used.
+        media_url = None
+        if stream_data and stream_data.get("_media_url"):
+            media_url = stream_data["_media_url"]
+        else:
             async with ytmusic_lock:
                 client = get_client()
-                stream_data = await asyncio.to_thread(client.get_stream_url, video_id)
-            if not stream_data or not stream_data.get('audio_formats'):
-                raise HTTPException(status_code=404, detail="No audio stream found")
-            cache.set(video_id, stream_data)
+                media_url = await asyncio.to_thread(client.get_media_url, video_id)
 
-        # Pick the audio format to transcode.
-        #
-        # INNERTUBE-PLAYBACK (2026-11-14): the InnerTube client returns AAC
-        # m4a (itag 140/139), not Opus webm, so "webm only" would 404 every
-        # track. Prefer webm when it is there (smaller, fastest to
-        # transcode), otherwise take the best m4a.
-        formats = stream_data['audio_formats']
-        webm = [f for f in formats if f.get('mime_type') == 'webm']
-        m4a = [f for f in formats if f.get('mime_type') == 'm4a']
-        if webm:
-            webm.sort(key=lambda f: f.get('bitrate', 0))
-            yt_url = webm[0]['url']
-        elif m4a:
-            m4a.sort(key=lambda f: f.get('bitrate', 0))
-            yt_url = m4a[0]['url']
-        else:
+        if not media_url:
             raise HTTPException(status_code=404, detail="No playable audio format available")
+
+        yt_url = media_url
 
         # S17-H (2026-07-27): pipe YouTube → ffmpeg → AVPlayer.
         # The first call downloads from YouTube and transcribes
@@ -1680,35 +1675,37 @@ async def _prefetch_worker(video_id: str, user_id: Optional[str] = None):
     auth on the read side).
     """
     try:
-        # 1. Make sure the stream URL cache is populated (URLs
-        # signed for the next 3.5h).
+        # 1. Resolve the media URL. This one comes from yt-dlp, because
+        #    InnerTube's iOS URLs are preview-capped by YouTube's CDN and
+        #    cannot carry a whole track (see /audio for the measurement).
+        async with ytmusic_lock:
+            client = get_client()
+            media_url = await asyncio.to_thread(client.get_media_url, video_id)
+        if not media_url:
+            logger.warning(f"Prefetch found no media URL: {video_id}")
+            return
+
+        # 2. Warm the metadata cache (InnerTube, fast) so the iOS app's
+        #    /stream call is instant. The media URL is stored alongside it
+        #    so /audio does not have to resolve it a second time.
         cache = get_cache()
         if not cache.get(video_id):
-            async with ytmusic_lock:
-                client = get_client()
-                stream_data = await asyncio.to_thread(client.get_stream_url, video_id)
-            if stream_data and stream_data.get("audio_formats"):
-                cache.set(video_id, stream_data)
-                logger.info(f"Prefetch cached stream: {video_id} (user={user_id or 'unknown'})")
-            else:
-                logger.warning(f"Prefetch found no audio formats: {video_id}")
-                return
+            try:
+                async with ytmusic_lock:
+                    stream_data = await asyncio.to_thread(client.get_stream_url, video_id)
+                if stream_data and stream_data.get("audio_formats"):
+                    stream_data["_media_url"] = media_url
+                    cache.set(video_id, stream_data)
+                    logger.info(f"Prefetch cached stream: {video_id} (user={user_id or 'unknown'})")
+            except Exception as exc:
+                logger.info(f"Prefetch metadata warm-up failed for {video_id}: {exc}")
 
-        # 2. Pre-transcode the audio. _transcode_to_cache handles
-        # the global semaphore + per-videoId lock; this worker
-        # just blocks until the transcode is done. If the user's
-        # /audio call arrives first, it will do the transcode
-        # and this worker will see the cache hit and return early.
-        stream_data = cache.get(video_id)
-        if not stream_data:
-            return
-        webm = [f for f in stream_data['audio_formats'] if f.get('mime_type') == 'webm']
-        if not webm:
-            return
-        webm.sort(key=lambda f: f.get('bitrate', 0))
-        yt_url = webm[0]['url']
-
-        await _transcode_to_cache(video_id, yt_url)
+        # 3. Pre-transcode the audio. _transcode_to_cache handles
+        #    the global semaphore + per-videoId lock; this worker
+        #    just blocks until the transcode is done. If the user's
+        #    /audio call arrives first, it will do the transcode
+        #    and this worker will see the cache hit and return early.
+        await _transcode_to_cache(video_id, media_url)
         cache_path = AUDIO_CACHE_DIR / f"{video_id}.m4a"
         if cache_path.exists():
             logger.info(f"Prefetch transcoded: {video_id} ({cache_path.stat().st_size} bytes, user={user_id or 'unknown'})")

@@ -26,6 +26,13 @@ WEB / MWEB / TVHTML5 answer "The page needs to be reloaded"
 usable InnerTube client. The progressive itag 18 the iOS app plays comes
 from yt-dlp's web client instead (see backend/server.py, /fast).
 
+And the URLs this client hands out are preview-capped: YouTube's CDN
+serves at most the FIRST 1 MB of an InnerTube iOS URL and answers 403
+for anything larger (measured on the homelab, the box that serves the
+iOS app). A yt-dlp URL has no such limit. So InnerTube is used for
+SEARCH and METADATA, and the bytes always come from yt-dlp
+(backend/ytm_client.py, get_media_url).
+
 Measured 2026-11-13 (this repo, live YouTube):
     watch page 0.21-1.0 s  +  player POST 0.41 s   -> ~0.6-1.4 s to audio URL
     (the previous yt-dlp path cost 1.74-2.38 s and could return zero audio formats)
@@ -358,29 +365,63 @@ class InnerTubeClient:
 
     @staticmethod
     def download_audio(url: str, destination: str, session: Optional[requests.Session] = None) -> int:
-        """Download a YouTube CDN URL in Range chunks.
+        """Download a YouTube CDN URL to a local file.
 
-        Measured 2026-11-14 (this machine, egress 144.6.2.185): YouTube's
-        CDN serves at most the FIRST 1 MB of a file to this IP, no matter
-        how the request is shaped -
+        Three strategies, fastest first, because YouTube's CDN treats
+        them very differently (all measured 2026-11-14 on the homelab,
+        the machine that serves the iOS app):
 
-            bytes=0-1048575     -> 206 (1 MB)
-            bytes=524288-1048575-> 206
-            bytes=1048576-...   -> 403
-            plain GET (no Range) -> 403
+          1. ``Range: bytes=0-`` (open ended) -> 206 with the WHOLE
+             body. 5.8 MB in 0.24s. This is what yt-dlp's URL allows.
+          2. plain GET (no Range) -> 200 with the whole body, but the
+             same 5.8 MB took 180s, so it is a fallback, not a plan.
+          3. fixed-size Range chunks -> only ever gets the first 1 MB
+             before the CDN answers 403.
 
-        yt-dlp's own downloader hits the same 403, so this is a property of
-        the egress IP (datacenter range), not of InnerTube or of the URL.
-        From a residential IP the same chunked download works.
-
-        Chunk size is therefore kept at 512 KB and every chunk is checked
-        for 206: the caller (server._do_transcode_pipeline) falls back to
-        the yt-dlp pipe when this raises, so a capped IP degrades to the
-        old behaviour instead of hanging.
+        Note that an InnerTube iOS URL does not allow ANY of them for
+        the full file: the CDN serves at most the first 1 MB of it and
+        refuses everything else. That is why the media URL for the
+        transcode comes from yt-dlp (see ytm_client.get_media_url) and
+        this function is only the downloader, not the resolver.
         """
         http = session or requests.Session()
         headers = {"User-Agent": DOWNLOAD_USER_AGENT}
 
+        # 1. open-ended range - the whole body in one response
+        try:
+            response = http.get(
+                url, headers={**headers, "Range": "bytes=0-"}, timeout=120, stream=True
+            )
+            if response.status_code in (200, 206):
+                written = 0
+                with open(destination, "wb") as handle:
+                    for chunk in response.iter_content(256 * 1024):
+                        if chunk:
+                            handle.write(chunk)
+                            written += len(chunk)
+                if written >= 1000:
+                    return written
+                raise IOError(f"open-ended range returned only {written} bytes")
+        except IOError:
+            raise
+        except Exception as exc:
+            logger.warning("open-ended range download failed (%s); trying a plain GET", exc)
+
+        # 2. plain GET
+        response = http.get(url, headers=headers, timeout=180, stream=True)
+        if response.status_code == 200:
+            written = 0
+            with open(destination, "wb") as handle:
+                for chunk in response.iter_content(256 * 1024):
+                    if chunk:
+                        handle.write(chunk)
+                        written += len(chunk)
+            if written >= 1000:
+                return written
+            raise IOError(f"plain GET returned only {written} bytes")
+
+        # 3. chunked range - the only thing left, and the CDN usually
+        #    refuses it past the first megabyte
         probe = http.get(url, headers={**headers, "Range": "bytes=0-0"}, timeout=20)
         total = 0
         content_range = probe.headers.get("Content-Range", "")

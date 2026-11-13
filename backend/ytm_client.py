@@ -16,6 +16,9 @@ from runtime_config import settings
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Media URLs are signed for a few hours; 3.5h matches the stream cache.
+_MEDIA_URL_TTL = 3.5 * 60 * 60
+
 
 # v1.8.5 / S18-SMALL-LARGE-THUMBNAILS: YouTube Music returns ~4
 # thumbnail sizes per item (typically 60/120/240/720). List rows
@@ -90,7 +93,12 @@ class YTMusicClient:
         self.auth_file = auth_file
         self.authenticated = False
         self.yt = None
-        
+
+        # Media URLs (the ones that can carry a whole track) are cached
+        # separately from get_stream_url's metadata: an InnerTube URL is
+        # preview-capped and cannot be used to fetch the bytes.
+        self._media_url_cache: dict[str, tuple[float, str]] = {}
+
         # Try authenticated mode first
         if os.path.exists(auth_file):
             try:
@@ -383,6 +391,57 @@ class YTMusicClient:
                 f"falling back to yt-dlp"
             )
             return self._get_stream_url_ytdlp(video_id)
+
+    def get_media_url(self, video_id: str) -> Optional[str]:
+        """
+        Resolve a video id to a CDN URL that can actually carry the whole
+        track, for the server-side transcode.
+
+        Why this is not the InnerTube URL (measured 2026-11-14 on the
+        homelab, which is the machine that serves the iOS app):
+        YouTube's CDN serves at most the FIRST 1 MB of an InnerTube iOS
+        URL and answers 403 for anything larger. The same URL fetched
+        without a Range header is refused outright. The yt-dlp URL
+        (mediaconnect / visionOS client) serves the whole file - an
+        open-ended "Range: bytes=0-" returns all 5.8 MB in 0.24s.
+
+        So: InnerTube for search and metadata (fast), yt-dlp for the
+        bytes. AAC m4a is preferred over webm/Opus so the transcode can
+        remux instead of re-encoding.
+
+        Args:
+            video_id: YouTube video ID
+
+        Returns:
+            A CDN URL, or None when the track could not be resolved.
+        """
+        cached = self._media_url_cache.get(video_id)
+        if cached and (time.time() - cached[0]) < _MEDIA_URL_TTL:
+            return cached[1]
+
+        stream = self._get_stream_url_ytdlp(video_id)
+        if not stream:
+            return None
+        formats = stream.get('audio_formats') or []
+        if not formats:
+            return None
+
+        def rank(fmt):
+            # m4a (AAC) first - it is what the remux path wants - then
+            # the highest bitrate of whatever else is on offer.
+            is_m4a = 1 if fmt.get('mime_type') in ('m4a', 'audio/mp4') else 0
+            return (is_m4a, fmt.get('bitrate') or 0)
+
+        best = max(formats, key=rank)
+        url = best.get('url')
+        if not url:
+            return None
+        self._media_url_cache[video_id] = (time.time(), url)
+        logger.info(
+            f"Media URL for {video_id}: itag {best.get('itag')} "
+            f"({best.get('mime_type')}, {best.get('bitrate')} bps)"
+        )
+        return url
 
     def _get_stream_url_ytdlp(self, video_id: str) -> Optional[Dict]:
         """
