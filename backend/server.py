@@ -40,6 +40,7 @@ from runtime_config import (
 from ytm_client import YTMusicClient, get_client, reset_client
 from extractor import AudioExtractor, get_extractor
 from stream_cache import get_cache
+import innertube
 from apple_auth import (
     verify_apple_identity_token,
     mint_session_jwt,
@@ -119,6 +120,54 @@ def _format18_put(video_id: str, url: str) -> None:
     while len(_format18_cache_order) > _FORMAT18_MAX:
         oldest = _format18_cache_order.pop(0)
         _format18_cache.pop(oldest, None)
+
+
+# --- itag 18 probe health ---
+#
+# INNERTUBE-PLAYBACK (2026-11-14): the progressive format-18 probe costs a
+# yt-dlp subprocess (~2.3s) on every cold play, and the production yt-dlp
+# (2026.08.19, backend/venv311) no longer offers itag 18 at all - the format
+# list for a music video contains only DASH video-only and audio-only
+# streams, so the probe always fails with "Requested format is not
+# available" (measured 2026-11-14; the older yt-dlp 2026.07.04 in
+# backend/venv still returns it).
+#
+# So the probe learns: after _FORMAT18_MISS_LIMIT consecutive
+# "not available" answers it switches itself off and every cold play goes
+# straight to the transcoded-AAC path. A single success re-enables it, so
+# a yt-dlp downgrade that brings itag 18 back is picked up automatically.
+# Transient failures (network, 429) are not counted as misses.
+_FORMAT18_MISS_LIMIT = 3
+_format18_misses = 0
+_format18_probe_disabled = False
+
+
+def _format18_record_probe(success: bool, error: str = "") -> None:
+    """Feed the probe result back into the adaptive switch."""
+    global _format18_misses, _format18_probe_disabled
+
+    if success:
+        if _format18_misses or _format18_probe_disabled:
+            logger.info("[fast] itag 18 probe works again - re-enabled")
+        _format18_misses = 0
+        _format18_probe_disabled = False
+        return
+
+    lowered = (error or "").lower()
+    if "not available" in lowered or "no video formats" in lowered:
+        _format18_misses += 1
+        if _format18_misses >= _FORMAT18_MISS_LIMIT and not _format18_probe_disabled:
+            _format18_probe_disabled = True
+            logger.info(
+                "[fast] itag 18 unavailable %d times in a row - probe disabled, "
+                "cold plays go straight to the transcoded AAC path",
+                _format18_misses,
+            )
+    else:
+        # transient: network hiccup, 429, timeout - not a verdict on itag 18
+        logger.warning("[fast] itag 18 probe failed for a transient reason: %s",
+                       (error or "")[:200])
+
 
 # --- Structured JSON logging ---
 class JSONFormatter(logging.Formatter):
@@ -725,14 +774,102 @@ async def cache_clear(request: Request, user: dict = Depends(require_session_use
 
 
 # Search endpoint
+def _parse_duration_to_seconds(value: str) -> int:
+    """Turn YouTube's "5:22" / "1:02:03" duration text into seconds."""
+    if not value:
+        return 0
+    parts = value.split(":")
+    try:
+        numbers = [int(part) for part in parts]
+    except ValueError:
+        return 0
+    seconds = 0
+    for number in numbers:
+        seconds = seconds * 60 + number
+    return seconds
+
+
+def _pick_thumbnail(thumbnails: List[dict], min_width: int, max_width: int) -> Optional[dict]:
+    """Pick the thumbnail closest to the requested width band."""
+    candidates = [
+        thumb for thumb in thumbnails
+        if isinstance(thumb, dict) and thumb.get("url")
+        and min_width <= int(thumb.get("width") or 0) <= max_width
+    ]
+    if not candidates:
+        candidates = [
+            thumb for thumb in thumbnails
+            if isinstance(thumb, dict) and thumb.get("url")
+        ]
+    if not candidates:
+        return None
+    best = max(candidates, key=lambda thumb: int(thumb.get("width") or 0))
+    return {
+        "url": best["url"],
+        "width": int(best.get("width") or 0),
+        "height": int(best.get("height") or 0),
+    }
+
+
+def _innertube_track_to_response(track: dict) -> dict:
+    """Map an InnerTube search hit onto the existing TrackResponse contract.
+
+    The iOS app decodes [Track] strictly, so the shape must stay identical to
+    what ytmusicapi returns (see TrackResponse in this file).
+    """
+    thumbnails = [
+        thumb for thumb in (track.get("thumbnails") or []) if thumb.get("url")
+    ]
+    artist = (track.get("artist") or "").strip()
+    return {
+        "videoId": track.get("video_id", ""),
+        "title": track.get("title") or "Unknown Title",
+        "artists": [artist] if artist else ["Unknown"],
+        # Plain YouTube search does not expose album metadata; the iOS app
+        # fills it in later from the library/sync payload (LibraryViewModel).
+        "album": "",
+        "durationSeconds": _parse_duration_to_seconds(track.get("duration") or ""),
+        "thumbnails": thumbnails,
+        "thumbnailSmall": _pick_thumbnail(thumbnails, 120, 240),
+        "thumbnailLarge": _pick_thumbnail(thumbnails, 480, 720),
+        "isExplicit": False,
+        "videoType": "MUSIC_VIDEO_TYPE_ATV",
+    }
+
+
 @app.post("/search", response_model=List[TrackResponse])
 @limiter.limit("10/minute")
 async def search(query: SearchQuery, request: Request, user: dict = Depends(require_session_user),):
-    """Search YouTube Music for tracks."""
+    """Search YouTube for tracks.
+
+    INNERTUBE-SEARCH (2026-11-14): fast path resolves through InnerTube's
+    `search` endpoint using the same official YouTube iOS client Musi uses
+    (see backend/innertube.py). It needs no YouTube Music OAuth session, so
+    search keeps working when the operator's cookie has expired, and it
+    answers in ~0.8s instead of a ytmusicapi round trip.
+
+    The YouTube Music API stays as the fallback - it is the only source that
+    knows about albums and "song" (audio-only) results.
+    """
     cache_key = f"{query.query}:{query.limit}"
     cached = search_cache.get(cache_key)
     if cached is not None:
         return cached
+
+    # Fast path: InnerTube (same client as Musi).
+    try:
+        results = await asyncio.to_thread(
+            innertube.get_client().search, query.query, query.limit
+        )
+        if results:
+            response = [_innertube_track_to_response(track) for track in results]
+            search_cache.set(cache_key, response)
+            return response
+        logger.info("Innertube search returned no results for %r", query.query)
+    except Exception as e:
+        logger.warning("Innertube search failed for %r: %s", query.query, e)
+
+    # Fallback: YouTube Music API.
     try:
         client = get_client()
         async with ytmusic_lock:
@@ -1001,13 +1138,23 @@ async def audio_stream(video_id: str, request: Request):
                 raise HTTPException(status_code=404, detail="No audio stream found")
             cache.set(video_id, stream_data)
 
-        # Pick the smallest webm (Opus) — fastest to transcode.
+        # Pick the audio format to transcode.
+        #
+        # INNERTUBE-PLAYBACK (2026-11-14): the InnerTube client returns AAC
+        # m4a (itag 140/139), not Opus webm, so "webm only" would 404 every
+        # track. Prefer webm when it is there (smaller, fastest to
+        # transcode), otherwise take the best m4a.
         formats = stream_data['audio_formats']
         webm = [f for f in formats if f.get('mime_type') == 'webm']
-        if not webm:
-            raise HTTPException(status_code=404, detail="No webm format available")
-        webm.sort(key=lambda f: f.get('bitrate', 0))
-        yt_url = webm[0]['url']
+        m4a = [f for f in formats if f.get('mime_type') == 'm4a']
+        if webm:
+            webm.sort(key=lambda f: f.get('bitrate', 0))
+            yt_url = webm[0]['url']
+        elif m4a:
+            m4a.sort(key=lambda f: f.get('bitrate', 0))
+            yt_url = m4a[0]['url']
+        else:
+            raise HTTPException(status_code=404, detail="No playable audio format available")
 
         # S17-H (2026-07-27): pipe YouTube → ffmpeg → AVPlayer.
         # The first call downloads from YouTube and transcribes
@@ -1164,10 +1311,38 @@ async def fast_stream(video_id: str, request: Request):
     # extraction failure we serve the transcoded AAC path, which is a playable
     # single URL and is what /stream already falls back to. The client gets
     # audio either way; the difference is it no longer sees an error.
+    #
+    # INNERTUBE-PLAYBACK (2026-11-14): the progressive probe deliberately
+    # stays on yt-dlp. InnerTube was tried here first and had to be
+    # reverted, for a measured reason: the official YouTube iOS client
+    # (the one Musi uses) never returns a progressive format at all.
+    # Its player response has no "formats" array - only adaptive
+    # video-only (itag 137/136/135) and audio-only (itag 140/139)
+    # streams. Asking InnerTube first therefore answered "no progressive
+    # format" and silently downgraded every cold play from video+audio to
+    # audio-only.
+    #
+    # The other YouTube InnerTube clients were measured too, for the
+    # record: WEB / MWEB / TVHTML5 -> "The page needs to be reloaded"
+    # (UNPLAYABLE), ANDROID_VR -> LOGIN_REQUIRED ("Sign in to confirm
+    # you're not a bot"). Only the IOS client is usable.
+    #
+    # The probe itself is adaptive: it costs a yt-dlp subprocess (~2.3s)
+    # and the production yt-dlp (2026.08.19) does not offer itag 18 for
+    # music videos any more, so after _FORMAT18_MISS_LIMIT consecutive
+    # "not available" answers it switches itself off and every cold play
+    # goes straight to the transcoded AAC path.
     cached_url = _format18_get(video_id)
     if cached_url:
         logger.info(f"[fast] {video_id} -> YouTube format 18 (cache hit)")
         return RedirectResponse(url=cached_url, status_code=302)
+
+    if _format18_probe_disabled:
+        logger.info(f"[fast] {video_id} -> transcoded audio (itag 18 probe disabled)")
+        return RedirectResponse(
+            url=f"/audio/{video_id}.m4a?token={quote(token_param)}",
+            status_code=302,
+        )
 
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -1188,6 +1363,7 @@ async def fast_stream(video_id: str, request: Request):
         if not yt_url:
             raise RuntimeError("yt-dlp returned an empty URL")
     except Exception as exc:
+        _format18_record_probe(False, str(exc))
         logger.warning(
             "[fast] %s: progressive format 18 unavailable (%s); serving transcoded audio",
             video_id, exc,
@@ -1199,6 +1375,7 @@ async def fast_stream(video_id: str, request: Request):
             status_code=302,
         )
 
+    _format18_record_probe(True)
     logger.info(f"[fast] {video_id} -> YouTube format 18 (cold, {len(yt_url)}-byte URL)")
     # Cache for the next 5h. Subsequent cold plays of the
     # same track within that window skip the yt-dlp cost.
@@ -1336,48 +1513,151 @@ async def _do_transcode_pipeline(video_id: str, yt_url: str, cache_path: Path) -
     # directly to cache_path. No more .raw.m4a intermediate
     # and no more re-mux pass. The empty_moov flag handles the
     # "moov at start" requirement in one pass.
-    pipe_cmd = (
-        f'{shlex.join(YTDLP_COMMAND)} '
-        f'--js-runtimes deno:{shlex.quote(DENO_BIN)} '
-        f'-f "worstaudio[ext=webm]/worstaudio/bestaudio[ext=webm]/bestaudio/best" '
-        f'-o - --no-playlist --no-part --no-progress --quiet '
-        f'--remote-components ejs:github {shlex.quote(yt_url)} '
-        f'| {shlex.quote(FFMPEG_BIN)} -y -loglevel error -i pipe:0 '
-        f'-c:a aac -b:a 128k '
-        f'-movflags "+frag_keyframe+empty_moov+default_base_moof" '
-        f'-f mp4 {shlex.quote(str(cache_path))}'
-    )
+    #
+    # INNERTUBE-PLAYBACK (2026-11-14): the source is now fetched with our
+    # own Range-chunked downloader instead of yt-dlp, and the audio is
+    # REMUXED instead of re-encoded whenever possible.
+    #
+    # Why remux: the InnerTube iOS client hands out itag 140/139 - AAC LC
+    # in a fragmented MP4 (major brand "dash", moov + moof + mdat). The
+    # audio codec is already exactly what the iPhone wants, so re-encoding
+    # it to AAC is pure waste. `ffmpeg -c copy -movflags +faststart` just
+    # moves the moov atom to the front and rewrites the brand to isom -
+    # measured 2026-11-14 on a 4-minute track: 0.05s versus 2.92s for the
+    # re-encode (58x). The re-encode stays as the fallback for a source
+    # that is not already AAC/MP4 (e.g. the yt-dlp webm pipe).
+    source_path = cache_dir / f".{video_id}.source"
     try:
+        await asyncio.to_thread(innertube.download_audio, yt_url, str(source_path))
+        if not source_path.exists() or source_path.stat().st_size < 1000:
+            raise RuntimeError("chunked download produced no data")
+
+        remux_cmd = (
+            f'{shlex.quote(FFMPEG_BIN)} -y -loglevel error -i {shlex.quote(str(source_path))} '
+            f'-c copy -movflags "+faststart" '
+            f'-f mp4 {shlex.quote(str(cache_path))}'
+        )
         t0 = time.monotonic()
         proc = await asyncio.create_subprocess_shell(
-            pipe_cmd,
+            remux_cmd,
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.PIPE,
         )
         _, stderr = await proc.communicate()
-        pipe_seconds = time.monotonic() - t0
+        remux_seconds = time.monotonic() - t0
+
+        if proc.returncode != 0 or not cache_path.exists() or cache_path.stat().st_size < 1000:
+            # Not a container ffmpeg can copy out of - re-encode instead.
+            logger.info(
+                "[audio] remux of %s failed (%s); re-encoding",
+                video_id, stderr.decode(errors="replace")[:200],
+            )
+            if cache_path.exists():
+                try:
+                    cache_path.unlink()
+                except OSError:
+                    pass
+            encode_cmd = (
+                f'{shlex.quote(FFMPEG_BIN)} -y -loglevel error -i {shlex.quote(str(source_path))} '
+                f'-c:a aac -b:a 128k '
+                f'-movflags "+frag_keyframe+empty_moov+default_base_moof" '
+                f'-f mp4 {shlex.quote(str(cache_path))}'
+            )
+            t0 = time.monotonic()
+            proc = await asyncio.create_subprocess_shell(
+                encode_cmd,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            _, stderr = await proc.communicate()
+            remux_seconds = time.monotonic() - t0
 
         if not cache_path.exists() or cache_path.stat().st_size < 1000:
             raise HTTPException(
                 status_code=500,
-                detail=f"fMP4 pipe transcode failed (rc={proc.returncode}): {stderr.decode(errors='replace')[:300]}"
+                detail=f"fMP4 transcode failed (rc={proc.returncode}): {stderr.decode(errors='replace')[:300]}"
             )
         output_size = cache_path.stat().st_size
         logger.info(
             f"[audio] Transcoded {video_id} → {output_size} bytes (fMP4) "
-            f"in {pipe_seconds:.1f}s"
+            f"in {remux_seconds:.1f}s"
         )
+        return
     except HTTPException:
         raise
-    except Exception:
-        # Clean up partial file on any failure so the next
-        # attempt can start fresh.
-        if cache_path.exists():
-            try:
-                cache_path.unlink()
-            except OSError:
-                pass
-        raise
+    except Exception as exc:
+        logger.warning(
+            "[audio] chunked download/transcode failed for %s (%s); "
+            "falling back to the yt-dlp pipe",
+            video_id, exc,
+        )
+    finally:
+        try:
+            if source_path.exists():
+                source_path.unlink()
+        except OSError:
+            pass
+
+    # Fallback: the original yt-dlp | ffmpeg pipe.
+    #
+    # INNERTUBE-PLAYBACK (2026-11-14): two attempts, in order.
+    #  1. the CDN URL we were handed - no extraction, just a download
+    #  2. the watch URL - yt-dlp re-extracts (fresh, correctly-signed URL,
+    #     its own n-challenge solver, its own chunked downloader), so the
+    #     fallback does not depend on InnerTube having worked at all.
+    #
+    # The source here is webm/Opus, so this path re-encodes to AAC.
+    watch_url = f"https://www.youtube.com/watch?v={video_id}"
+    sources = [yt_url, watch_url]
+    last_error = ""
+    for source in sources:
+        pipe_cmd = (
+            f'{shlex.join(YTDLP_COMMAND)} '
+            f'--js-runtimes deno:{shlex.quote(DENO_BIN)} '
+            f'-f "worstaudio[ext=webm]/worstaudio/bestaudio[ext=webm]/bestaudio/best" '
+            f'-o - --no-playlist --no-part --no-progress --quiet '
+            f'--remote-components ejs:github {shlex.quote(source)} '
+            f'| {shlex.quote(FFMPEG_BIN)} -y -loglevel error -i pipe:0 '
+            f'-c:a aac -b:a 128k '
+            f'-movflags "+frag_keyframe+empty_moov+default_base_moof" '
+            f'-f mp4 {shlex.quote(str(cache_path))}'
+        )
+        try:
+            t0 = time.monotonic()
+            proc = await asyncio.create_subprocess_shell(
+                pipe_cmd,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            _, stderr = await proc.communicate()
+            pipe_seconds = time.monotonic() - t0
+
+            if not cache_path.exists() or cache_path.stat().st_size < 1000:
+                raise RuntimeError(
+                    f"fMP4 pipe transcode failed (rc={proc.returncode}): "
+                    f"{stderr.decode(errors='replace')[:300]}"
+                )
+            output_size = cache_path.stat().st_size
+            logger.info(
+                f"[audio] Transcoded {video_id} → {output_size} bytes (fMP4) "
+                f"in {pipe_seconds:.1f}s (yt-dlp pipe)"
+            )
+            return
+        except Exception as exc:
+            last_error = str(exc)
+            logger.warning("[audio] yt-dlp pipe failed for %s via %s: %s",
+                           video_id, source[:60], last_error)
+            # Clean up partial file so the next attempt starts fresh.
+            if cache_path.exists():
+                try:
+                    cache_path.unlink()
+                except OSError:
+                    pass
+
+    raise HTTPException(
+        status_code=500,
+        detail=f"fMP4 pipe transcode failed: {last_error[:300]}",
+    )
 
 
 async def _prefetch_worker(video_id: str, user_id: Optional[str] = None):
