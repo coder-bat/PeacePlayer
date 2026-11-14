@@ -139,7 +139,7 @@ struct LibraryContent: View {
     @State private var libraryMode: LibraryMode = .downloaded
     // v1.6.9 (CV-15b): Combine cancellables for the
     // async stream-URL fetches kicked off by
-    // playAllLiked / addLikedTrackToQueue /
+    // playLikedTracks / addLikedTrackToQueue /
     // playLikedTrackNext. The sinks are short-lived
     // (they fire once and complete) but we still need
     // a bag to hold the AnyCancellable so the closure
@@ -607,13 +607,12 @@ struct LibraryContent: View {
                 .padding(.horizontal, 16)
                 .padding(.bottom, 12)
 
-            // v1.6.9 (CV-15b): Play-all row. Only
-            // shown in Liked mode (Downloaded mode
-            // already has Play / Shuffle buttons
-            // elsewhere via the row context menu
-            // and the FullPlayer's Play All from
-            // an artist).
-            if libraryMode == .liked && !currentTracks.isEmpty {
+            // 2026-11-14: Play All / Shuffle row. Shown in BOTH
+            // modes now (it was Liked-only). The Home page used to
+            // carry the Downloaded section with its own Play All /
+            // Shuffle chips; that section is gone, so the Library
+            // page is the one place that owns both actions.
+            if !currentTracks.isEmpty {
                 playAllRow
                     .padding(.horizontal, 16)
                     .padding(.bottom, 12)
@@ -697,37 +696,90 @@ struct LibraryContent: View {
         }
     }
 
-    // v1.6.9 (CV-15b): Play-all action for the
-    // Liked mode. Tapping it plays the first liked
-    // track and pre-fetches the rest into the queue
-    // (same pattern Anti-Algorithm's "start session"
-    // uses). Replaces the "Play All" button the
-    // Liked Songs sheet had via PlaylistDetailView's
-    // hero header.
+    // 2026-11-14: Play All + Shuffle for the current mode.
+    // "PLAY ALL" is the primary CTA (cyan fill), "SHUFFLE" is the
+    // secondary one (outlined). Both act on `currentTracks`, i.e. the
+    // filtered list the user is looking at.
     private var playAllRow: some View {
-        Button {
-            HapticManager.medium()
-            playAllLiked()
-        } label: {
-            HStack(spacing: 10) {
-                Image(systemName: "play.fill")
-                    .font(.system(size: 13, weight: .bold))
-                Text("PLAY ALL")
-                    .font(.system(size: 13, weight: .bold, design: .monospaced))
-                Spacer()
-                Text("\(currentTracks.count) TRACK\(currentTracks.count == 1 ? "" : "S")")
-                    .font(.system(size: 11, weight: .medium, design: .monospaced))
-                    .opacity(0.8)
+        HStack(spacing: 10) {
+            Button {
+                HapticManager.medium()
+                playAll(shuffled: false)
+            } label: {
+                playAllLabel(
+                    icon: "play.fill",
+                    text: "PLAY ALL",
+                    foreground: Theme.cyberBackground,
+                    background: Theme.cyberCyan
+                )
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .frame(maxWidth: .infinity)
-            .foregroundColor(Theme.cyberBackground)
-            .background(Theme.cyberCyan)
-            .cornerRadius(CornerRadius.sm)
-            .shadow(color: Theme.cyberCyan.opacity(0.5), radius: 10, x: 0, y: 0)
+            .buttonStyle(.plain)
+            .accessibilityLabel("Play all \(currentTracks.count) tracks")
+
+            Button {
+                HapticManager.medium()
+                playAll(shuffled: true)
+            } label: {
+                playAllLabel(
+                    icon: "shuffle",
+                    text: "SHUFFLE",
+                    foreground: Theme.cyberCyan,
+                    background: Color.cyberSurface.opacity(0.9)
+                )
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Shuffle all \(currentTracks.count) tracks")
         }
-        .buttonStyle(.plain)
+    }
+
+    // Shared label shape for the two action buttons.
+    private func playAllLabel(
+        icon: String,
+        text: String,
+        foreground: Color,
+        background: Color
+    ) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon)
+                .font(.system(size: 13, weight: .bold))
+            Text(text)
+                .font(.system(size: 13, weight: .bold, design: .monospaced))
+            Spacer()
+            Text("\(currentTracks.count) TRACK\(currentTracks.count == 1 ? "" : "S")")
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .opacity(0.8)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity)
+        .foregroundColor(foreground)
+        .background(background)
+        .cornerRadius(CornerRadius.sm)
+    }
+
+    // 2026-11-14: one entry point for both modes.
+    //
+    // Downloaded: the tracks are local files, so the queue is built
+    // from `file://` URLs and swapped in wholesale (PlayerState's
+    // shared helper — the same code the Home page's Downloaded chips
+    // used before that section was removed).
+    //
+    // Liked: the tracks are streamed, so the first one plays right
+    // away and the rest are pre-fetched through the shared
+    // StreamURLCache and appended to the queue as their URLs arrive.
+    private func playAll(shuffled: Bool) {
+        let items = currentTracks
+        guard !items.isEmpty else { return }
+
+        switch libraryMode {
+        case .downloaded:
+            PlayerState.shared.playLocalTracks(
+                items.map(\.track),
+                shuffled: shuffled
+            )
+        case .liked:
+            playLikedTracks(items, shuffled: shuffled)
+        }
     }
 
     // v1.6.9 (CV-15b): play the first liked track
@@ -738,9 +790,9 @@ struct LibraryContent: View {
     // fetch (Combine sink) that appends a QueueItem
     // to the player's queue as each stream URL
     // arrives.
-    private func playAllLiked() {
-        let items = currentTracks
-        guard let first = items.first else { return }
+    private func playLikedTracks(_ items: [DownloadedTrackItem], shuffled: Bool) {
+        let ordered = shuffled ? PlayerState.shuffled(items) : items
+        guard let first = ordered.first else { return }
         let firstTrack = first.track
         // Play the first via the standard path.
         // play(track:) handles the stream-URL fetch
@@ -751,7 +803,7 @@ struct LibraryContent: View {
         // pre-fetch. StreamURLCache is the same cache
         // play(track:) uses, so the first play of each
         // track is the only network roundtrip.
-        let remaining = Array(items.dropFirst())
+        let remaining = Array(ordered.dropFirst())
         let maxQueueSize = max(50, remaining.count + 5)
         for trackItem in remaining {
             let track = trackItem.track
@@ -1345,7 +1397,7 @@ struct LibraryContent: View {
                 receiveCompletion: { completion in
                     if case .failure = completion {
                         // Quiet fail — same reasoning as
-                        // playAllLiked.
+                        // playLikedTracks.
                     }
                 },
                 receiveValue: { streamInfo in

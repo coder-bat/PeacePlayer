@@ -1641,6 +1641,82 @@ class PlayerState: ObservableObject {
         adaptiveQuality?.cancelPendingUpgrade()
     }
 
+    // 2026-11-14: shared "Play all / Shuffle" for a set of DOWNLOADED
+    // (local file) tracks. It used to live on HomeViewModel because the
+    // Home page had a "Downloaded" section with Play All / Shuffle
+    // chips; that section is gone (the Library page owns it now), so the
+    // implementation moved here next to the queue code it drives.
+    //
+    // Why `queueStore.replace` (not `addToQueue` x N):
+    //   Going through `add` would dedup against the existing queue and
+    //   could leave stale items in place. `replace` gives a clean swap
+    //   so the user's prior queue (or any in-flight restore) can't leak
+    //   into the new playback. Combined with `markUserTouchedPlayback()`
+    //   this also wins the race against QueueRestorer's pending restore.
+    //
+    // Why set isShuffled = shuffled after queueing:
+    //   The store's `originalQueue` is what `toggleShuffle` uses to
+    //   restore the unshuffled order on toggle-off. We build the queue
+    //   in the final order (shuffled or not), so the flag just needs to
+    //   reflect reality — the queue itself is the source of truth.
+    @MainActor
+    func playLocalTracks(_ tracks: [Track], shuffled: Bool) {
+        let context = PersistenceController.shared.viewContext
+        // Defensive: skip stale CoreData rows whose file is gone.
+        let playable = tracks.filter {
+            AudioFileManager.shared.isPlayable(videoId: $0.videoId, context: context)
+        }
+        guard !playable.isEmpty else {
+            ErrorHandler.shared.show(
+                .playbackFailed("None of your downloaded tracks are playable right now")
+            )
+            return
+        }
+
+        let ordered: [Track] = shuffled ? PlayerState.shuffled(playable) : playable
+
+        let items: [QueueItem] = ordered.compactMap { track in
+            let localURL = AudioFileManager.shared.localFileURL(for: track.videoId)
+            return QueueItem(
+                track: track,
+                streamUrl: localURL.absoluteString,
+                source: .local(path: localURL.path),
+                contentSource: .local
+            )
+        }
+        guard !items.isEmpty else { return }
+
+        // Defeat any in-flight QueueRestorer swap.
+        markUserTouchedPlayback()
+        // Replace the entire queue with the downloaded set.
+        queueStore.replace(with: items)
+        queueStore.setCurrentIndex(0)
+        // Loop forever (per spec). User can still toggle off
+        // from the player chrome.
+        repeatMode = .all
+        // Reflect the chosen mode in the player's shuffle state.
+        isShuffled = shuffled
+        // Clear any leftover "original queue" so a later
+        // toggleShuffle-off from the chrome doesn't try to
+        // restore a stale order.
+        originalQueue = []
+
+        HapticManager.medium()
+        playQueue(at: 0)
+    }
+
+    // Fisher–Yates shuffle. Pulled out so the random order is
+    // determined once on the main thread, before the queue
+    // replace, instead of being deferred into the queue store.
+    static func shuffled<T>(_ array: [T]) -> [T] {
+        var copy = array
+        for i in stride(from: copy.count - 1, through: 1, by: -1) {
+            let j = Int.random(in: 0...i)
+            copy.swapAt(i, j)
+        }
+        return copy
+    }
+
     func playQueue(at index: Int, isCrossfadeFallback: Bool = false) {
         // S17-H (P1-F5): see play(track:).
         markUserTouchedPlayback()
