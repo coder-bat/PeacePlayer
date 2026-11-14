@@ -733,25 +733,26 @@ struct LibraryContent: View {
     }
 
     // Shared label shape for the two action buttons.
+    //
+    // 2026-11-14: the "9 TRACKS" counter came out of both labels - the
+    // stats bar right below already says how many tracks the view has,
+    // and having it twice read as a mistake. The label is now just the
+    // icon + the action, centred.
     private func playAllLabel(
         icon: String,
         text: String,
         foreground: Color,
         background: Color
     ) -> some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 8) {
             Image(systemName: icon)
                 .font(.system(size: 13, weight: .bold))
             Text(text)
                 .font(.system(size: 13, weight: .bold, design: .monospaced))
-            Spacer()
-            Text("\(currentTracks.count) TRACK\(currentTracks.count == 1 ? "" : "S")")
-                .font(.system(size: 11, weight: .medium, design: .monospaced))
-                .opacity(0.8)
         }
+        .frame(maxWidth: .infinity)
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
-        .frame(maxWidth: .infinity)
         .foregroundColor(foreground)
         .background(background)
         .cornerRadius(CornerRadius.sm)
