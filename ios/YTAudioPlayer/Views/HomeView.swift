@@ -55,101 +55,22 @@ struct HomeView: View {
     // standard nav bar with a back button — replaces the previous
     // modal-sheet behavior.
     @State private var path: [HomeDestination] = []
+    // 2026-11-17: the Turntable Home flag. Observed (not read once)
+    // so flipping the toggle in Settings → Labs swaps the body
+    // immediately, with no relaunch.
+    @StateObject private var featureFlags = FeatureFlags.shared
 
     var body: some View {
         NavigationStack(path: $path) {
             ZStack {
-                // Animated background gradient
-                CyberBackground()
-
-                ScrollView(showsIndicators: false) {
-                    VStack(spacing: 0) {
-                        // 2026-06-28 (S6): top header — user profile chip
-                        // (avatar + name) on the left, nav icons on the right.
-                        headerSection
-                            .padding(.horizontal, 20)
-                            .padding(.top, 20)
-
-                        // 2026-11-14: the "NOW PLAYING / PAUSED / RESUME"
-                        // hero that used to sit here was removed - the
-                        // mini player (bottom right) already shows the
-                        // current track and opens the full player on tap.
-                        // The hero repeated it in the most expensive
-                        // possible place: the top of the page.
-
-                        // FOR YOU - Favorite artists suggestions
-                        favoriteArtistsSection
-                            .padding(.top, 24)
-
-                        // S18 / P1-3: "On this day in your music" —
-                        // tracks the user played on this calendar day
-                        // in prior years. Gives a daily re-entry reason.
-                        // Gated by ff_on_this_day flag (default OFF
-                        // for v1.5; can flip in Settings → Labs later).
-                        if UserDefaults.standard.object(forKey: "ff_on_this_day") as? Bool ?? false {
-                            OnThisDaySection()
-                                .padding(.top, 24)
-                        }
-
-                        // 2026-08-30: v1.9.0 Smart Library
-                        // card. Appears only when
-                        // SmartLibraryManager.pendingCandidates
-                        // is non-nil (the manager is the source
-                        // of truth — the card self-hides when
-                        // there's nothing to show). Placed
-                        // above the "Your Library" section so
-                        // the user sees the actionable surface
-                        // first.
-                        SmartLibraryCard()
-                            .padding(.top, Spacing.lg)
-
-                        // 2026-09-08: v1.9.3 Cleanup banner.
-                        // Sits ABOVE the Smart Library card —
-                        // cleanup is the more urgent decision
-                        // (files are about to move) and the
-                        // banner shows a countdown. Both
-                        // components self-hide when their
-                        // respective pending state is nil, so
-                        // stacking them in this order is
-                        // free when neither is showing.
-                        //
-                        // 2026-09-14: v1.9.4 — added
-                        // `.padding(.top, Spacing.md)` so the
-                        // two cards read as separate surfaces
-                        // when both are showing. Without it,
-                        // they sat flush (the SmartLibraryCard
-                        // already owns Spacing.lg above it; the
-                        // cleanup banner had no top padding),
-                        // which read as one merged block.
-                        CleanupScheduledBanner()
-                            .padding(.top, Spacing.md)
-
-                        // 2026-11-14: the "YOUR LIBRARY" section
-                        // (Liked Songs horizontal cards + Downloaded
-                        // vertical rows) was removed from Home. Both
-                        // live in the Library page, which the nav bar
-                        // reaches in one tap - and the Library page
-                        // now owns Play All / Shuffle for both.
-                        .padding(.bottom, 100)
-                    }
-                }
-                .refreshable {
-                    // 2026-09-14 (Mavis race-condition fix):
-                    // await the actual loadData() instead of
-                    // busy-polling isLoading. The previous poll
-                    // exited early if a previous in-flight
-                    // fetchLibrary completed first and flipped
-                    // isLoading=false — leaving the new request
-                    // running but the pull-to-refresh spinner
-                    // already dismissed.
-                    await viewModel.loadData()
-                }
-
-                if viewModel.isLoading {
-                    ProgressView()
-                        .tint(.cyberCyan)
-                        .scaleEffect(1.2)
-                        .transition(.opacity)
+                // 2026-11-17: two Home layouts behind one flag.
+                // The Turntable deck replaces the card scroll; the
+                // legacy scroll is preserved intact so the flag can be
+                // flipped off at any time.
+                if featureFlags.turntableHome {
+                    turntableBody
+                } else {
+                    legacyBody
                 }
             }
             // S14: hide the standard nav bar on Home itself (the
@@ -269,6 +190,125 @@ struct HomeView: View {
                 path.append(.radio)
             }
         }
+    }
+
+    // MARK: - Legacy body (pre-Turntable)
+    //
+    // 2026-11-17: extracted verbatim out of `body` so the Turntable
+    // deck can replace it behind `ff_turntable_home`. Nothing about
+    // this layout changed in the extraction — it is the card scroll
+    // exactly as it shipped, kept intact so the flag can be flipped
+    // off at any time.
+    private var legacyBody: some View {
+        ZStack {
+            // Animated background gradient
+            CyberBackground()
+
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 0) {
+                    // 2026-06-28 (S6): top header — user profile chip
+                    // (avatar + name) on the left, nav icons on the right.
+                    headerSection
+                        .padding(.horizontal, 20)
+                        .padding(.top, 20)
+
+                    // 2026-11-14: the "NOW PLAYING / PAUSED / RESUME"
+                    // hero that used to sit here was removed - the
+                    // mini player (bottom right) already shows the
+                    // current track and opens the full player on tap.
+                    // The hero repeated it in the most expensive
+                    // possible place: the top of the page.
+
+                    // FOR YOU - Favorite artists suggestions
+                    favoriteArtistsSection
+                        .padding(.top, 24)
+
+                    // S18 / P1-3: "On this day in your music" —
+                    // tracks the user played on this calendar day
+                    // in prior years. Gives a daily re-entry reason.
+                    // Gated by ff_on_this_day flag (default OFF
+                    // for v1.5; can flip in Settings → Labs later).
+                    if UserDefaults.standard.object(forKey: "ff_on_this_day") as? Bool ?? false {
+                        OnThisDaySection()
+                            .padding(.top, 24)
+                    }
+
+                    // 2026-08-30: v1.9.0 Smart Library
+                    // card. Appears only when
+                    // SmartLibraryManager.pendingCandidates
+                    // is non-nil (the manager is the source
+                    // of truth — the card self-hides when
+                    // there's nothing to show). Placed
+                    // above the "Your Library" section so
+                    // the user sees the actionable surface
+                    // first.
+                    SmartLibraryCard()
+                        .padding(.top, Spacing.lg)
+
+                    // 2026-09-08: v1.9.3 Cleanup banner.
+                    // Sits ABOVE the Smart Library card —
+                    // cleanup is the more urgent decision
+                    // (files are about to move) and the
+                    // banner shows a countdown. Both
+                    // components self-hide when their
+                    // respective pending state is nil, so
+                    // stacking them in this order is
+                    // free when neither is showing.
+                    //
+                    // 2026-09-14: v1.9.4 — added
+                    // `.padding(.top, Spacing.md)` so the
+                    // two cards read as separate surfaces
+                    // when both are showing. Without it,
+                    // they sat flush (the SmartLibraryCard
+                    // already owns Spacing.lg above it; the
+                    // cleanup banner had no top padding),
+                    // which read as one merged block.
+                    CleanupScheduledBanner()
+                        .padding(.top, Spacing.md)
+
+                    // 2026-11-14: the "YOUR LIBRARY" section
+                    // (Liked Songs horizontal cards + Downloaded
+                    // vertical rows) was removed from Home. Both
+                    // live in the Library page, which the nav bar
+                    // reaches in one tap - and the Library page
+                    // now owns Play All / Shuffle for both.
+                    .padding(.bottom, 100)
+                }
+            }
+            .refreshable {
+                // 2026-09-14 (Mavis race-condition fix):
+                // await the actual loadData() instead of
+                // busy-polling isLoading. The previous poll
+                // exited early if a previous in-flight
+                // fetchLibrary completed first and flipped
+                // isLoading=false — leaving the new request
+                // running but the pull-to-refresh spinner
+                // already dismissed.
+                await viewModel.loadData()
+            }
+
+            if viewModel.isLoading {
+                ProgressView()
+                    .tint(.cyberCyan)
+                    .scaleEffect(1.2)
+                    .transition(.opacity)
+            }
+        }
+    }
+
+    // MARK: - Turntable body
+    //
+    // 2026-11-17: the Turntable deck — the record is the home screen.
+    // Not scrollable: it is one screen tall by design, and the crate
+    // scrolls horizontally instead.
+    private var turntableBody: some View {
+        TurntableHomeView(
+            viewModel: viewModel,
+            favoriteArtists: favoriteArtists,
+            playerState: playerState,
+            visualizer: AudioVisualizerEngine.shared
+        )
+        .ignoresSafeArea(edges: .bottom)
     }
 
     // MARK: - Header

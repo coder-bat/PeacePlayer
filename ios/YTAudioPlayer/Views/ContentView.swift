@@ -11,6 +11,11 @@ struct ContentView: View {
     @StateObject private var networkMonitor = NetworkMonitor.shared
     @StateObject private var searchViewModel = SearchViewModel()
     @StateObject private var radioViewModel = RadioViewModel()
+    // 2026-11-17: the Turntable Home flag. Observed here as well as
+    // in HomeView, because the deck's now-playing strip replaces the
+    // global mini player on the Home tab. A cached read in either
+    // place would leave them out of sync after a Labs toggle.
+    @StateObject private var featureFlags = FeatureFlags.shared
     // 2026-06-28: Apple Sign-In. The LandingView shows when this is
     // false; the main UI shows when it's true. bootstrap() is called
     // from init() in YTAudioPlayerApp.swift before ContentView mounts.
@@ -88,7 +93,12 @@ struct ContentView: View {
                     tabBar: CyberpunkTabBar(selectedTab: $selectedTab),
                     miniPlayer: AnyView(MiniPlayer(onExpand: {
                         showFullPlayer = true
-                    }, compact: true))
+                    }, compact: true)),
+                    // 2026-11-17: the Turntable Home shows its own
+                    // now-playing strip on the deck, so the global
+                    // mini player would show the same track twice.
+                    // Every other tab keeps the mini player.
+                    hidesMiniPlayer: featureFlags.turntableHome && selectedTab == 0
                 )
                 .frame(maxWidth: .infinity)
                 .background(Color.clear)
@@ -374,6 +384,11 @@ private struct HideNativeTabBar: ViewModifier {
 struct BottomBar: View {
     let tabBar: CyberpunkTabBar
     let miniPlayer: AnyView
+    /// 2026-11-17: when true the mini player is not rendered and the
+    /// tab pill is centred instead. Used by the Turntable Home, which
+    /// shows its own now-playing strip on the deck — without this the
+    /// same track would appear twice on the Home tab.
+    var hidesMiniPlayer: Bool = false
 
     @StateObject private var playerState = PlayerState.shared
 
@@ -416,7 +431,7 @@ struct BottomBar: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 8) {
-            if playerState.isNowPlaying {
+            if playerState.isNowPlaying && !hidesMiniPlayer {
                 // Tab pill on the left
                 tabBar
 

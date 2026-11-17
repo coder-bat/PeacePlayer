@@ -544,6 +544,27 @@ struct SettingsView: View {
                         title: "Memory-Boosted Anti-Algorithm",
                         subtitle: "Songs you've written memories for are seeded more often"
                     )
+                    // 2026-11-17: the Turntable Home. The record is the
+                    // home screen - platter, tonearm, cue lever, crate.
+                    // Default OFF so no existing user's entry screen
+                    // changes until they opt in.
+                    //
+                    // `onChange` mirrors the value into FeatureFlags.
+                    // The flag has to be read in two places (HomeView
+                    // swaps the body, ContentView hides the MiniPlayer)
+                    // and a cached read in either would leave them out
+                    // of sync after a toggle.
+                    LabsToggle(
+                        key: FeatureFlags.turntableHomeKey,
+                        defaultValue: false,
+                        icon: "record.circle",
+                        iconColor: Theme.cyberCyan,
+                        title: "Turntable Home",
+                        subtitle: "Replace the home screen with a record deck",
+                        onChange: { enabled in
+                            FeatureFlags.shared.turntableHome = enabled
+                        }
+                    )
                 } header: {
                     Text("Labs")
                         .font(Typography.sectionHeader)
