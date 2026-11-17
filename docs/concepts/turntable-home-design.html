@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Turntable Home — iYMusic design spec</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#100f0e; --surf:#1a1816; --surf2:#221f1b; --line:rgba(255,255,255,.10);
+    --ink:#f4efe6; --muted:#98907f; --amber:#f0a92b;
+    --cyan:#00E5FF; --magenta:#FF0099;
+    --walnut:#3b2a1e; --alu:#c9c6be; --cream:#f3ede0; --felt:#2f4034;
+    --sans:'Space Grotesk',sans-serif; --mono:'JetBrains Mono',monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);-webkit-font-smoothing:antialiased;overflow-x:hidden}
+  .wrap{max-width:1180px;margin:0 auto;padding:56px 24px 80px}
+  .glow{position:fixed;width:560px;height:560px;border-radius:50%;filter:blur(100px);opacity:.10;pointer-events:none;z-index:0}
+  .glow.a{background:var(--amber);top:-200px;left:-160px}
+  .glow.b{background:var(--magenta);bottom:-260px;right:-180px;opacity:.08}
+
+  .eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.24em;color:var(--amber);margin:0 0 14px}
+  h1{font-size:clamp(28px,4.6vw,46px);line-height:1.05;letter-spacing:-.02em;margin:0 0 12px;font-weight:700;max-width:15ch}
+  .lede{font-size:15.5px;line-height:1.6;color:var(--muted);max-width:56ch;margin:0 0 40px}
+  .lede b{color:var(--ink);font-weight:500}
+
+  .split{display:grid;grid-template-columns:400px 1fr;gap:36px;align-items:start;position:relative;z-index:1}
+
+  /* PHONE */
+  .phone{width:400px;border-radius:44px;border:9px solid #2a251f;background:#08080a;padding:9px;
+    box-shadow:0 30px 60px -24px rgba(0,0,0,.9),0 0 0 1px rgba(255,255,255,.05);position:relative}
+  .screen{position:relative;height:706px;border-radius:36px;overflow:hidden;
+    background:radial-gradient(120% 80% at 50% 0%,#241f19 0%,#141210 45%,#0c0b0a 100%);
+    display:flex;flex-direction:column;padding:16px 14px}
+
+  /* fascia */
+  .fascia{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:12px;
+    background:linear-gradient(#3a342c,#221e19);border:1px solid rgba(255,255,255,.09);margin-bottom:14px}
+  .rpmchip{font-family:var(--mono);font-size:9px;letter-spacing:.1em;color:var(--amber);
+    border:1px solid rgba(240,169,43,.45);background:rgba(240,169,43,.10);border-radius:6px;padding:3px 7px}
+  .lamps{display:flex;gap:6px;align-items:center}
+  .lamp{width:9px;height:9px;border-radius:50%}
+  .lamp.on{background:var(--amber);box-shadow:0 0 10px var(--amber)}
+  .lamp.c{background:var(--cyan);box-shadow:0 0 10px var(--cyan)}
+  .lamp.m{background:var(--magenta);box-shadow:0 0 10px var(--magenta)}
+  .fascia .lbl{font-family:var(--mono);font-size:10px;letter-spacing:.2em;color:#cbc3b4}
+  .deckchips{display:flex;gap:5px}
+  .dchip{width:22px;height:22px;border-radius:6px;background:linear-gradient(#3b352c,#252119);
+    display:flex;align-items:center;justify-content:center;color:#8d8574}
+
+  /* platter */
+  .stage{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;position:relative;min-height:0;padding-top:34px}
+  .platterwrap{position:relative;width:326px;height:326px;display:flex;align-items:center;justify-content:center}
+  .platter{position:relative;width:320px;height:320px;border-radius:50%;
+    background:radial-gradient(circle at 50% 50%,#1c1c22 0 20.5%,#08080a 21% 100%);
+    box-shadow:0 0 0 1px rgba(255,255,255,.08),0 18px 40px -18px #000,inset 0 0 60px rgba(0,0,0,.6)}
+  .platter::before{content:"";position:absolute;inset:0;border-radius:50%;
+    background:repeating-radial-gradient(circle at 50% 50%,rgba(255,255,255,.055) 0 1px,transparent 1px 5px)}
+  .spin{position:absolute;inset:0;border-radius:50%;animation:spin 3.2s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .sheen{position:absolute;inset:0;border-radius:50%;mix-blend-mode:screen;
+    background:conic-gradient(from 0deg,transparent 0deg,rgba(255,255,255,.14) 24deg,transparent 62deg,transparent 186deg,rgba(255,255,255,.09) 208deg,transparent 248deg);
+    animation:spin 3.2s linear infinite}
+  .label{position:absolute;left:50%;top:50%;width:132px;height:132px;margin:-66px 0 0 -66px;border-radius:50%;
+    background:radial-gradient(circle at 38% 32%,var(--magenta),#8f0053 72%);
+    box-shadow:0 0 30px rgba(255,0,153,.4)}
+  .label::after{content:"";position:absolute;inset:52px;border-radius:50%;background:#08080a;
+    box-shadow:0 0 0 2px rgba(255,255,255,.12)}
+  .art{position:absolute;left:50%;top:50%;width:54px;height:54px;margin:-27px 0 0 -27px;border-radius:5px;
+    background:linear-gradient(140deg,#00E5FF,#f0a92b);opacity:.9}
+  .spindle{position:absolute;left:50%;top:50%;width:11px;height:11px;margin:-5.5px 0 0 -5.5px;border-radius:50%;
+    background:var(--cyan);box-shadow:0 0 16px var(--cyan);z-index:3}
+
+  /* tonearm */
+  .pivot{position:absolute;right:6px;top:8px;width:34px;height:34px;border-radius:50%;
+    background:radial-gradient(circle at 36% 30%,#d9d4c8,#4a443b);box-shadow:0 4px 10px rgba(0,0,0,.6);z-index:4}
+  .arm{position:absolute;right:20px;top:22px;width:250px;height:4px;border-radius:3px;z-index:4;
+    background:linear-gradient(90deg,#b9b3a7,#efeade);transform-origin:100% 50%;transform:rotate(19deg);
+    transition:transform .45s cubic-bezier(.2,.8,.2,1)}
+  .arm::before{content:"";position:absolute;right:-9px;top:-8px;width:20px;height:20px;border-radius:50%;background:#d9d4c8}
+  .arm::after{content:"";position:absolute;left:-13px;top:-6px;width:26px;height:16px;border-radius:4px;
+    background:linear-gradient(#f0a92b,#c9861b);box-shadow:0 2px 6px rgba(0,0,0,.5)}
+  .cuelever{position:absolute;right:42px;top:58px;width:10px;height:46px;border-radius:6px;z-index:5;
+    background:linear-gradient(#cfc9bd,#6d675c);transform-origin:50% 100%;
+    box-shadow:0 3px 8px rgba(0,0,0,.55)}
+  .stack{display:flex;gap:7px;margin-top:14px;justify-content:center}
+  .qdisc{width:46px;height:46px;border-radius:50%;position:relative;
+    background:radial-gradient(circle,#1b1b20 0 26%,#0a0a0c 27%);
+    box-shadow:0 0 0 1px rgba(255,255,255,.09)}
+  .qdisc::after{content:"";position:absolute;left:50%;top:50%;width:15px;height:15px;margin:-7.5px 0 0 -7.5px;
+    border-radius:50%;background:var(--magenta);opacity:.75}
+  .qdisc.q2{background:radial-gradient(circle,#1b1b20 0 26%,#0a0a0c 27%)}.qdisc.q2::after{background:var(--cyan)}
+  .qdisc.q3::after{background:var(--amber)}
+
+  /* shelf */
+  .shelf{margin-top:6px}
+  .crates{display:flex;gap:8px;overflow:hidden;padding:9px 0 10px}
+  .crate{flex:none;width:64px;height:64px;border-radius:8px;border:1px solid rgba(255,255,255,.10);
+    position:relative;overflow:hidden;transition:transform .3s}
+  .crate:hover{transform:translateY(-6px)}
+  .crate.c1{background:linear-gradient(140deg,#00E5FF,#0d5f68)}
+  .crate.c2{background:linear-gradient(140deg,#FF0099,#5c0038)}
+  .crate.c3{background:linear-gradient(140deg,#f0a92b,#6b4410)}
+  .crate.c4{background:linear-gradient(140deg,#7f8f6a,#2a3324)}
+  .crate em{position:absolute;left:6px;bottom:5px;font-family:var(--mono);font-size:8px;font-style:normal;color:rgba(255,255,255,.85)}
+  .rail{height:2px;border-radius:2px;background:linear-gradient(90deg,var(--walnut),#5a4530);margin-top:4px}
+
+  /* now playing */
+  .np{margin-top:10px;padding:11px 12px;border-radius:12px;background:rgba(255,255,255,.04);
+    border:1px solid rgba(255,255,255,.08)}
+  .np .row{display:flex;align-items:center;justify-content:space-between}
+  .np .tt{font-size:13px;font-weight:500}
+  .np .ar{font-family:var(--mono);font-size:9px;color:var(--muted);letter-spacing:.08em;margin-top:2px}
+  .vu{display:flex;gap:3px;align-items:flex-end;height:20px;flex:1;max-width:120px;margin-left:14px}
+  .vu i{flex:1;background:rgba(0,229,255,.22);border-radius:1px;animation:eq 1.1s ease-in-out infinite}
+  .vu i:nth-child(1){height:40%;animation-delay:.03s}.vu i:nth-child(2){height:70%;animation-delay:.16s}
+  .vu i:nth-child(3){height:48%;animation-delay:.29s}.vu i:nth-child(4){height:92%;animation-delay:.1s}
+  .vu i:nth-child(5){height:56%;animation-delay:.37s}.vu i:nth-child(6){height:100%;animation-delay:.21s}
+  .vu i:nth-child(7){height:44%;animation-delay:.44s}.vu i:nth-child(8){height:74%;animation-delay:.07s}
+  @keyframes eq{0%,100%{transform:scaleY(.5)}50%{transform:scaleY(1)}}
+
+  /* pins */
+  .pin{position:absolute;width:22px;height:22px;border-radius:50%;background:var(--amber);color:#231a0c;
+    font-family:var(--mono);font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;
+    box-shadow:0 0 0 3px rgba(240,169,43,.25),0 3px 8px rgba(0,0,0,.5);z-index:9}
+
+  /* right column */
+  .notes{display:flex;flex-direction:column;gap:9px}
+  .note{display:grid;grid-template-columns:26px 1fr;gap:12px;align-items:baseline;
+    padding:11px 13px;border-radius:11px;background:var(--surf);border:1px solid var(--line);
+    opacity:0;transform:translateX(18px);transition:.6s cubic-bezier(.2,.8,.2,1)}
+  .note.in{opacity:1;transform:none}
+  .note .n{font-family:var(--mono);font-size:11px;color:var(--amber);font-weight:700}
+  .note b{display:block;font-size:13.5px;font-weight:500;margin-bottom:2px}
+  .note p{margin:0;font-size:12.5px;line-height:1.55;color:var(--muted)}
+  .note code{font-family:var(--mono);font-size:11px;color:#cfc7b7;background:rgba(255,255,255,.05);padding:1px 5px;border-radius:4px}
+
+  .panels{margin-top:44px;display:grid;grid-template-columns:1fr 1fr;gap:22px;position:relative;z-index:1}
+  .panel{background:var(--surf);border:1px solid var(--line);border-radius:18px;padding:20px}
+  .panel h3{font-family:var(--mono);font-size:10.5px;letter-spacing:.22em;color:var(--amber);margin:0 0 18px;font-weight:500}
+  .flow{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+  .fnode{padding:8px 11px;border-radius:9px;background:var(--surf2);border:1px solid var(--line);
+    font-family:var(--mono);font-size:10px;letter-spacing:.08em;color:var(--ink)}
+  .fnode.a{border-color:rgba(240,169,43,.45);background:rgba(240,169,43,.1)}
+  .farrow{color:#6b6357}
+  .tree{display:flex;flex-direction:column;gap:5px}
+  .trow{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center;padding:7px 0;border-bottom:1px dashed rgba(255,255,255,.08)}
+  .trow:last-child{border-bottom:none}
+  .trow code{font-family:var(--mono);font-size:11.5px;color:#e6dfd0}
+  .trow span{font-size:11.5px;color:var(--muted);text-align:right}
+  .trow.hd code{color:var(--amber)}
+  footer{margin-top:38px;font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:#6b6357}
+  @media (max-width:960px){
+    .split{grid-template-columns:1fr}
+    .panels{grid-template-columns:1fr}
+    .phone{margin:0 auto}
+  }
+  @media (prefers-reduced-motion:reduce){
+    *{animation:none!important;transition:none!important}
+    .note{opacity:1;transform:none}
+  }
+</style>
+</head>
+<body>
+<div class="glow a"></div><div class="glow b"></div>
+<div class="wrap">
+
+  <p class="eyebrow">iYMusic · HOME REDESIGN · DIRECTION 01</p>
+  <h1>The record is the home screen.</h1>
+  <p class="lede">One deck replaces the scroll. The <b>platter shows what plays</b>, the <b>tonearm scrubs</b>, sleeves drop onto it, and the cue lever is play/pause. Rotation replaces the progress bar.</p>
+
+  <div class="split">
+    <div class="phone">
+      <div class="screen">
+        <div class="fascia">
+          <div class="lamps"><i class="lamp on"></i><i class="lamp c"></i><i class="lamp m"></i></div>
+          <div class="lbl">NIGHT</div>
+          <div class="rpmchip">33⅓</div>
+          <div class="deckchips" style="margin-left:auto">
+            <div class="dchip"><svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M6 2h3v20H6zM11 2h2v20h-2zM17 2l5 10-5 10z"/></svg></div>
+            <div class="dchip"><svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M5 3l14 9-14 9z"/></svg></div>
+            <div class="dchip"><svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4h10v2H7zm0 4h10v2H7zm0 4h10v2H7zm0 4h10v2H7z"/></svg></div>
+          </div>
+        </div>
+
+        <div class="stage">
+          <div class="platterwrap">
+            <div class="platter">
+              <div class="spin"><div class="sheen"></div></div>
+              <div class="label"></div>
+              <div class="art"></div>
+              <div class="spindle"></div>
+            </div>
+            <div class="cuelever"></div>
+            <div class="arm"></div>
+            <div class="pivot"></div>
+          </div>
+        </div>
+
+        <div class="shelf">
+          <div class="stack">
+            <div class="qdisc"></div><div class="qdisc q2"></div><div class="qdisc q3"></div>
+          </div>
+          <div class="crates">
+            <div class="crate c1"><em>A1</em></div>
+            <div class="crate c2"><em>A2</em></div>
+            <div class="crate c3"><em>A3</em></div>
+            <div class="crate c4"><em>A4</em></div>
+          </div>
+          <div class="rail"></div>
+        </div>
+
+        <div class="np">
+          <div class="row">
+            <div><div class="tt">Midnight Signal</div><div class="ar">NIGHT FM</div></div>
+            <div class="vu"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+          </div>
+        </div>
+
+        <div class="pin" style="left:8px;top:22px">1</div>
+        <div class="pin" style="right:48px;top:146px">2</div>
+        <div class="pin" style="left:176px;top:34px">3</div>
+        <div class="pin" style="left:30px;top:246px">4</div>
+        <div class="pin" style="left:118px;top:42px">6</div>
+        <div class="pin" style="left:6px;bottom:104px">5</div>
+        <div class="pin" style="right:36px;bottom:28px">7</div>
+      </div>
+    </div>
+
+    <div class="notes" id="notes">
+      <div class="note"><span class="n">1</span><div><b>Fascia</b><p>Profile chip and 5 nav chips become a brushed strip with indicator lamps.</p></div></div>
+      <div class="note"><span class="n">2</span><div><b>Cue lever</b><p>Lift = pause, drop = play. <code>togglePlayPause</code></p></div></div>
+      <div class="note"><span class="n">3</span><div><b>Tonearm</b><p>Drag to scrub, 10% haptic detents, seek on release.</p></div></div>
+      <div class="note"><span class="n">4</span><div><b>Platter</b><p>Spins when playing, idles when paused, label carries art.</p></div></div>
+      <div class="note"><span class="n">5</span><div><b>Sleeve crate</b><p>Drag a sleeve onto the platter to play it.</p></div></div>
+      <div class="note"><span class="n">6</span><div><b>RPM chip</b><p>33 / 45 maps to 1.0× / 1.25× rate.</p></div></div>
+      <div class="note"><span class="n">7</span><div><b>VU meter</b><p>Live amplitude, reuse <code>NeuralFreqVisualizer</code> maths.</p></div></div>
+    </div>
+  </div>
+
+  <div class="panels">
+    <div class="panel">
+      <h3>STATE</h3>
+      <div class="flow">
+        <div class="fnode">IDLE</div><span class="farrow">→</span>
+        <div class="fnode a">SPINNING</div><span class="farrow">→</span>
+        <div class="fnode">PAUSED</div><span class="farrow">→</span>
+        <div class="fnode a">SCRUB</div><span class="farrow">→</span>
+        <div class="fnode">SPINNING</div>
+      </div>
+      <div class="flow" style="margin-top:16px">
+        <div class="fnode">TAP SPINDLE</div><span class="farrow">→</span>
+        <div class="fnode a">45 RPM</div>
+      </div>
+      <div class="flow" style="margin-top:16px">
+        <div class="fnode">LONG-PRESS PLATTER</div><span class="farrow">→</span>
+        <div class="fnode">QUEUE STACK</div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>SWIFTUI UNITS</h3>
+      <div class="tree">
+        <div class="trow hd"><code>TurntableHomeView</code><span>root</span></div>
+        <div class="trow"><code>DeckFasciaView</code><span>lamp + chips</span></div>
+        <div class="trow"><code>PlatterView</code><span>grooves + label</span></div>
+        <div class="trow"><code>TonearmView</code><span>drag + detents</span></div>
+        <div class="trow"><code>SleeveCrateView</code><span>drag to platter</span></div>
+        <div class="trow"><code>LevelMeterRow</code><span>amplitude</span></div>
+        <div class="trow"><code>TurntableTokens</code><span>walnut, alu, felt</span></div>
+      </div>
+    </div>
+  </div>
+
+  <footer>iYMusic · turntable home · spec v1</footer>
+</div>
+
+<script>
+  const items=document.querySelectorAll('.note');
+  const io=new IntersectionObserver(es=>{es.forEach(e=>{if(e.isIntersecting){e.target.classList.add('in');io.unobserve(e.target);}})},{threshold:.2});
+  items.forEach(i=>io.observe(i));
+</script>
+</body>
+</html>
