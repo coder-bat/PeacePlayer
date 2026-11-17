@@ -58,6 +58,10 @@ struct TurntableHomeView: View {
     @ObservedObject var playerState: PlayerState
     @ObservedObject var visualizer: AudioVisualizerEngine
 
+    /// The profile chip, owned by Home (it owns the avatar picker) and
+    /// drawn on the deck's fascia.
+    var profile: AnyView
+
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var is45RPM = false
@@ -84,7 +88,7 @@ struct TurntableHomeView: View {
     var body: some View {
         VStack(spacing: 0) {
             DeckFasciaView(
-                greeting: viewModel.greeting,
+                profile: profile,
                 isPlaying: playerState.playbackState == .playing,
                 isConnected: true,
                 rpmLabel: is45RPM ? "45" : "33⅓",
@@ -311,12 +315,22 @@ struct TurntableHomeView: View {
 
     /// The deck's plinth: walnut with a dark vignette so the deck
     /// sits in a room rather than on a flat colour.
+    ///
+    /// The walnut texture sits inside an overlay on purpose. A
+    /// resizable image with `.aspectRatio(contentMode: .fill)` reports
+    /// its natural size as its ideal size, and in a ZStack that ideal
+    /// size wins: the container grows to the texture's 1024pt width
+    /// and everything laid out inside the deck is pushed off screen.
+    /// An overlay pins the texture to the plinth's own bounds.
     private var deckBackground: some View {
         ZStack {
-            Image(TurntableTexture.walnut)
-                .resizable()
-                .aspectRatio(contentMode: .fill)
-                .opacity(0.22)
+            Color.clear
+                .overlay(
+                    Image(TurntableTexture.walnut)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .opacity(0.22)
+                )
 
             LinearGradient(
                 colors: [

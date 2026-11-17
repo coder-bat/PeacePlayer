@@ -38,8 +38,17 @@ final class TurntableWiringTests: XCTestCase {
     func testTurntableIsOffByDefaultInSharedStore() {
         // The shared store must not have the flag on unless the user
         // explicitly enabled it in Settings -> Labs.
-        XCTAssertFalse(FeatureFlags.shared.turntableHome,
-                       "Turntable must be opt-in")
+        //
+        // The assertion is about the store's DEFAULT, so it runs against
+        // a scratch defaults suite. The simulator's own UserDefaults
+        // may have the flag on from a manual run, and that must not
+        // make this test flaky.
+        let suiteName = "TurntableWiringTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let flags = FeatureFlags(defaults: defaults)
+        XCTAssertFalse(flags.turntableHome, "Turntable must be opt-in")
     }
 
     func testFlagKeyMatchesTheLabsToggleKey() {

@@ -52,10 +52,12 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
     }
 
     private func loadImage() {
-        guard let url = url else {
-            image = nil
-            return
-        }
+        // No URL means there is nothing to load. Returning without
+        // touching `image` matters: this runs from `onAppear`, and
+        // writing @State from there during a graph update leaves a
+        // state box that SwiftUI can release twice when the view is
+        // torn down (observed as a SIGBUS inside the image loader).
+        guard let url = url else { return }
 
         cancellable = ImageCache.shared.image(for: url)
             .receive(on: DispatchQueue.main)

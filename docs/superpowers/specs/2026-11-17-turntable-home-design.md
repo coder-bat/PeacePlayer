@@ -72,14 +72,20 @@ that already exists in `PlayerState`.
 
 ### 4.1 Deck fascia (1)
 - Replaces `headerSection`. Brushed-metal strip, rounded, dark walnut gradient.
-- Three indicator lamps on the left (amber / cyan / magenta) — decorative state
-  echoes; amber = playing, cyan = connected, magenta = queue has content.
-- `NIGHT` greeting text (reuse `HomeViewModel.greeting`, already time-based).
-- **RPM chip (6)** — `33⅓` / `45`, tappable. Maps to playback rate 1.0× / 1.25×
+- **Two rows.** The deck is 402pt wide; one row cannot hold the instruments, the
+  profile chip and five navigation chips without clipping, so:
+  - **Row 1 — instruments.** The profile chip (owned by `HomeView`, so the avatar
+    picker stays there) on the left; three indicator lamps (amber / cyan / magenta —
+    amber = power, cyan = connected, magenta = playing); the RPM chip on the right.
+  - **Row 2 — navigation and attention.** The existing 5 `CyberIconChip` destinations
+    (Time Capsule, Anti-Algorithm, Radio, Playlists, Settings) on the left, restyled
+    as square deck buttons; the two actionable lamps on the right.
+- **RPM chip** — `33⅓` / `45`, tappable. Maps to playback rate 1.0× / 1.25×
   via `PlayerState.setPlaybackRate(_:)`.
-- Right side: the existing 5 `CyberIconChip` destinations (Time Capsule,
-  Anti-Algorithm, Radio, Playlists, Settings), restyled as square deck buttons.
-  **These must keep working** — same `HomeDestination` navigation, no new routes.
+- The two actionable lamps (Smart Library, scheduled cleanup) keep a full 44×44pt
+  touch target, which is why they get their own space on row 2 instead of being
+  squeezed into row 1.
+- **These must keep working** — same `HomeDestination` navigation, no new routes.
 
 ### 4.2 Cue lever (2)
 - A vertical lever to the right of the platter.
@@ -88,17 +94,28 @@ that already exists in `PlayerState`.
 - Must be a ≥44×44pt hit target even though the visible lever is ~10×46pt.
 
 ### 4.3 Tonearm (3)
-- Pivots from the upper right, arm reaching over the platter edge.
-- **Drag to scrub.** Horizontal drag maps to `0…1` progress; a `DragGesture` with
-  `@GestureState` drives the live angle, and the seek is committed on release
-  (`PlayerState.seek(to:)`).
+- Pivots from the deck's back-**left** corner — the back-right corner belongs to the
+  cue lever — and reaches across the record, with the headshell travelling down the
+  record's right-hand side.
+- The arm is a rigid tube: the stylus rides a **circular arc about the pivot**, not a
+  straight line, exactly as on a real deck. The angles (8.8° at rest → 37.1° at the
+  end) are calibrated so the stylus starts on the outer groove and finishes at the
+  edge of the paper label; `TurntableGeometryTests` asserts both.
+- **Drag to scrub.** The drag angle about the pivot maps to `0…1` progress; the seek is
+  committed on release (`PlayerState.seek(to:)`).
 - **Haptic detent every 10%** — `HapticManager.selectionChanged()`, not `.light()`.
   The audit flagged ~80 haptics in `FullPlayer` alone; keep this one sharp and
   distinct, and use `.light()` nowhere else.
-- Angle range: ~19° (start) to ~52° (end of side).
 
 ### 4.4 Platter (4)
-- Concentric groove rings, magenta label, cyan spindle light at the centre.
+- Built outside in: machined aluminium **rim** → **felt mat** → the **record** (the
+  generated vinyl macro photograph, multiplied down so it reads as black vinyl rather
+  than brushed metal) → concentric groove rings → a specular sheen that catches the
+  light as the record turns → the **centre label** → the lit cyan **spindle**.
+- The record is smaller than the platter, so a ring of green felt shows around it —
+  a record that fills the platter edge to edge does not read as a record.
+- The centre label is paper stock with the album art on it and the imprint
+  **"PEACEPLAYER" set on an arc**, the way a pressed label is.
 - **Label artwork = current track's album art** via the existing `CachedAsyncImage`.
 - **Rotation = playback.** `progress` drives rotation so the record turns exactly
   once per track; when paused it holds still; when idle it is blank.

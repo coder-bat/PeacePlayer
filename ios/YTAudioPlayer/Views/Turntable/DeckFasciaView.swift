@@ -5,16 +5,28 @@
 //  The brushed-aluminium strip across the top of the deck.
 //
 //  It replaces the current Home header (profile chip + 5 nav chips).
-//  Three pilot lamps sit on the left: amber for power, cyan for a
-//  live connection, magenta for a queue with content. The greeting
-//  and the RPM chip sit in the middle; the existing navigation chips
-//  are passed in from HomeView so their routes stay owned by Home.
+//  The strip is two rows because the deck is only 402pt wide:
+//
+//    Row 1 — the deck's own instrumentation. The profile chip on the
+//            left, the pilot lamps (amber for power, cyan for a live
+//            connection, magenta for a playing deck) and the RPM chip
+//            on the right.
+//    Row 2 — the app's navigation on the left, and the two actionable
+//            state lamps (Smart Library review, scheduled cleanup) on
+//            the right. Those two stand in for the SmartLibraryCard
+//            and the CleanupScheduledBanner from the old Home.
+//
+//  The lamps that stand in for real cards keep a full 44x44 touch
+//  target, which is why they get their own space rather than being
+//  squeezed into the instruments row.
 //
 
 import SwiftUI
 
 struct DeckFasciaView<Chips: View>: View {
-    let greeting: String
+    /// The profile chip, owned by Home so the avatar picker stays
+    /// there.
+    let profile: AnyView
     let isPlaying: Bool
     let isConnected: Bool
     let rpmLabel: String
@@ -29,7 +41,7 @@ struct DeckFasciaView<Chips: View>: View {
     /// control of its NavigationStack routes — the fascia only draws
     /// the buttons.
     init(
-        greeting: String,
+        profile: AnyView,
         isPlaying: Bool,
         isConnected: Bool,
         rpmLabel: String,
@@ -40,7 +52,7 @@ struct DeckFasciaView<Chips: View>: View {
         onCleanup: @escaping () -> Void,
         @ViewBuilder navChips: @escaping () -> Chips
     ) {
-        self.greeting = greeting
+        self.profile = profile
         self.isPlaying = isPlaying
         self.isConnected = isConnected
         self.rpmLabel = rpmLabel
@@ -53,65 +65,79 @@ struct DeckFasciaView<Chips: View>: View {
     }
 
     var body: some View {
-        HStack(spacing: 10) {
-            // Pilot lamps.
-            HStack(spacing: 6) {
-                PilotLamp(color: TurntableTokens.amberLamp, isOn: true)
-                PilotLamp(color: Theme.cyberCyan, isOn: isConnected)
-                PilotLamp(color: Theme.cyberMagenta, isOn: isPlaying)
+        VStack(spacing: 10) {
+            // Row 1 — instruments.
+            HStack(spacing: 10) {
+                profile
+                    .layoutPriority(1)
+
+                Spacer(minLength: 8)
+
+                // Pilot lamps.
+                HStack(spacing: 6) {
+                    PilotLamp(color: TurntableTokens.amberLamp, isOn: true)
+                    PilotLamp(color: Theme.cyberCyan, isOn: isConnected)
+                    PilotLamp(color: Theme.cyberMagenta, isOn: isPlaying)
+                }
+
+                // RPM chip.
+                Button {
+                    onToggleRPM()
+                } label: {
+                    Text(rpmLabel)
+                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .foregroundColor(TurntableTokens.amberLamp)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 5)
+                        .background(
+                            RoundedRectangle(cornerRadius: 5)
+                                .fill(TurntableTokens.amberLamp.opacity(0.12))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 5)
+                                        .strokeBorder(TurntableTokens.amberLamp.opacity(0.45), lineWidth: 1)
+                                )
+                        )
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Playback speed, \(rpmLabel)")
             }
 
-            // Actionable-state lamps. These replace the Smart Library
-            // card and the cleanup banner — both of which were the most
-            // important decision surfaces on the old Home.
-            if hasSmartLibraryCandidates {
-                PilotLamp(color: Theme.cyberYellow, isOn: true, action: onSmartLibrary)
-                    .accessibilityLabel("Smart Library needs review")
+            // Row 2 — navigation and anything that needs attention.
+            HStack(spacing: 8) {
+                navChips()
+
+                Spacer(minLength: 0)
+
+                // Actionable-state lamps. These replace the Smart
+                // Library card and the cleanup banner — both of which
+                // were the most important decision surfaces on the old
+                // Home.
+                if hasSmartLibraryCandidates {
+                    PilotLamp(color: Theme.cyberYellow, isOn: true, action: onSmartLibrary)
+                        .accessibilityLabel("Smart Library needs review")
+                }
+                if hasPendingCleanup {
+                    PilotLamp(color: Theme.cyberMagenta, isOn: true, action: onCleanup)
+                        .accessibilityLabel("Scheduled cleanup pending")
+                }
             }
-            if hasPendingCleanup {
-                PilotLamp(color: Theme.cyberMagenta, isOn: true, action: onCleanup)
-                    .accessibilityLabel("Scheduled cleanup pending")
-            }
-
-            Spacer(minLength: 4)
-
-            Text(greeting.uppercased())
-                .font(Typography.eyebrow)
-                .foregroundColor(TurntableTokens.aluminium.opacity(0.85))
-                .lineLimit(1)
-
-            // RPM chip.
-            Button {
-                onToggleRPM()
-            } label: {
-                Text(rpmLabel)
-                    .font(.system(size: 10, weight: .bold, design: .monospaced))
-                    .foregroundColor(TurntableTokens.amberLamp)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(
-                        RoundedRectangle(cornerRadius: 5)
-                            .fill(TurntableTokens.amberLamp.opacity(0.12))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 5)
-                                    .strokeBorder(TurntableTokens.amberLamp.opacity(0.45), lineWidth: 1)
-                            )
-                    )
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Playback speed, \(rpmLabel)")
-
-            navChips()
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 9)
+        .padding(.vertical, 10)
         .background(
             ZStack {
-                // Brushed aluminium.
-                Image(TurntableTexture.brushedAluminium)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .opacity(0.30)
+                // Brushed aluminium. The texture is pinned in an
+                // overlay: a resizable image with
+                // `.aspectRatio(contentMode: .fill)` reports its natural
+                // size as its ideal size, and that size can leak into
+                // the strip's layout and push the controls off screen.
+                Color.clear
+                    .overlay(
+                        Image(TurntableTexture.brushedAluminium)
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                            .opacity(0.30)
+                    )
 
                 // Machined gradient over the texture so the strip reads
                 // as a solid metal part rather than a photo.

@@ -6,8 +6,8 @@
 //
 //  Construction, outside in:
 //
-//    1. Felt mat        - deep green, sits under the platter
-//    2. Platter rim     - machined aluminium ring with a bright edge
+//    1. Machined rim    - the aluminium edge of the platter
+//    2. Felt mat        - deep green, the record sits on it
 //    3. Groove surface  - the generated macro photograph of vinyl
 //                         grooves, clipped to a circle
 //    4. Groove rings    - concentric specular lines drawn on top so
@@ -15,7 +15,8 @@
 //                         texture is compressed on a small screen
 //    5. Specular sheen  - a soft off-centre highlight that catches the
 //                         light as the record turns
-//    6. Centre label    - the album art on a paper label
+//    6. Centre label    - the album art on a paper label, with the
+//                         label's own curved type ring
 //    7. Spindle         - the metal pin with a lit centre
 //
 //  Rotation is a PURE FUNCTION of playback progress. There is no
@@ -63,9 +64,40 @@ struct PlatterView: View {
     var onTapSpindle: () -> Void
     var onLongPress: () -> Void
 
+    /// The platter's outer diameter. Every other dimension below is
+    /// derived from it, so the whole assembly scales as one part.
+    static let diameter: CGFloat = 320
+
+    /// The record's diameter — smaller than the platter, so a ring of
+    /// felt shows around it. A record that fills the platter edge to
+    /// edge does not read as a record on a turntable.
+    static let recordDiameter: CGFloat = 276
+
+    /// The paper label's diameter — about a third of the record, the
+    /// way a real 12" label sits on a 12" record.
+    static let labelDiameter: CGFloat = 96
+
     var body: some View {
         ZStack {
-            // 1. Felt mat
+            // 1. Machined rim.
+            Circle()
+                .strokeBorder(
+                    LinearGradient(
+                        colors: [
+                            TurntableTokens.edgeHighlight,
+                            TurntableTokens.aluminium.opacity(0.35),
+                            TurntableTokens.aluminium.opacity(0.85),
+                            TurntableTokens.edgeHighlight
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: 6
+                )
+                .frame(width: Self.diameter, height: Self.diameter)
+                .shadow(color: .black.opacity(0.55), radius: 14, y: 8)
+
+            // 2. Felt mat.
             Circle()
                 .fill(
                     LinearGradient(
@@ -74,91 +106,29 @@ struct PlatterView: View {
                         endPoint: .bottomTrailing
                     )
                 )
+                .frame(width: Self.diameter - 14, height: Self.diameter - 14)
                 .overlay(
                     Image(TurntableTexture.felt)
                         .resizable()
                         .aspectRatio(contentMode: .fill)
-                        .opacity(0.5)
+                        .opacity(0.55)
                         .blendMode(.overlay)
                 )
-                .shadow(color: .black.opacity(0.6), radius: 18, y: 8)
-
-            // 2. Platter rim
-            Circle()
-                .strokeBorder(
-                    LinearGradient(
-                        colors: [
-                            TurntableTokens.edgeHighlight,
-                            TurntableTokens.aluminium.opacity(0.35),
-                            TurntableTokens.aluminium.opacity(0.8),
-                            TurntableTokens.edgeHighlight
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ),
-                    lineWidth: 3
-                )
-                .padding(1)
-
-            // 3 + 4. Groove surface
-            Circle()
-                .fill(TurntableTokens.vinyl)
-                .overlay(
-                    Image(TurntableTexture.vinylGrooves)
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                        .rotationEffect(.degrees(rotationDegrees))
-                )
-                .overlay(
-                    // Concentric specular lines, drawn on top so the
-                    // surface reads as vinyl even at low resolution.
-                    Circle()
-                        .strokeBorder(TurntableTokens.grooveShadow, lineWidth: 1)
-                        .padding(26)
-                        .overlay(
-                            Circle()
-                                .strokeBorder(TurntableTokens.grooveShadow.opacity(0.7), lineWidth: 1)
-                                .padding(44)
-                        )
-                        .overlay(
-                            Circle()
-                                .strokeBorder(TurntableTokens.grooveShadow.opacity(0.5), lineWidth: 1)
-                                .padding(64)
-                        )
-                )
-                .overlay(
-                    // 5. Specular sheen — off-centre highlight.
-                    RadialGradient(
-                        colors: [
-                            .white.opacity(0.20),
-                            .white.opacity(0.05),
-                            .clear
-                        ],
-                        center: UnitPoint(x: 0.30, y: 0.22),
-                        startRadius: 0,
-                        endRadius: 260
-                    )
-                    .blendMode(.screen)
-                    .allowsHitTesting(false)
-                )
-                .overlay(
-                    // Inner shadow at the record's edge so it sits inside
-                    // the platter rim rather than floating on it.
-                    Circle()
-                        .strokeBorder(.black.opacity(0.55), lineWidth: 10)
-                        .blur(radius: 8)
-                        .padding(-5)
-                        .allowsHitTesting(false)
-                )
+                // The texture is a square photograph; without this it
+                // spills over the mat as a square of green felt.
                 .clipShape(Circle())
 
-            // 6. Centre label
+            // 3 + 4 + 5. The record.
+            record
+                .frame(width: Self.recordDiameter, height: Self.recordDiameter)
+
+            // 6. Centre label.
             labelArtwork
 
-            // 7. Spindle
+            // 7. Spindle.
             spindle
         }
-        .frame(width: 320, height: 320)
+        .frame(width: Self.diameter, height: Self.diameter)
         .contentShape(Circle())
         .onTapGesture { onTapSpindle() }
         .onLongPressGesture(minimumDuration: 0.5) { onLongPress() }
@@ -168,6 +138,68 @@ struct PlatterView: View {
             isPlaying ? "Spinning, \(Int(progress * 100)) percent through track" : "Stopped"
         )
         .accessibilityAddTraits(.isButton)
+    }
+
+    // MARK: - Record
+
+    private var record: some View {
+        Circle()
+            .fill(TurntableTokens.vinyl)
+            .overlay(
+                Image(TurntableTexture.vinylGrooves)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .rotationEffect(.degrees(rotationDegrees))
+                    // The generated macro photograph is a bright, silvery
+                    // anisotropic sheen. Multiply it down so it reads as
+                    // black vinyl catching a light rather than as
+                    // brushed aluminium.
+                    .colorMultiply(Color(red: 0.30, green: 0.29, blue: 0.33))
+            )
+            .overlay(grooveRings)
+            .overlay(
+                // Specular sheen — off-centre highlight.
+                RadialGradient(
+                    colors: [
+                        .white.opacity(0.16),
+                        .white.opacity(0.04),
+                        .clear
+                    ],
+                    center: UnitPoint(x: 0.30, y: 0.22),
+                    startRadius: 0,
+                    endRadius: 220
+                )
+                .blendMode(.screen)
+                .allowsHitTesting(false)
+            )
+            .overlay(
+                // Inner shadow at the record's edge so it sits on the
+                // felt rather than floating on it.
+                Circle()
+                    .strokeBorder(.black.opacity(0.5), lineWidth: 10)
+                    .blur(radius: 7)
+                    .padding(-4)
+                    .allowsHitTesting(false)
+            )
+            .clipShape(Circle())
+    }
+
+    /// Concentric specular lines, drawn on top so the surface reads as
+    /// vinyl even at low resolution or when the texture is compressed.
+    private var grooveRings: some View {
+        ZStack {
+            ForEach(0..<16, id: \.self) { index in
+                let fraction = Double(index) / 15.0
+                let radius = 52 + fraction * 80
+                Circle()
+                    .strokeBorder(
+                        TurntableTokens.grooveShadow.opacity(0.9 - fraction * 0.45),
+                        lineWidth: 1
+                    )
+                    .frame(width: radius * 2, height: radius * 2)
+            }
+        }
+        .allowsHitTesting(false)
     }
 
     // MARK: - Rotation
@@ -191,42 +223,69 @@ struct PlatterView: View {
                         colors: [TurntableTokens.cream, TurntableTokens.cream.opacity(0.86)],
                         center: .center,
                         startRadius: 0,
-                        endRadius: 70
+                        endRadius: 52
                     )
                 )
-                .frame(width: 132, height: 132)
+                .frame(width: Self.labelDiameter, height: Self.labelDiameter)
                 .shadow(color: .black.opacity(0.55), radius: 6, y: 2)
 
             // Album art, circular crop, on the label.
-            CachedAsyncImage(url: artworkURL) { image in
-                image
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-            } placeholder: {
-                // Placeholder: a magenta disc with a spindle hole, so an
-                // unloaded track still looks like a record with a blank
-                // label rather than a grey square.
-                ZStack {
-                    Circle().fill(Theme.cyberMagenta.opacity(0.55))
-                    Circle().fill(TurntableTokens.vinyl).frame(width: 22, height: 22)
-                }
-            }
-            .frame(width: 88, height: 88)
-            .clipShape(Circle())
-            .overlay(Circle().strokeBorder(.black.opacity(0.25), lineWidth: 1))
-            .shadow(color: .black.opacity(0.35), radius: 3)
+            artworkDisc
 
-            // Label type ring — the record's own typography.
-            Text("PEACEPLAYER")
-                .font(.system(size: 7, weight: .semibold, design: .monospaced))
-                .tracking(1.6)
-                .foregroundColor(TurntableTokens.walnut.opacity(0.75))
-                .rotationEffect(.degrees(-90))
-                .offset(y: -56)
-                .allowsHitTesting(false)
+            // Label type ring — the record's own typography, set on an
+            // arc so it reads like a pressed paper label.
+            CurvedText(
+                text: "PEACEPLAYER",
+                radius: 40,
+                font: .system(size: 7, weight: .semibold, design: .monospaced),
+                measurementFont: .monospacedSystemFont(ofSize: 7, weight: .semibold),
+                tracking: 1.4,
+                color: TurntableTokens.walnut.opacity(0.8)
+            )
+            .frame(width: Self.labelDiameter, height: Self.labelDiameter)
+            .allowsHitTesting(false)
         }
         // The label spins with the record.
         .rotationEffect(.degrees(rotationDegrees))
+    }
+
+    /// The artwork that sits on the paper label.
+    ///
+    /// The image loader is only built when there is a URL to load. A
+    /// `CachedAsyncImage` with a nil URL still owns `@State` and still
+    /// writes to it on appear, and SwiftUI's graph can release that
+    /// state twice when the platter is torn down — a crash that only
+    /// shows up offscreen, exactly where it is hardest to diagnose.
+    private var artworkDisc: some View {
+        Group {
+            if let artworkURL {
+                CachedAsyncImage(url: artworkURL) { image in
+                    image
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                } placeholder: {
+                    blankLabel
+                }
+            } else {
+                blankLabel
+            }
+        }
+        .frame(width: 62, height: 62)
+        .clipShape(Circle())
+        .overlay(Circle().strokeBorder(.black.opacity(0.25), lineWidth: 1))
+        .shadow(color: .black.opacity(0.35), radius: 3)
+    }
+
+    /// Placeholder: an unprinted label with a magenta ring, so an
+    /// unloaded track still looks like a record with a blank label
+    /// rather than a grey square — and the record's centre does not
+    /// become a slab of neon.
+    private var blankLabel: some View {
+        ZStack {
+            Circle().fill(TurntableTokens.walnut.opacity(0.22))
+            Circle().strokeBorder(Theme.cyberMagenta.opacity(0.5), lineWidth: 2)
+            Circle().fill(TurntableTokens.vinyl).frame(width: 22, height: 22)
+        }
     }
 
     // MARK: - Spindle
@@ -249,5 +308,65 @@ struct PlatterView: View {
                 .frame(width: 5, height: 5)
                 .shadow(color: Theme.cyberCyan.opacity(0.9), radius: 5)
         }
+    }
+}
+
+// MARK: - Curved text
+
+/// Text set on a circular path.
+///
+/// The record label carries its own typography the way a real pressed
+/// label does — the imprint runs around the top of the paper. SwiftUI
+/// has no built-in for this, so the characters are drawn one at a
+/// time onto a canvas, each rotated to its own point on the arc.
+struct CurvedText: View {
+    let text: String
+    let radius: CGFloat
+    /// The font the glyphs are drawn with.
+    var font: Font
+    /// The same font in UIKit terms — Canvas cannot measure a SwiftUI
+    /// `Font`, and the arc length depends on each character's width.
+    var measurementFont: UIFont
+    var tracking: CGFloat = 1.4
+    var color: Color = TurntableTokens.walnut
+
+    var body: some View {
+        Canvas { context, size in
+            let characters = Array(text)
+            guard !characters.isEmpty else { return }
+
+            let attributes: [NSAttributedString.Key: Any] = [
+                .font: measurementFont,
+                .kern: tracking
+            ]
+            let widths = characters.map { character in
+                NSString(string: String(character)).size(withAttributes: attributes).width
+            }
+            let totalWidth = widths.reduce(0, +)
+            guard totalWidth > 0 else { return }
+
+            // The arc the whole imprint occupies.
+            let totalAngle = totalWidth / radius
+            var cursor = -totalAngle / 2
+            let centre = CGPoint(x: size.width / 2, y: size.height / 2)
+
+            for (index, character) in characters.enumerated() {
+                let step = widths[index] / radius
+                let mid = cursor + step / 2
+
+                var glyph = context
+                glyph.translateBy(x: centre.x, y: centre.y)
+                glyph.rotate(by: .radians(mid))
+                glyph.translateBy(x: 0, y: -radius)
+                glyph.draw(
+                    Text(String(character)).font(font).foregroundColor(color),
+                    at: .zero,
+                    anchor: .center
+                )
+
+                cursor += step
+            }
+        }
+        .accessibilityHidden(true)
     }
 }

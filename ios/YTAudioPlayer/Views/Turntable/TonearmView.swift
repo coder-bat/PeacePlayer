@@ -10,9 +10,16 @@
 //  Dragging the arm therefore scrubs, and the arm's position is
 //  always an honest readout of where in the track we are.
 //
-//  The pivot sits at the top-right of the platter; the arm sweeps
-//  clockwise from about -18 degrees (rest, outer edge) to +26 degrees
-//  (inner). The headshell carries the stylus that touches the record.
+//  The pivot assembly sits at the deck's back-LEFT corner — the
+//  back-right corner belongs to the cue lever — and the arm reaches
+//  across the record to the right-hand side, where the headshell
+//  travels down the grooves toward the label.
+//
+//  The stylus rides a circular arc about the pivot, exactly as a real
+//  arm does: the arm's length is fixed, so the stylus cannot travel
+//  in a straight line into the label. The angles below are calibrated
+//  so the stylus starts on the outer groove and finishes at the edge
+//  of the paper label, and TurntableGeometryTests asserts both.
 //
 
 import SwiftUI
@@ -20,11 +27,28 @@ import SwiftUI
 // MARK: - Geometry
 
 enum TonearmGeometry {
-    /// Arm angle at the outer edge of the record (radians).
-    static let startAngle: Double = -18 * .pi / 180
+    /// The frame the geometry is calibrated against — the platter's
+    /// own diameter. Positions are expressed as fractions of the frame
+    /// so the assembly scales with the platter as one part.
+    static let nominalFrame: CGFloat = 320
 
-    /// Arm angle over the inner run-out groove (radians).
-    static let endAngle: Double = 26 * .pi / 180
+    /// The pivot, as a fraction of the frame, measured from the top-left.
+    static let pivotFraction = CGPoint(x: 0.10625, y: 0.09375)
+
+    /// The arm's length as a fraction of the frame.
+    static let armLengthFraction: CGFloat = 0.671875
+
+    /// Arm angle at the outer groove (the arm at rest).
+    ///
+    /// Calibrated so the stylus lands ~130pt from the record's centre
+    /// in a 320pt frame — just inside the record's 138pt edge.
+    static let startAngle: Double = 8.8 * .pi / 180
+
+    /// Arm angle over the label's edge (the end of the track).
+    ///
+    /// Calibrated so the stylus lands ~45pt from the record's centre,
+    /// which is the edge of the 96pt paper label.
+    static let endAngle: Double = 37.1 * .pi / 180
 
     /// Arm angle for a given playback progress.
     static func angle(forProgress progress: Double) -> Double {
@@ -42,18 +66,55 @@ enum TonearmGeometry {
     /// The 10% detent a progress value has just crossed, or nil if it
     /// has not crossed a boundary.
     ///
-    /// Returns the detent index (1...9) so the caller can fire a
-    /// haptic exactly once per boundary crossing.
+    /// Returns the index of the most recent boundary at or below the
+    /// value (1...9). The caller compares consecutive calls to decide
+    /// whether a boundary was newly crossed, so this must return the
+    /// index of the boundary it *reached*, not the one it is heading
+    /// toward — otherwise the haptic would fire late (at 18% instead
+    /// of 10%) and the count would drift out of step with the arm.
+    ///
+    /// There is no detent at 0% (nothing was crossed) or at 100% (the
+    /// track is over).
     static func detent(forProgress progress: Double) -> Int? {
         let clamped = max(0, min(1, progress))
         let index = Int((clamped * 10).rounded(.down))
         guard index >= 1, index <= 9 else { return nil }
-        // Only fire when we are within the last 20% of the band, so a
-        // value that sits exactly on a boundary (0.10) reports the
-        // boundary it just reached rather than repeating it.
-        let fractional = clamped * 10 - Double(index)
-        guard fractional >= 0.8 else { return nil }
         return index
+    }
+
+    // MARK: - Placement
+
+    /// The pivot's position in a frame of the given size.
+    static func pivot(in size: CGSize) -> CGPoint {
+        CGPoint(
+            x: size.width * pivotFraction.x,
+            y: size.height * pivotFraction.y
+        )
+    }
+
+    /// The arm's length in a frame of the given size.
+    static func armLength(in size: CGSize) -> CGFloat {
+        min(size.width, size.height) * armLengthFraction
+    }
+
+    /// The record's centre in a frame of the given size.
+    static func recordCentre(in size: CGSize) -> CGPoint {
+        CGPoint(x: size.width / 2, y: size.height / 2)
+    }
+
+    /// Where the stylus sits for a given progress.
+    ///
+    /// The stylus rides the arm's arc about the pivot, so this is a
+    /// pure function of the angle — the same angle the user drags
+    /// through, which is what makes the scrub feel honest.
+    static func stylusPoint(forProgress progress: Double, in size: CGSize) -> CGPoint {
+        let angle = angle(forProgress: progress)
+        let pivot = pivot(in: size)
+        let length = armLength(in: size)
+        return CGPoint(
+            x: pivot.x + length * CGFloat(cos(angle)),
+            y: pivot.y + length * CGFloat(sin(angle))
+        )
     }
 }
 
@@ -76,12 +137,17 @@ struct TonearmView: View {
     var body: some View {
         GeometryReader { geo in
             let size = geo.size
-            let pivot = CGPoint(x: size.width - 26, y: 30)
-            let armLength = min(size.width, size.height) * 0.62
+            let pivot = TonearmGeometry.pivot(in: size)
             let angle = TonearmGeometry.angle(forProgress: displayedProgress)
-            let stylus = CGPoint(
-                x: pivot.x + armLength * cos(angle),
-                y: pivot.y + armLength * sin(angle)
+            let stylus = TonearmGeometry.stylusPoint(forProgress: displayedProgress, in: size)
+            let centre = TonearmGeometry.recordCentre(in: size)
+
+            // The stylus meets the record head-on: the headshell sits
+            // between the arm and the needle.
+            let inward = unitVector(from: stylus, to: centre)
+            let armEnd = CGPoint(
+                x: stylus.x - inward.x * 14,
+                y: stylus.y - inward.y * 14
             )
 
             ZStack {
@@ -98,10 +164,13 @@ struct TonearmView: View {
                             endPoint: .bottomTrailing
                         )
                     )
-                    .frame(width: 30, height: 30)
+                    .frame(width: 26, height: 26)
                     .overlay(Circle().strokeBorder(.black.opacity(0.35), lineWidth: 1))
                     .shadow(color: .black.opacity(0.5), radius: 5, y: 2)
-                    .position(x: pivot.x - 12, y: pivot.y)
+                    .position(
+                        x: pivot.x - 15 * CGFloat(cos(angle)),
+                        y: pivot.y - 15 * CGFloat(sin(angle))
+                    )
 
                 // Pivot base.
                 Circle()
@@ -113,7 +182,7 @@ struct TonearmView: View {
                             endRadius: 24
                         )
                     )
-                    .frame(width: 24, height: 24)
+                    .frame(width: 26, height: 26)
                     .overlay(Circle().strokeBorder(.black.opacity(0.4), lineWidth: 1))
                     .shadow(color: .black.opacity(0.55), radius: 6, y: 2)
                     .position(pivot)
@@ -121,7 +190,7 @@ struct TonearmView: View {
                 // The arm tube.
                 Path { path in
                     path.move(to: pivot)
-                    path.addLine(to: stylus)
+                    path.addLine(to: armEnd)
                 }
                 .stroke(
                     LinearGradient(
@@ -139,7 +208,18 @@ struct TonearmView: View {
 
                 // Headshell + stylus at the far end.
                 headshell
-                    .position(x: stylus.x, y: stylus.y)
+                    .rotationEffect(.radians(angle))
+                    .position(
+                        x: stylus.x - inward.x * 7,
+                        y: stylus.y - inward.y * 7
+                    )
+
+                // The stylus itself — the needle touching the groove.
+                Circle()
+                    .fill(TurntableTokens.edgeHighlight)
+                    .frame(width: 4, height: 4)
+                    .shadow(color: .black.opacity(0.8), radius: 2)
+                    .position(stylus)
             }
             .contentShape(Rectangle())
             .gesture(
@@ -199,20 +279,12 @@ struct TonearmView: View {
                         endPoint: .bottomTrailing
                     )
                 )
-                .frame(width: 22, height: 14)
-                .rotationEffect(.degrees(28))
+                .frame(width: 24, height: 13)
                 .overlay(
                     RoundedRectangle(cornerRadius: 3)
                         .strokeBorder(.black.opacity(0.35), lineWidth: 1)
-                        .rotationEffect(.degrees(28))
                 )
                 .shadow(color: .black.opacity(0.5), radius: 3, y: 1)
-
-            // The stylus — the actual needle that touches the record.
-            Circle()
-                .fill(TurntableTokens.edgeHighlight)
-                .frame(width: 4, height: 4)
-                .offset(y: 9)
         }
     }
 
@@ -221,5 +293,14 @@ struct TonearmView: View {
     /// Angle of a point relative to a pivot, measured from the +x axis.
     private func angleOf(point: CGPoint, around pivot: CGPoint) -> Double {
         atan2(point.y - pivot.y, point.x - pivot.x)
+    }
+
+    /// A unit vector pointing from `origin` to `target`.
+    private func unitVector(from origin: CGPoint, to target: CGPoint) -> CGPoint {
+        let dx = target.x - origin.x
+        let dy = target.y - origin.y
+        let length = sqrt(dx * dx + dy * dy)
+        guard length > 0 else { return CGPoint(x: 0, y: 1) }
+        return CGPoint(x: dx / length, y: dy / length)
     }
 }

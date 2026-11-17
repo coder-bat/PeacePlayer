@@ -86,6 +86,70 @@ final class TurntableGeometryTests: XCTestCase {
         }
     }
 
+    // MARK: - Stylus placement
+    //
+    // The arm's length is fixed, so the stylus rides an arc about the
+    // pivot rather than a straight line. These assertions pin that
+    // arc to the record: at rest the needle sits on the outer groove,
+    // and at the end of the track it sits at the edge of the label.
+    // If the geometry drifts, the needle ends up on the felt mat or
+    // off the record entirely — and nothing else in the app would
+    // notice.
+
+    private func stylusRadius(forProgress progress: Double) -> CGFloat {
+        let size = CGSize(width: TonearmGeometry.nominalFrame,
+                          height: TonearmGeometry.nominalFrame)
+        let stylus = TonearmGeometry.stylusPoint(forProgress: progress, in: size)
+        let centre = TonearmGeometry.recordCentre(in: size)
+        return hypot(stylus.x - centre.x, stylus.y - centre.y)
+    }
+
+    func testStylusRestsOnTheOuterGroove() {
+        // The record's edge is at 138pt; the outer groove is just
+        // inside it.
+        XCTAssertEqual(stylusRadius(forProgress: 0), 130, accuracy: 3)
+    }
+
+    func testStylusEndsAtTheLabelEdge() {
+        // The paper label is 96pt across, so its edge is 48pt out.
+        XCTAssertEqual(stylusRadius(forProgress: 1), 45, accuracy: 3)
+    }
+
+    func testStylusStaysOnTheRecordForTheWholeTrack() {
+        for step in 0...100 {
+            let radius = stylusRadius(forProgress: Double(step) / 100.0)
+            XCTAssertLessThanOrEqual(radius, 138, "Stylus left the record at step \(step)")
+            XCTAssertGreaterThanOrEqual(radius, 45, "Stylus left the label at step \(step)")
+        }
+    }
+
+    func testStylusMovesInwardAsTheTrackPlays() {
+        var previous = stylusRadius(forProgress: 0)
+        for step in 1...100 {
+            let radius = stylusRadius(forProgress: Double(step) / 100.0)
+            XCTAssertLessThanOrEqual(radius, previous,
+                                     "Stylus moved outward at step \(step)")
+            previous = radius
+        }
+    }
+
+    func testArmLengthIsConstantSoTheStylusRidesAnArc() {
+        // Two different progress values, two different stylus points,
+        // but the same distance from the pivot — that is what makes
+        // the arm a rigid tube.
+        let size = CGSize(width: TonearmGeometry.nominalFrame,
+                          height: TonearmGeometry.nominalFrame)
+        let pivot = TonearmGeometry.pivot(in: size)
+        let length = TonearmGeometry.armLength(in: size)
+
+        for progress in [0.0, 0.25, 0.5, 0.75, 1.0] {
+            let stylus = TonearmGeometry.stylusPoint(forProgress: progress, in: size)
+            let distance = hypot(stylus.x - pivot.x, stylus.y - pivot.y)
+            XCTAssertEqual(distance, length, accuracy: 0.5,
+                           "Arm length changed at progress \(progress)")
+        }
+    }
+
     // MARK: - Scrub detents
 
     func testDetentFiresOnEachTenPercentBoundary() {

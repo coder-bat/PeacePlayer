@@ -67,9 +67,17 @@ targets:
       properties:
         CFBundleDisplayName: PeacePlayer
         CFBundleName: PeacePlayer
-        CFBundleShortVersionString: "1.9.2"
-        CFBundleVersion: "22"
+        CFBundleShortVersionString: "1.9.3"
+        CFBundleVersion: "23"
         UILaunchStoryboardName: LaunchScreen
+        # The scene delegate is the app's own — without this key the
+        # scene manifest is dropped on every `xcodegen generate` and the
+        # app falls back to the legacy app delegate lifecycle.
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+          UISceneConfigurations:
+            UIWindowSceneSessionRoleApplication:
+              - UISceneDelegateClassName: $(PRODUCT_MODULE_NAME).WalkDJAppDelegate
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
           - UIInterfaceOrientationLandscapeLeft
