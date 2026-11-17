@@ -121,8 +121,10 @@ that already exists in `PlayerState`.
 - Title + artist in the existing `Typography.playerTitle` / `playerArtist` tokens.
 - VU meter = live amplitude bars, reusing `NeuralFreqVisualizer`'s colour ramp
   and bar logic.
-- **This strip replaces `MiniPlayer` on Home.** If `MiniPlayer` stays, the two
-  would show the same track twice — see §7 Open Question 2.
+- **This strip replaces `MiniPlayer` on Home** (decided §7.1). `MiniPlayer` is
+  rendered by the global `BottomBar` in `ContentView`, so the hide has to happen
+  there — see §7.1 for the exact wiring.
+- Tapping the strip opens the full player (`PlayerState.showFullPlayer = true`).
 
 ## 5. Visual language
 
@@ -164,21 +166,84 @@ Rotation is a pure function of `PlayerState.progress`; there is no independent
 animation clock, so pausing or seeking is always visually consistent with audio.
 This is the single most important correctness property of the design.
 
-## 7. Open questions (need your call before implementation)
+## 7. Resolved decisions (2026-11-17, Vergil)
 
-1. **Does `MiniPlayer` survive?** The now-playing strip (4.7) and `MiniPlayer` would
-   show the same track twice. Options: (a) strip replaces `MiniPlayer` on Home,
-   (b) strip shows only VU + queue depth, no title. *Recommendation: (a).*
-2. **What happens to the existing Home sections** — "FOR YOU" favorite artists,
-   Smart Library card, cleanup banner, "On this day"? They cannot all fit on a
-   deck. Options: (a) keep Smart Library + cleanup as sheets behind fascia
-   indicators, (b) drop them from Home entirely (Library already owns most of
-   this), (c) move "On this day" into the sleeve crate as a special sleeve.
-   *Recommendation: (a) for the two actionable cards, (c) for "On this day".*
-3. **Scope of the first build.** Full swap of Home vs. a flag-gated variant
-   (`ff_turntable_home`, same pattern as the existing `ff_on_this_day` flag).
-   *Recommendation: flag-gated, so it ships behind Settings → Labs and the
-   current Home stays the fallback.*
+All three open questions were answered during design review.
+
+### 7.1 MiniPlayer — the strip replaces it on Home
+
+**Decision:** the deck's now-playing strip replaces `MiniPlayer` while the user is on
+the Home tab. `MiniPlayer` is unchanged on every other tab.
+
+**Implementation note (non-obvious):** `MiniPlayer` is **not** inside `HomeView`.
+It is rendered by `ContentView`'s global `BottomBar`, which sits in a
+`.safeAreaInset(edge: .bottom)` on the `TabView` and therefore appears on every
+tab (`ContentView.swift:83-95`, `BottomBar` at `ContentView.swift:374`).
+Hiding it on Home therefore has to be done at that level, not in `HomeView`:
+
+- `BottomBar` gains a `hidesMiniPlayer: Bool` parameter.
+- `ContentView` passes `hidesMiniPlayer: selectedTab == 0 && turntableHomeEnabled`.
+- The flag is read through an `ObservableObject` so flipping it in Settings → Labs
+  takes effect without a relaunch (see §7.3).
+
+`BottomBar` must then centre the tab pill when the mini player is hidden — it
+already has that branch for the "nothing playing" case, so the work is to reuse it.
+
+`MiniPlayer` also owns the swipe-to-collapse gesture and the full-player expansion.
+On Home the deck strip replaces that role: tapping the strip opens the full player
+(`PlayerState.showFullPlayer = true`), and the deck's own transport controls
+(tonearm, cue lever) replace the mini player's buttons.
+
+### 7.2 Existing Home sections — actionable cards become fascia indicators
+
+**Decision:**
+
+| Existing section | New home |
+|---|---|
+| `SmartLibraryCard` | fascia indicator lamp (amber when candidates pending) → opens the existing `SmartLibraryReviewSheet` |
+| `CleanupScheduledBanner` | fascia indicator lamp (magenta when a cleanup is scheduled) → opens the existing `CleanupReviewSheet` |
+| "On this day" (`OnThisDaySection`) | a special sleeve in the crate, pinned first, visually distinct (cream sleeve with the date) |
+| "FOR YOU" favorite artists | the sleeve crate itself — the sleeves *are* the suggestions |
+
+The two actionable cards were previously the most important decision surfaces on
+Home ("the user sees the actionable surface first"). They cannot be cards on a
+deck, so they become **lamps on the fascia**: small, always visible, and they light
+up only when they need attention. This preserves the "actionable first" property
+without spending screen space.
+
+`SmartLibraryCard` and `CleanupScheduledBanner` already self-hide when their
+manager state is nil, so the lamps can reuse the exact same state check and stay
+in sync automatically — no new plumbing.
+
+### 7.3 Scope — flag-gated behind Settings → Labs
+
+**Decision:** ship as `ff_turntable_home`, default **OFF**, with a toggle in
+Settings → Labs. The current Home remains the fallback.
+
+**Implementation note:** `SettingsView` already has a `Labs` section and a private
+`LabsToggle` row component (`SettingsView.swift:502-548`, `1303+`). The new
+toggle is one more `LabsToggle` entry — no new settings infrastructure.
+
+The flag must be **reactive**, not read once at launch. `ff_on_this_day` is read
+inline at render time (`HomeView.swift:89`), which works because it is checked on
+every body evaluation; the turntable flag must work the same way, but the switch
+also needs to hide `MiniPlayer` in `ContentView`, which does not re-render on
+`UserDefaults` changes. So:
+
+- Add a small `FeatureFlags: ObservableObject` in `DesignSystem/` that publishes
+  `@Published var turntableHome: Bool` backed by `UserDefaults`.
+- `SettingsView`'s `LabsToggle` for this key writes through to it (the existing
+  `LabsToggle` has an `onChange` hook for exactly this — see the `ff_daily_recap`
+  entry, which uses it to reset the notifier's state).
+- Both `HomeView` and `ContentView` observe it.
+
+This avoids the bug where the user toggles the flag in Settings, returns to Home,
+and the deck has not appeared (or `MiniPlayer` is still showing) because the flag
+was cached in a `@State` initialiser.
+
+Default OFF also means the current Home's behaviour is byte-for-byte unchanged for
+existing users until they opt in — which is the safe default for a full visual
+replacement of the app's entry screen.
 
 ## 8. Implementation shape
 
@@ -186,6 +251,7 @@ New files under `ios/YTAudioPlayer/`:
 
 ```
 DesignSystem/TurntableTokens.swift
+DesignSystem/FeatureFlags.swift             reactive flag store (ff_turntable_home)
 Views/Turntable/TurntableHomeView.swift      root, replaces HomeView body
 Views/Turntable/DeckFasciaView.swift         lamps, greeting, RPM chip, nav chips
 Views/Turntable/PlatterView.swift            grooves, label, spindle, rotation
@@ -196,10 +262,23 @@ Views/Turntable/QueueStackView.swift         mini discs
 Views/Turntable/LevelMeterRow.swift          VU bars
 ```
 
+Files modified (not created):
+
+```
+Views/HomeView.swift         body branches on the flag; keeps NavigationStack,
+                             HomeDestination, notification handling
+Views/ContentView.swift      BottomBar gains hidesMiniPlayer
+Views/SettingsView.swift     one more LabsToggle for ff_turntable_home
+```
+
 `HomeView` keeps its `NavigationStack`, `HomeDestination` enum, and notification
 handling (`.startSongRadio`, `.openRadioView`); only the body swaps. That keeps
 every existing route reachable and avoids nested-`NavigationStack` crashes that
 the codebase has already hit twice.
+
+**Ordering constraint:** the deck's bottom edge must clear the `BottomBar`'s
+`rowHeight` (60pt) + the tab pill. The current `HomeView` already reserves
+`.padding(.bottom, 100)` for this; the turntable layout must reserve the same.
 
 ## 9. Risks
 
@@ -222,6 +301,14 @@ the codebase has already hit twice.
 7. All new touch targets ≥ 44×44pt.
 8. `prefers-reduced-motion` respected: platter rotation replaced by a static label,
    no decorative animation.
+9. With `ff_turntable_home` OFF, the current Home renders exactly as it does today,
+   and `MiniPlayer` is present in the `BottomBar`.
+10. With the flag ON and `selectedTab == 0`, `MiniPlayer` is hidden and exactly one
+    now-playing surface (the deck strip) is visible.
+11. Toggling the flag in Settings → Labs takes effect on returning to Home without
+    an app relaunch.
+12. `SmartLibraryCard` and `CleanupScheduledBanner` state changes light their
+    corresponding fascia lamp within one render cycle.
 
 ## 11. Reference
 
