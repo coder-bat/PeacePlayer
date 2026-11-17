@@ -878,11 +878,11 @@
 				TargetAttributes = {
 					1C1AD7A86C5BEA7222BCA2D5 = {
 						DevelopmentTeam = 4Y85577Z4G;
-						ProvisioningStyle = Automatic;
+						ProvisioningStyle = Manual;
 					};
 					716416BF920B6C9F1C6A6424 = {
 						DevelopmentTeam = 4Y85577Z4G;
-						ProvisioningStyle = Automatic;
+						ProvisioningStyle = Manual;
 					};
 					7195BDACE5345E91F0F6C0F5 = {
 						DevelopmentTeam = 4Y85577Z4G;
@@ -1163,7 +1163,8 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = PeacePlayerWidget/PeacePlayerWidget.entitlements;
-				CODE_SIGN_STYLE = Automatic;
+				CODE_SIGN_IDENTITY = "Apple Development: Created via API (J522WUTHAK)";
+				CODE_SIGN_STYLE = Manual;
 				DEVELOPMENT_TEAM = 4Y85577Z4G;
 				INFOPLIST_FILE = PeacePlayerWidget/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
@@ -1174,6 +1175,7 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.ytaudioplayer.app.widget;
 				PRODUCT_NAME = PeacePlayerWidget;
+				PROVISIONING_PROFILE_SPECIFIER = "PeacePlayerWidget Dev API";
 				SDKROOT = iphoneos;
 				SUPPORTS_MACCATALYST = NO;
 				SWIFT_VERSION = 5.9;
@@ -1290,8 +1292,8 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = YTAudioPlayer/YTAudioPlayer.entitlements;
-				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CODE_SIGN_STYLE = Automatic;
+				CODE_SIGN_IDENTITY = "Apple Development: Created via API (J522WUTHAK)";
+				CODE_SIGN_STYLE = Manual;
 				DEVELOPMENT_TEAM = 4Y85577Z4G;
 				ENABLE_PREVIEWS = YES;
 				INFOPLIST_FILE = YTAudioPlayer/Info.plist;
@@ -1302,6 +1304,7 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.ytaudioplayer.app;
 				PRODUCT_NAME = PeacePlayer;
+				PROVISIONING_PROFILE_SPECIFIER = "PeacePlayer Dev API";
 				SDKROOT = iphoneos;
 				SUPPORTS_MACCATALYST = NO;
 				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
@@ -1315,7 +1318,8 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = PeacePlayerWidget/PeacePlayerWidget.entitlements;
-				CODE_SIGN_STYLE = Automatic;
+				CODE_SIGN_IDENTITY = "Apple Development: Created via API (J522WUTHAK)";
+				CODE_SIGN_STYLE = Manual;
 				DEVELOPMENT_TEAM = 4Y85577Z4G;
 				INFOPLIST_FILE = PeacePlayerWidget/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
@@ -1326,6 +1330,7 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.ytaudioplayer.app.widget;
 				PRODUCT_NAME = PeacePlayerWidget;
+				PROVISIONING_PROFILE_SPECIFIER = "PeacePlayerWidget Dev API";
 				SDKROOT = iphoneos;
 				SUPPORTS_MACCATALYST = NO;
 				SWIFT_VERSION = 5.9;
@@ -1338,8 +1343,8 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = YTAudioPlayer/YTAudioPlayer.entitlements;
-				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CODE_SIGN_STYLE = Automatic;
+				CODE_SIGN_IDENTITY = "Apple Development: Created via API (J522WUTHAK)";
+				CODE_SIGN_STYLE = Manual;
 				DEVELOPMENT_TEAM = 4Y85577Z4G;
 				ENABLE_PREVIEWS = YES;
 				INFOPLIST_FILE = YTAudioPlayer/Info.plist;
@@ -1350,6 +1355,7 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.ytaudioplayer.app;
 				PRODUCT_NAME = PeacePlayer;
+				PROVISIONING_PROFILE_SPECIFIER = "PeacePlayer Dev API";
 				SDKROOT = iphoneos;
 				SUPPORTS_MACCATALYST = NO;
 				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
