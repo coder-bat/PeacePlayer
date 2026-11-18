@@ -83,8 +83,6 @@ final class TurntableSnapshotTests: XCTestCase {
             deckPlatter
                 .padding(.vertical, 10)
 
-            deckMeter
-
             deckQueue
                 .padding(.horizontal, 18)
 
@@ -120,8 +118,6 @@ final class TurntableSnapshotTests: XCTestCase {
 
             deckPlatter
                 .padding(.vertical, 10)
-
-            deckMeter
 
             deckQueue
                 .padding(.horizontal, 18)
@@ -349,27 +345,6 @@ final class TurntableSnapshotTests: XCTestCase {
                 .offset(x: -132, y: -76)
         }
         .frame(maxWidth: .infinity)
-    }
-
-    /// The deck's output meter strip.
-    @MainActor
-    private var deckMeter: some View {
-        LevelMeterRow(
-            levels: (0..<32).map { Float(0.15 + 0.6 * abs(sin(Double($0) / 4))) },
-            accent: Theme.cyberCyan
-        )
-        .frame(width: 150, height: 12)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 5)
-        .background(
-            RoundedRectangle(cornerRadius: 6)
-                .fill(.black.opacity(0.55))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 6)
-                        .strokeBorder(TurntableTokens.aluminium.opacity(0.22), lineWidth: 1)
-                )
-        )
-        .padding(.bottom, 2)
     }
 
     /// The shelf of queued picture discs.

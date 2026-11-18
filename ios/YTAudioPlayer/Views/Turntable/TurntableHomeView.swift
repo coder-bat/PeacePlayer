@@ -87,7 +87,6 @@ struct TurntableHomeView: View {
     @ObservedObject var viewModel: HomeViewModel
     @ObservedObject var favoriteArtists: FavoriteArtistsManager
     @ObservedObject var playerState: PlayerState
-    @ObservedObject var visualizer: AudioVisualizerEngine
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -188,25 +187,10 @@ struct TurntableHomeView: View {
             .frame(maxWidth: .infinity)
             .padding(.vertical, 10)
 
-            // The deck's output meter — a slim peak meter strip on the
-            // plinth, the way a turntable's aux VU meter sits beside
-            // the controls.
-            LevelMeterRow(
-                levels: visualizer.bands,
-                accent: Theme.cyberCyan
-            )
-            .frame(width: 150, height: 12)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
-            .background(
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(.black.opacity(0.55))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 6)
-                            .strokeBorder(TurntableTokens.aluminium.opacity(0.22), lineWidth: 1)
-                    )
-            )
-            .padding(.bottom, 2)
+            // The deck's output meter used to sit here — a slim peak
+            // meter strip on the plinth (revision 2026-11-18: removed;
+            // the record is the instrument, and the empty strip read as
+            // a broken bar).
 
             // The shelf of queued records, under the deck.
             QueueStackView(

@@ -58,8 +58,10 @@ final class TurntableDeckUITests: XCTestCase {
     /// Waits for the deck to be on screen.
     @discardableResult
     private func waitForDeck(timeout: TimeInterval = 60) -> Bool {
-        let crate = app.staticTexts["CRATE"]
-        let found = crate.waitForExistence(timeout: timeout)
+        // The record itself is the deck's stable handle. The crate's
+        // CRATE caption is gone (revision 2026-11-18), so waiting for
+        // it meant waiting forever.
+        let found = record.waitForExistence(timeout: timeout)
         if !found {
             // The app gates the whole UI on Apple sign-in. On a device with
             // no session the deck simply never mounts, and the test would

@@ -130,7 +130,6 @@
 		90C12B80FF245BBBEC1EAD9F /* HapticReduceToast.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA6ACD057DEE1FA7095F7767 /* HapticReduceToast.swift */; };
 		9163403BC5219F0172EABEB2 /* SendTapBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37C335F56DC3A0BD327D9373 /* SendTapBridge.swift */; };
 		918664F868BBCB8A5BB21F46 /* UndoService.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC9D9D70360E6B8CD624FF88 /* UndoService.swift */; };
-		931DF9BECBC8E660DCA5BCD2 /* LevelMeterRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03A5732DF44960E277539DC3 /* LevelMeterRow.swift */; };
 		937A11DF74E5E97AFFCBC3CC /* AudioFileManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D14921A5DEB5399A4EFC83D /* AudioFileManagerTests.swift */; };
 		949592A767FE5C414F0C5304 /* PlaybackClock.swift in Sources */ = {isa = PBXBuildFile; fileRef = D86AF67FC8104A90E060C885 /* PlaybackClock.swift */; };
 		94CA042AFCB259A4B402C5D2 /* NeuralFreqVisualizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94360F35720B73822E1A2CD7 /* NeuralFreqVisualizer.swift */; };
@@ -255,7 +254,6 @@
 		0080BED852F91FC0AFA9DE17 /* YTAudioPlayerApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = YTAudioPlayerApp.swift; sourceTree = "<group>"; };
 		00CA580AB7F5354A0D5782EA /* SongMemoryBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SongMemoryBadge.swift; sourceTree = "<group>"; };
 		0235C33E045FE51378D34C35 /* AudiobookLibrary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudiobookLibrary.swift; sourceTree = "<group>"; };
-		03A5732DF44960E277539DC3 /* LevelMeterRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LevelMeterRow.swift; sourceTree = "<group>"; };
 		0449744B02B62A5111EBC52F /* CrossfadeManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrossfadeManager.swift; sourceTree = "<group>"; };
 		0AD7FD93A65608ABFCFB8FFC /* UndoToastView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UndoToastView.swift; sourceTree = "<group>"; };
 		0B76C8D0AB363A480871DC1E /* TurntableSnapshotTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurntableSnapshotTests.swift; sourceTree = "<group>"; };
@@ -693,7 +691,6 @@
 			children = (
 				D53A927EC1C5C1DF71714B3C /* CueLeverView.swift */,
 				A46138D5407C927D58EEB10C /* DeckFasciaView.swift */,
-				03A5732DF44960E277539DC3 /* LevelMeterRow.swift */,
 				FF7321727AFF9E46AD42C40C /* PlatterView.swift */,
 				3CE50F51708170EC3B9EC685 /* QueueStackView.swift */,
 				8405960684D9E97FAFEB3D5A /* SleeveCrateView.swift */,
@@ -1068,7 +1065,6 @@
 				3FEE30CDE16A8EBD1B1F97A2 /* ImageCache.swift in Sources */,
 				41A376DEE9553D8C56A7B1F8 /* KeychainHelper.swift in Sources */,
 				6E24F9E7616917E4ECA83D7E /* LandingView.swift in Sources */,
-				931DF9BECBC8E660DCA5BCD2 /* LevelMeterRow.swift in Sources */,
 				AD268BEDECBAD8B85A77F81C /* LibraryTierBadge.swift in Sources */,
 				D68E450CDE257229340947C7 /* LibraryView.swift in Sources */,
 				5C3D4A6FE26E4C494C3E8FB4 /* LibraryViewModel.swift in Sources */,

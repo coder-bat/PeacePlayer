@@ -79,4 +79,8 @@ enum TurntableTexture {
 
     /// Dark forest green felt.
     static let felt = "Turntable/felt"
+
+    /// PeacePlayer's own record art — what the platter wears when no
+    /// track is loaded, so the deck is never a blank black disc.
+    static let idleArt = "Turntable/idle_art"
 }

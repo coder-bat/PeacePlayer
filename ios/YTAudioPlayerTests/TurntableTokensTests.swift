@@ -21,7 +21,8 @@ final class TurntableTokensTests: XCTestCase {
         for name in [TurntableTexture.vinylGrooves,
                      TurntableTexture.walnut,
                      TurntableTexture.brushedAluminium,
-                     TurntableTexture.felt] {
+                     TurntableTexture.felt,
+                     TurntableTexture.idleArt] {
             XCTAssertNotNil(UIImage(named: name),
                             "Missing asset: \(name)")
         }

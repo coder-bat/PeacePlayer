@@ -90,6 +90,11 @@ that already exists in `PlayerState`.
   removed — the record itself is the instrument, and a row of status dots above it
   was chrome. The five links moved up into row 1, where the old Home put its nav
   icons.
+- **Revision (2026-11-18):** the output meter strip under the platter was
+  removed, the crate's **CRATE** caption was removed, the crate's rows got more
+  air between them (`rowSpacing` 10 → 20), and an idle platter now wears
+  **PeacePlayer's own record art** (`Turntable/idle_art`) instead of a blank
+  black disc.
 - Each nav chip is a 30pt graphic inside a **44×44pt** touch target.
 - The two actionable indicators are **icons in the row** now (revision 2026-11-18),
   each with the same 44×44pt touch target, and appear **only** when there is

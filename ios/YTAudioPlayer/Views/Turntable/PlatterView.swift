@@ -245,6 +245,12 @@ struct PlatterView: View {
                     .opacity(flipProgress)
                     .allowsHitTesting(false)
             } else {
+                // No track loaded: the record wears PeacePlayer's own
+                // art instead of sitting there as a blank disc.
+                idleArtFace
+                    .opacity(flipProgress)
+                    .allowsHitTesting(false)
+
                 blankLabel
                     .opacity(flipProgress)
                     .allowsHitTesting(false)
@@ -337,6 +343,23 @@ struct PlatterView: View {
             }
         }
         .allowsHitTesting(false)
+    }
+
+    /// PeacePlayer's own record art, printed across the whole disc.
+    ///
+    /// This is what the platter wears when no track is loaded: a dark
+    /// disc with the app's own cyan and magenta rings, so an idle deck
+    /// still reads as a record with something on it.
+    private var idleArtFace: some View {
+        Image(TurntableTexture.idleArt)
+            .resizable()
+            .aspectRatio(contentMode: .fill)
+            .frame(width: Self.recordDiameter, height: Self.recordDiameter)
+            .clipped()
+            // Same knock-down as a printed picture disc, so the grooves
+            // and the sheen still read on top of it and the art looks
+            // like ink on black vinyl rather than neon tubes.
+            .colorMultiply(Color(red: 0.78, green: 0.77, blue: 0.82))
     }
 
     /// The artwork printed across the whole record.

@@ -24,21 +24,15 @@ struct SleeveCrateView: View {
     var onQueue: (Track) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("CRATE")
-                .font(Typography.eyebrow)
-                .foregroundColor(TurntableTokens.aluminium.opacity(0.7))
-
-            ScrollView(.vertical, showsIndicators: false) {
-                CrateShelf(
-                    sleeves: sleeves,
-                    onPlay: onPlay,
-                    onQueue: onQueue
-                )
-                .padding(.vertical, 2)
-            }
-            .frame(height: CrateGrid.visibleHeight)
+        ScrollView(.vertical, showsIndicators: false) {
+            CrateShelf(
+                sleeves: sleeves,
+                onPlay: onPlay,
+                onQueue: onQueue
+            )
+            .padding(.vertical, 2)
         }
+        .frame(height: CrateGrid.visibleHeight)
     }
 }
 
@@ -82,7 +76,11 @@ enum CrateGrid {
     /// Gap between the rail and the sleeves above it.
     static let railGap: CGFloat = 3
     /// Gap between one row's rail and the next row.
-    static let rowSpacing: CGFloat = 10
+    ///
+    /// The rows are bins of records, not a spreadsheet: each rail needs
+    /// air under it or the crate reads as one crowded shelf
+    /// (revision 2026-11-18).
+    static let rowSpacing: CGFloat = 20
     /// How many sleeves fit across the deck.
     static let columnCount: Int = 5
     /// How many rows the crate shows at once.

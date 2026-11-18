@@ -305,8 +305,7 @@ struct HomeView: View {
         TurntableHomeView(
             viewModel: viewModel,
             favoriteArtists: favoriteArtists,
-            playerState: playerState,
-            visualizer: AudioVisualizerEngine.shared
+            playerState: playerState
         )
         .ignoresSafeArea(edges: .bottom)
     }
