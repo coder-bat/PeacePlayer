@@ -56,6 +56,64 @@ final class TurntableHomeModelTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(CrateGrid.columnCount * CrateGrid.visibleRows, 15)
     }
 
+    func testCrateContentsFillFromTheQueueAndRecentlyPlayed() {
+        // The suggestions alone rarely fill three rows. The queue and
+        // the recently-played shelf top the crate up so the deck does
+        // not look half empty.
+        let suggestion = makeTrack(id: "s1", title: "Suggested")
+        let queued = makeTrack(id: "q1", title: "Queued")
+        let recent = makeTrack(id: "r1", title: "Recent")
+
+        let contents = TurntableHomeModel.crateContents(
+            suggestions: ["Artist": [suggestion]],
+            queue: [QueueItem(track: queued, streamUrl: "u", source: .stream)],
+            recent: [RecentTrack(videoId: "r1", title: "Recent", artists: ["Artist"],
+                                 album: "Album", durationSeconds: 100, thumbnails: [],
+                                 isExplicit: false, videoType: "MUSIC_VIDEO_TYPE_ATV",
+                                 playedAt: Date(), playbackProgress: 0)],
+            limit: 15
+        )
+
+        XCTAssertEqual(contents.map(\.videoId), ["s1", "q1", "r1"])
+    }
+
+    func testCrateContentsDoNotRepeatATrack() {
+        let track = makeTrack(id: "same", title: "Same")
+        let contents = TurntableHomeModel.crateContents(
+            suggestions: ["Artist": [track]],
+            queue: [QueueItem(track: track, streamUrl: "u", source: .stream)],
+            recent: [],
+            limit: 15
+        )
+        XCTAssertEqual(contents.count, 1)
+    }
+
+    func testCrateContentsRespectTheLimit() {
+        let many = (0..<30).map { makeTrack(id: "t\($0)", title: "T\($0)") }
+        let contents = TurntableHomeModel.crateContents(
+            suggestions: ["Artist": many],
+            queue: [],
+            recent: [],
+            limit: 15
+        )
+        XCTAssertEqual(contents.count, 15)
+    }
+
+    func testCrateRowsAreFiveAcrossAndThreeDeep() {
+        let many = (0..<15).map { makeTrack(id: "t\($0)", title: "T\($0)") }
+        let rows = CrateGrid.rows(from: many)
+        XCTAssertEqual(rows.count, 3)
+        XCTAssertEqual(rows.first?.count, 5)
+        XCTAssertEqual(rows.last?.count, 5)
+    }
+
+    func testAShortLastRowIsStillOneRow() {
+        let many = (0..<12).map { makeTrack(id: "t\($0)", title: "T\($0)") }
+        let rows = CrateGrid.rows(from: many)
+        XCTAssertEqual(rows.count, 3)
+        XCTAssertEqual(rows.last?.count, 2)
+    }
+
     private func makeTrack(id: String, title: String) -> Track {
         Track(videoId: id,
              title: title,

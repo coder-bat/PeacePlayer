@@ -6,12 +6,16 @@
 //
 //  It replaces the current Home header (profile chip + 5 nav chips).
 //
-//  The strip is ONE row: the profile chip on the left and the app's
-//  five destinations on the right, in the top-right corner where the
-//  old Home put its nav icons. The deck's instrumentation (the RPM
-//  chip and the three pilot lamps) was removed — the record itself is
-//  the instrument now, and a row of status dots above it was just
-//  chrome.
+//  The strip is ONE row: the deck's etched wordmark on the left and
+//  the app's five destinations in the top-right corner, where the old
+//  Home put its nav icons. The deck's instrumentation (the RPM chip
+//  and the three pilot lamps) was removed — the record itself is the
+//  instrument now, and a row of status dots above it was just chrome.
+//
+//  The profile chip moved out of the deck entirely (revision
+//  2026-11-18): the deck is a record player, not an account screen.
+//  The avatar, display name and sign-out sheet now live in Settings,
+//  behind the email row.
 //
 //  The only thing below the row is the pair of ACTIONABLE lamps
 //  (Smart Library review, scheduled cleanup). They stand in for the
@@ -23,9 +27,6 @@
 import SwiftUI
 
 struct DeckFasciaView<Chips: View>: View {
-    /// The profile chip, owned by Home so the avatar picker stays
-    /// there.
-    let profile: AnyView
     let hasSmartLibraryCandidates: Bool
     let hasPendingCleanup: Bool
     var onSmartLibrary: () -> Void
@@ -36,14 +37,12 @@ struct DeckFasciaView<Chips: View>: View {
     /// control of its NavigationStack routes — the fascia only draws
     /// the buttons.
     init(
-        profile: AnyView,
         hasSmartLibraryCandidates: Bool,
         hasPendingCleanup: Bool,
         onSmartLibrary: @escaping () -> Void,
         onCleanup: @escaping () -> Void,
         @ViewBuilder navChips: @escaping () -> Chips
     ) {
-        self.profile = profile
         self.hasSmartLibraryCandidates = hasSmartLibraryCandidates
         self.hasPendingCleanup = hasPendingCleanup
         self.onSmartLibrary = onSmartLibrary
@@ -53,10 +52,17 @@ struct DeckFasciaView<Chips: View>: View {
 
     var body: some View {
         VStack(spacing: 8) {
-            // Row 1 — profile on the left, navigation on the right.
+            // Row 1 — the deck's own brand on the left, navigation in
+            // the top-right corner.
             HStack(spacing: 10) {
-                profile
-                    .layoutPriority(1)
+                // Etched into the metal, the way a deck carries its
+                // maker's mark. The profile chip used to live here;
+                // it moved to Settings (tapping the email row opens
+                // the avatar / display name / sign-out sheet).
+                Text("PEACEPLAYER")
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .tracking(2.4)
+                    .foregroundColor(TurntableTokens.aluminium.opacity(0.45))
 
                 Spacer(minLength: 4)
 

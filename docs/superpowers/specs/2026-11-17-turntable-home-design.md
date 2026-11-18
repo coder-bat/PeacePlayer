@@ -55,7 +55,7 @@ that already exists in `PlayerState`.
 ```
 ┌─────────────────────────────────┐
 │ FASCIA                          │  1
-│  NIGHT ALEX        ▮ ▮ ▮ ▮ ▮    │  ← 5 links, top right
+│  PEACEPLAYER       ▮ ▮ ▮ ▮ ▮    │  ← 5 links, top right
 ├─────────────────────────────────┤
 │ ● cue lever                      │  2
 │            ╱ TONEEARM ────────● │
@@ -75,10 +75,13 @@ that already exists in `PlayerState`.
 
 ### 4.1 Deck fascia (1)
 - Replaces `headerSection`. Brushed-metal strip, rounded, dark walnut gradient.
-- **One row.** The profile chip (owned by `HomeView`, so the avatar picker stays
-  there) on the left; the existing 5 `CyberIconChip` destinations (Time Capsule,
-  Anti-Algorithm, Radio, Playlists, Settings) in the **top-right corner**, restyled
-  as square deck buttons.
+- **One row.** The deck's etched **PEACEPLAYER** wordmark on the left; the existing 5
+  `CyberIconChip` destinations (Time Capsule, Anti-Algorithm, Radio, Playlists,
+  Settings) in the **top-right corner**, restyled as square deck buttons.
+- **The profile chip is gone** (revision 2026-11-18). The deck is a record player,
+  not an account screen: the avatar, display name and sign-out sheet moved to
+  **Settings**, where tapping the email row opens it. The legacy Home keeps its
+  own profile chip.
 - **Revision (2026-11-18):** the RPM chip and the three indicator lamps were
   removed — the record itself is the instrument, and a row of status dots above it
   was chrome. The five links moved up into row 1, where the old Home put its nav
@@ -125,11 +128,17 @@ that already exists in `PlayerState`.
   cream **"PEACEPLAYER"** label.
 - The **sheen does not rotate with the record** — the highlight belongs to the
   room, so the record turns under a fixed light.
-- The record is 288pt against a 320pt platter (0.9×), so a thin ring of green felt
+- The record is 270pt against a 300pt platter (0.9×), so a thin ring of green felt
   shows around it.
 - **Artwork = current track's album art** via the existing `CachedAsyncImage`.
 - **Rotation = playback.** `progress` drives rotation so the record turns exactly
   once per track; when paused it holds still; when idle it is blank.
+- **The rotation is sampled at display rate** (revision 2026-11-18). The player's
+  clock ticks at 1Hz, which made the record move in visible one-degree jumps —
+  "short bursts". The platter and the tonearm now read the clock through a
+  `TimelineView` at 30fps and project the clock's value forward by the
+  wall-clock time since its last tick. It is still a pure function of the
+  player's own position in the track.
 - **Track change flips the face in 3D** (revision 2026-11-18): the outgoing
   artwork rotates away around the vertical axis while the incoming artwork rotates
   in. The flip is keyed on the **track**, not the artwork URL — two consecutive
@@ -138,12 +147,19 @@ that already exists in `PlayerState`.
 - Long-press the platter → open the queue stack (existing `showQueue` / `DownloadQueueView`).
 
 ### 4.5 Sleeve crate (5)
-- **Three rows** of album-art sleeves (64pt, five across) for favourite-artist
+- **Three rows** of album-art sleeves (56pt, five across) for favourite-artist
   suggestions (revision 2026-11-18: a single row read as a shelf, not a crate).
+- **Every row stands on its own rail** — the walnut slat a row of records rests
+  on. A single rail under the whole crate read as a stand waiting for rows that
+  never came.
 - The rows live in one vertical scroll, so the deck stays one screen tall: three
   rows at a time, and you flip down through the rest the way you would work
   through a bin of records.
-- The grid is centred — each sleeve is centred in its cell.
+- Rows are centred, so a short last row sits in the middle of the crate rather
+  than hanging off the left.
+- The crate's contents are the suggestions **plus the queue and the
+  recently-played shelf** — the suggestions alone rarely fill three rows, and a
+  half-empty crate made the deck look broken.
 - Tapping a sleeve plays it; long-press offers "Add to queue".
 
 ### 4.6 Queue shelf
@@ -197,6 +213,7 @@ IDLE ──play──▶ SPINNING ──pause──▶ PAUSED
   └─────────── SCRUB ──────────────────┘
 
 TAP PLATTER:        → FULL PLAYER
+CRATE / QUEUE TAP:  → TRACK CHANGE (3D face flip)
 LONG-PRESS PLATTER: → QUEUE STACK overlay
 TRACK CHANGE:       → 3D FACE FLIP (new artwork rotates in)
 ```

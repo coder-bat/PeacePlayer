@@ -150,6 +150,7 @@ final class TurntableSnapshotTests: XCTestCase {
                 isPlaying: true,
                 progress: 0.0,
                 reduceMotion: false,
+                progressAt: nil,
                 onTapPlatter: {},
                 onLongPress: {}
             )
@@ -171,6 +172,7 @@ final class TurntableSnapshotTests: XCTestCase {
                 isPlaying: false,
                 progress: 0.0,
                 reduceMotion: false,
+                progressAt: nil,
                 onTapPlatter: {},
                 onLongPress: {}
             )
@@ -196,6 +198,7 @@ final class TurntableSnapshotTests: XCTestCase {
             TonearmView(
                 progress: 0.35,
                 isScrubbing: false,
+                progressAt: nil,
                 onScrub: { _ in },
                 onScrubEnded: { _ in }
             )
@@ -216,7 +219,7 @@ final class TurntableSnapshotTests: XCTestCase {
                 .font(Typography.eyebrow)
                 .foregroundColor(TurntableTokens.aluminium.opacity(0.7))
 
-            CrateGrid(
+            CrateShelf(
                 sleeves: (0..<18).map {
                     Self.makeTrack(id: "crate-\($0)", title: "Track \($0)", artist: "Artist", artIndex: $0)
                 },
@@ -265,24 +268,6 @@ final class TurntableSnapshotTests: XCTestCase {
     @MainActor
     private var deckFascia: some View {
         DeckFasciaView(
-            profile: AnyView(
-                HStack(spacing: 8) {
-                    Circle()
-                        .fill(Theme.cyberCyan.opacity(0.18))
-                        .frame(width: 30, height: 30)
-                        .overlay(
-                            Circle().stroke(Theme.cyberCyan.opacity(0.4), lineWidth: 1)
-                        )
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text("NIGHT")
-                            .font(.system(size: 9, weight: .medium, design: .monospaced))
-                            .foregroundColor(TurntableTokens.aluminium.opacity(0.6))
-                        Text("ALEX")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundColor(TurntableTokens.cream)
-                    }
-                }
-            ),
             hasSmartLibraryCandidates: true,
             hasPendingCleanup: true,
             onSmartLibrary: {},
@@ -320,6 +305,7 @@ final class TurntableSnapshotTests: XCTestCase {
                 isPlaying: true,
                 progress: 0.42,
                 reduceMotion: false,
+                progressAt: nil,
                 onTapPlatter: {},
                 onLongPress: {}
             )
@@ -328,6 +314,7 @@ final class TurntableSnapshotTests: XCTestCase {
             TonearmView(
                 progress: 0.42,
                 isScrubbing: false,
+                progressAt: nil,
                 onScrub: { _ in },
                 onScrubEnded: { _ in }
             )
@@ -387,7 +374,7 @@ final class TurntableSnapshotTests: XCTestCase {
                 .font(Typography.eyebrow)
                 .foregroundColor(TurntableTokens.aluminium.opacity(0.7))
 
-            CrateGrid(
+            CrateShelf(
                 sleeves: (0..<12).map {
                     Self.makeTrack(id: "crate-\($0)", title: "Track \($0)", artist: "Artist", artIndex: $0)
                 },

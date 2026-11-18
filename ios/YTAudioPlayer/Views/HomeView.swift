@@ -306,8 +306,7 @@ struct HomeView: View {
             viewModel: viewModel,
             favoriteArtists: favoriteArtists,
             playerState: playerState,
-            visualizer: AudioVisualizerEngine.shared,
-            profile: AnyView(profileChip)
+            visualizer: AudioVisualizerEngine.shared
         )
         .ignoresSafeArea(edges: .bottom)
     }

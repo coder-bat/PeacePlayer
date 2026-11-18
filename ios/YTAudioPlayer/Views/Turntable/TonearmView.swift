@@ -132,6 +132,11 @@ enum TonearmGeometry {
 struct TonearmView: View {
     let progress: Double
     let isScrubbing: Bool
+    /// Fine-grained progress source, sampled at display rate.
+    ///
+    /// The player's clock ticks at 1Hz, which would make the arm
+    /// jump in visible steps as it travels the groove.
+    var progressAt: ((Date) -> Double)?
     var onScrub: (Double) -> Void
     var onScrubEnded: (Double) -> Void
 
@@ -144,11 +149,23 @@ struct TonearmView: View {
     }
 
     var body: some View {
+        TimelineView(timelineSchedule) { timeline in
+            armBody(progress: progressAt?(timeline.date) ?? displayedProgress)
+        }
+    }
+
+    /// 30fps while the record turns, stopped when it does not.
+    private var timelineSchedule: AnimationTimelineSchedule {
+        if isScrubbing { return .animation(minimumInterval: 1.0 / 60.0) }
+        return .animation(minimumInterval: 1.0 / 30.0, paused: false)
+    }
+
+    private func armBody(progress: Double) -> some View {
         GeometryReader { geo in
             let size = geo.size
             let pivot = TonearmGeometry.pivot(in: size)
-            let angle = TonearmGeometry.angle(forProgress: displayedProgress)
-            let stylus = TonearmGeometry.stylusPoint(forProgress: displayedProgress, in: size)
+            let angle = TonearmGeometry.angle(forProgress: progress)
+            let stylus = TonearmGeometry.stylusPoint(forProgress: progress, in: size)
             let centre = TonearmGeometry.recordCentre(in: size)
 
             // The stylus meets the record head-on: the headshell sits

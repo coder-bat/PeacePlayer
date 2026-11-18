@@ -46,6 +46,15 @@ final class PlaybackClock: ObservableObject {
 
     private var lastUpdateTime: Date = Date()
 
+    /// When the clock last ticked.
+    ///
+    /// The AVPlayer time observer runs at 1Hz, so `currentTime` alone
+    /// moves in one-second steps. A view that animates from the clock
+    /// (the turntable's record, the tonearm) projects the value
+    /// forward by the wall-clock time elapsed since this instant, so
+    /// the motion is smooth without the hot path ticking faster.
+    private(set) var lastUpdateDate: Date = Date()
+
     init() {}
 
     /// Reset to zero. Called from PlayerState.stop().
@@ -56,6 +65,7 @@ final class PlaybackClock: ObservableObject {
         expectedDuration = 0.0
         rate = 1.0
         lastUpdateTime = Date()
+        lastUpdateDate = lastUpdateTime
     }
 
     /// Update from the periodic time observer. Returns the elapsed
@@ -66,6 +76,7 @@ final class PlaybackClock: ObservableObject {
         let now = Date()
         let elapsed = now.timeIntervalSince(lastUpdateTime)
         lastUpdateTime = now
+        lastUpdateDate = now
 
         // Only publish if values changed materially. This avoids spurious
         // SwiftUI re-renders when AVPlayer reports the same value twice.

@@ -27,6 +27,16 @@ class ImageCache {
     // forever.
     private var preloadCancellables = Set<AnyCancellable>()
     private var activeDownloads: [URL: AnyCancellable] = [:]
+    /// Guards `activeDownloads`.
+    ///
+    /// The publisher body runs on a background queue (`.subscribe(on:)`)
+    /// and the completion handler runs on URLSession's own queue, so
+    /// two threads can touch the dictionary at the same time.
+    /// Concurrent mutation of a Swift Dictionary corrupts it — the
+    /// crash surfaced as an Objective-C "doesNotRecognizeSelector"
+    /// thrown from inside the dictionary's setter, and it only fired
+    /// once the crate started loading fifteen artworks at once.
+    private let downloadsLock = NSLock()
     private var cleanupTimer: Timer?
 
     // Thread safety for disk cache operations
@@ -132,41 +142,48 @@ class ImageCache {
                 return Just(image).eraseToAnyPublisher()
             }
 
-            // Download if not already downloading
-            if self.activeDownloads[url] == nil {
-                let download = URLSession.shared.dataTaskPublisher(for: url)
-                    .map { [weak self] output -> UIImage? in
-                        // S17-G (perf 10 P0-F6): decode + downsample to
-                        // 1024px instead of full-resolution UIImage(data:).
-                        // See `decodedImage` for the rationale.
-                        self?.decodedImage(data: output.data)
+            // Download if not already downloading.
+            //
+            // The check and the insert happen under one lock, so the
+            // dictionary is never mutated concurrently and two threads
+            // cannot both start a download for the same URL.
+            let download = URLSession.shared.dataTaskPublisher(for: url)
+                .map { [weak self] output -> UIImage? in
+                    // S17-G (perf 10 P0-F6): decode + downsample to
+                    // 1024px instead of full-resolution UIImage(data:).
+                    // See `decodedImage` for the rationale.
+                    self?.decodedImage(data: output.data)
+                }
+                .catch { _ in Just(nil) }
+                // S15: keep the download pipeline off main.
+                // Decoding + caching + disk save all happen on
+                // URLSession's background queue now; only the
+                // final delivery to subscribers hops to main.
+                .handleEvents(receiveOutput: { [weak self] image in
+                    guard let self = self, let image = image else { return }
+
+                    // Store in memory cache
+                    self.memoryCache.setObject(image, forKey: key, cost: image.cacheCost)
+
+                    // Store in disk cache on a background queue
+                    // (JPEG encoding + file write can stall).
+                    DispatchQueue.global(qos: .utility).async {
+                        self.saveToDisk(image: image, key: key)
                     }
-                    .catch { _ in Just(nil) }
-                    // S15: keep the download pipeline off main.
-                    // Decoding + caching + disk save all happen on
-                    // URLSession's background queue now; only the
-                    // final delivery to subscribers hops to main.
-                    .handleEvents(receiveOutput: { [weak self] image in
-                        guard let self = self, let image = image else { return }
 
-                        // Store in memory cache
-                        self.memoryCache.setObject(image, forKey: key, cost: image.cacheCost)
+                    // Remove from active downloads
+                    self.downloadsLock.lock()
+                    self.activeDownloads.removeValue(forKey: url)
+                    self.downloadsLock.unlock()
+                })
+                .share()
+                .eraseToAnyPublisher()
 
-                        // Store in disk cache on a background queue
-                        // (JPEG encoding + file write can stall).
-                        DispatchQueue.global(qos: .utility).async {
-                            self.saveToDisk(image: image, key: key)
-                        }
-
-                        // Remove from active downloads
-                        self.activeDownloads.removeValue(forKey: url)
-                    })
-                    .share()
-                    .eraseToAnyPublisher()
-                    .sink { _ in }
-
-                self.activeDownloads[url] = download
+            downloadsLock.lock()
+            if activeDownloads[url] == nil {
+                activeDownloads[url] = download.sink { _ in }
             }
+            downloadsLock.unlock()
 
             // Return placeholder while loading
             return Just(nil).eraseToAnyPublisher()
@@ -367,8 +384,10 @@ class ImageCache {
         memoryCache.removeAllObjects()
         
         // Cancel pending downloads
+        downloadsLock.lock()
         activeDownloads.values.forEach { $0.cancel() }
         activeDownloads.removeAll()
+        downloadsLock.unlock()
         
         // Clean disk cache on background thread
         DispatchQueue.global(qos: .background).async { [weak self] in

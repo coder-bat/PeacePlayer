@@ -43,6 +43,42 @@ enum TurntableHomeModel {
         }
         return result
     }
+
+    /// The crate's contents.
+    ///
+    /// The suggestions are the crate's spine, but they are not always
+    /// enough to fill three rows — a user with two favourite artists
+    /// sees five records and the deck looks half empty. The queue and
+    /// the recently-played shelf top the crate up so the deck always
+    /// shows three full rows of records.
+    static func crateContents(
+        suggestions: [String: [Track]],
+        queue: [QueueItem],
+        recent: [RecentTrack],
+        limit: Int
+    ) -> [Track] {
+        var seen = Set<String>()
+        var result: [Track] = []
+
+        func append(_ track: Track) {
+            guard !seen.contains(track.videoId) else { return }
+            seen.insert(track.videoId)
+            result.append(track)
+        }
+
+        for track in sleeves(from: suggestions, limit: limit) {
+            append(track)
+        }
+        for item in queue {
+            append(item.track)
+            if result.count >= limit { return result }
+        }
+        for entry in recent {
+            append(entry.toTrack)
+            if result.count >= limit { return result }
+        }
+        return Array(result.prefix(limit))
+    }
 }
 
 // MARK: - View
@@ -52,10 +88,6 @@ struct TurntableHomeView: View {
     @ObservedObject var favoriteArtists: FavoriteArtistsManager
     @ObservedObject var playerState: PlayerState
     @ObservedObject var visualizer: AudioVisualizerEngine
-
-    /// The profile chip, owned by Home (it owns the avatar picker) and
-    /// drawn on the deck's fascia.
-    var profile: AnyView
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -76,13 +108,38 @@ struct TurntableHomeView: View {
     }
 
     private var sleeves: [Track] {
-        TurntableHomeModel.sleeves(from: viewModel.artistSuggestions, limit: 18)
+        TurntableHomeModel.crateContents(
+            suggestions: viewModel.artistSuggestions,
+            queue: playerState.queue,
+            recent: DataManager.shared.recentlyPlayed,
+            limit: CrateGrid.columnCount * CrateGrid.visibleRows
+        )
+    }
+
+    /// The progress the deck animates from, sampled at display rate.
+    ///
+    /// The player's clock ticks once a second, which makes a record
+    /// that turns once per track move in visible one-degree jumps.
+    /// Projecting the clock's value forward by the wall-clock time
+    /// since its last tick makes the motion continuous while still
+    /// deriving from the player's own position in the track.
+    private func smoothProgress(at date: Date) -> Double {
+        if isScrubbing { return scrubProgress }
+        let clock = playerState.playbackClock
+        guard playerState.isTransportRunning else { return clock.progress }
+
+        let elapsed = date.timeIntervalSince(clock.lastUpdateDate)
+        guard elapsed > 0, elapsed < 2 else { return clock.progress }
+
+        let projected = clock.currentTime + elapsed * Double(clock.rate)
+        let duration = clock.duration > 0 ? clock.duration : clock.expectedDuration
+        guard duration > 0 else { return clock.progress }
+        return min(1, max(0, projected / duration))
     }
 
     var body: some View {
         VStack(spacing: 0) {
             DeckFasciaView(
-                profile: profile,
                 hasSmartLibraryCandidates: SmartLibraryManager.shared.pendingCandidates != nil,
                 hasPendingCleanup: SmartLibraryManager.shared.pendingCleanup != nil,
                 onSmartLibrary: { showSmartLibrary = true },
@@ -102,6 +159,7 @@ struct TurntableHomeView: View {
                     isPlaying: playerState.isTransportRunning,
                     progress: displayedProgress,
                     reduceMotion: reduceMotion,
+                    progressAt: { date in smoothProgress(at: date) },
                     onTapPlatter: {
                         playerState.showFullPlayer = true
                     },
@@ -114,6 +172,7 @@ struct TurntableHomeView: View {
                 TonearmView(
                     progress: displayedProgress,
                     isScrubbing: isScrubbing,
+                    progressAt: { date in smoothProgress(at: date) },
                     onScrub: { value in
                         isScrubbing = true
                         scrubProgress = value
@@ -207,8 +266,7 @@ struct TurntableHomeView: View {
     /// NavigationStack routes.
     ///
     /// Each chip is a 30pt graphic inside a 44x44 touch target, so
-    /// the five of them fit the top-right corner without crowding the
-    /// profile chip.
+    /// the five of them fit the top-right corner.
     @ViewBuilder
     private var navChips: some View {
         HStack(spacing: 2) {

@@ -12,6 +12,11 @@ struct SettingsView: View {
     @StateObject private var smartLibrary = SmartLibraryManager.shared
     @State private var showClearCacheConfirmation = false
     @State private var showSignOutConfirmation = false
+    // 2026-11-18: the avatar / display-name / sign-out sheet used to
+    // be reached from the profile chip on Home. The chip is gone (the
+    // deck is a record player, not an account screen), so the sheet
+    // now opens from the account row below — tapping the email.
+    @State private var showProfileSheet = false
     @State private var showBackendSettings = false
     @State private var showAudioSettings = false  // S13
     @State private var showEqualizer = false  // S15: real 10-band EQ
@@ -317,33 +322,43 @@ struct SettingsView: View {
                 // WidgetSyncService.reloadAll() so lock-screen / home
                 // widgets don't show stale Now Playing.
                 Section {
-                    HStack(spacing: 16) {
-                        ZStack {
-                            Circle()
-                                .fill(Theme.cyberCyan.opacity(0.2))
-                                .frame(width: 44, height: 44)
+                    Button {
+                        showProfileSheet = true
+                    } label: {
+                        HStack(spacing: 16) {
+                            ZStack {
+                                Circle()
+                                    .fill(Theme.cyberCyan.opacity(0.2))
+                                    .frame(width: 44, height: 44)
 
-                            Image(systemName: "person.crop.circle.fill")
-                                .font(.system(size: 22))
-                                .foregroundColor(Theme.cyberCyan)
+                                Image(systemName: "person.crop.circle.fill")
+                                    .font(.system(size: 22))
+                                    .foregroundColor(Theme.cyberCyan)
+                            }
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(auth.email ?? auth.userId ?? "Signed In")
+                                    .font(.system(size: 17, weight: .semibold))
+                                    .foregroundColor(.white)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+
+                                Text("Apple ID")
+                                    .font(.caption)
+                                    .foregroundColor(.green)
+                            }
+
+                            Spacer()
+
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundColor(Theme.cyberDim)
                         }
-
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(auth.email ?? auth.userId ?? "Signed In")
-                                .font(.system(size: 17, weight: .semibold))
-                                .foregroundColor(.white)
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-
-                            Text("Apple ID")
-                                .font(.caption)
-                                .foregroundColor(.green)
-                        }
-
-                        Spacer()
                     }
+                    .buttonStyle(.plain)
                     .padding(.vertical, 4)
                     .listRowBackground(Theme.cyberSurface)
+                    .accessibilityLabel("Profile and sign out")
 
                     Button {
                         showSignOutConfirmation = true
@@ -1156,6 +1171,12 @@ struct SettingsView: View {
         // S15: 10-band parametric EQ panel.
         .sheet(isPresented: $showEqualizer) {
             EqualizerPanelView()
+                .preferredColorScheme(.dark)
+        }
+        // 2026-11-18: the avatar / display-name / sign-out sheet,
+        // moved here from the Home profile chip.
+        .sheet(isPresented: $showProfileSheet) {
+            AvatarPickerSheet()
                 .preferredColorScheme(.dark)
         }
         // S17 (CV-4): cancel any in-flight connection

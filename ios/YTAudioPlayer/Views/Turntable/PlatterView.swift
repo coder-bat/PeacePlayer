@@ -72,17 +72,25 @@ struct PlatterView: View {
     let isPlaying: Bool
     let progress: Double
     let reduceMotion: Bool
+    /// Fine-grained progress source.
+    ///
+    /// The player's clock ticks once a second, which makes a record
+    /// that turns once per track move in visible one-degree jumps.
+    /// This closure is sampled at display rate so the rotation is
+    /// smooth; it still derives from the player's own clock, so the
+    /// record still tells the truth about where the audio is.
+    var progressAt: ((Date) -> Double)?
     var onTapPlatter: () -> Void
     var onLongPress: () -> Void
 
     /// The platter's outer diameter. Every other dimension below is
     /// derived from it, so the whole assembly scales as one part.
-    static let diameter: CGFloat = 320
+    static let diameter: CGFloat = 300
 
     /// The record's diameter — smaller than the platter, so a ring of
     /// felt shows around it. A record that fills the platter edge to
     /// edge does not read as a record on a turntable.
-    static let recordDiameter: CGFloat = 288
+    static let recordDiameter: CGFloat = 270
 
     /// The paper label's diameter — about a third of the record, the
     /// way a real 12" label sits on a 12" record. Used only by the
@@ -99,6 +107,21 @@ struct PlatterView: View {
     @State private var displayedTrack: String = ""
 
     var body: some View {
+        TimelineView(timelineSchedule) { timeline in
+            platterBody(progress: progressAt?(timeline.date) ?? progress)
+        }
+    }
+
+    /// The timeline's cadence: 30fps while the record is turning,
+    /// stopped entirely when it is not.
+    private var timelineSchedule: AnimationTimelineSchedule {
+        if reduceMotion {
+            return .animation(minimumInterval: 1.0, paused: true)
+        }
+        return .animation(minimumInterval: 1.0 / 30.0, paused: !isPlaying)
+    }
+
+    private func platterBody(progress: Double) -> some View {
         ZStack {
             // 1. Machined rim.
             Circle()
@@ -140,7 +163,7 @@ struct PlatterView: View {
                 .clipShape(Circle())
 
             // 3. The record face.
-            recordFace
+            recordFace(progress: progress)
                 .frame(width: Self.recordDiameter, height: Self.recordDiameter)
 
             // 3b. The specular sheen. It is NOT inside the rotating
@@ -190,7 +213,7 @@ struct PlatterView: View {
 
     /// The picture disc: the artwork fills the record, and everything
     /// that makes it read as vinyl is layered on top of it.
-    private var recordFace: some View {
+    private func recordFace(progress: Double) -> some View {
         ZStack {
             // The vinyl body. It shows through around the artwork's
             // edges while the face is mid-flip, and it IS the record
@@ -252,7 +275,7 @@ struct PlatterView: View {
                 .allowsHitTesting(false)
         }
         .clipShape(Circle())
-        .rotationEffect(.degrees(rotationDegrees))
+        .rotationEffect(.degrees(rotationDegrees(for: progress)))
     }
 
     /// The specular highlight. It is drawn OUTSIDE the record's
@@ -354,7 +377,11 @@ struct PlatterView: View {
     /// The record turns as the track plays. With `reduceMotion` on we
     /// hold it still — the progress is still legible from the label
     /// and the tonearm, so nothing is lost.
-    private var rotationDegrees: Double {
+    ///
+    /// Takes the progress as an argument rather than reading the
+    /// stored one: the timeline samples it at display rate, and the
+    /// coarse stored value would undo that.
+    private func rotationDegrees(for progress: Double) -> Double {
         guard !reduceMotion else { return 0 }
         return PlatterGeometry.rotation(forProgress: progress)
     }
