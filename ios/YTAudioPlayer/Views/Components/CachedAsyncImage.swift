@@ -21,6 +21,19 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
         self.url = url
         self.contentBuilder = content
         self.placeholderBuilder = placeholder
+
+        // Seed the state from the memory cache. Two reasons:
+        //
+        // 1. Speed — artwork that is already decoded paints on the
+        //    first layout pass instead of a runloop turn later, which
+        //    is what makes scrolling a list of covers look smooth.
+        // 2. Correctness of offscreen renders — `ImageRenderer`
+        //    snapshots whatever is on screen at the moment it runs,
+        //    so an asynchronously delivered image would always be
+        //    missing from the picture.
+        let cached = url.flatMap { ImageCache.shared.cachedImage(for: $0) }
+        _image = State(initialValue: cached)
+        _isLoaded = State(initialValue: cached != nil)
     }
 
     var body: some View {

@@ -591,7 +591,31 @@ class PlayerState: ObservableObject {
     var isNowPlaying: Bool {
         currentItem != nil
     }
-    
+
+    /// True when the transport is actually rolling.
+    ///
+    /// `playbackState` alone is not enough. A stall (AVPlayerItem
+    /// PlaybackStalled) parks the state at `.buffering` even though the
+    /// AVPlayer is still holding its rate, and the recovery back to
+    /// `.playing` only lands when `isPlaybackLikelyToKeepUp` fires
+    /// again — which does not always happen for a momentary
+    /// underrun. Reading the enum alone therefore showed a PLAY glyph
+    /// in the mini player while the audio was still playing.
+    ///
+    /// The player's own rate is the tie-breaker: during a stall the
+    /// AVPlayer keeps `rate` at the requested speed and only
+    /// `timeControlStatus` drops to `.waitingToPlayAtSpecifiedRate`.
+    var isTransportRunning: Bool {
+        switch playbackState {
+        case .playing:
+            return true
+        case .buffering:
+            return (player?.rate ?? 0) > 0
+        default:
+            return false
+        }
+    }
+
     var currentTimeFormatted: String {
         formatTime(currentTime)
     }

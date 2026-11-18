@@ -10,14 +10,16 @@
 //    platter rotation  -> PlayerState.playbackClock.progress
 //    tonearm drag      -> PlayerState.seek(to:)
 //    cue lever         -> PlayerState.togglePlayPause()
-//    spindle tap       -> PlayerState.setPlaybackRate(_:)
+//    platter tap       -> PlayerState.showFullPlayer
 //    crate sleeves     -> HomeViewModel.playTrack(_:)
+//    queue discs       -> PlayerState.playQueue(at:)
 //    level meter       -> AudioVisualizerEngine.bands
 //
 //  The view deliberately owns NO playback state of its own. It reads
 //  PlayerState and calls its methods; that keeps the deck honest
 //  (it cannot show a position the player does not agree with) and
 //  means every existing player control keeps working unchanged.
+//
 //
 
 import SwiftUI
@@ -41,13 +43,6 @@ enum TurntableHomeModel {
         }
         return result
     }
-
-    /// Playback rate for the 33 / 45 RPM switch. 45 RPM is the real
-    /// turntable convention: the same record plays 45/33 = 1.36x
-    /// faster. We use 1.25x so it stays musical.
-    static func playbackRate(forRPM is45: Bool) -> Float {
-        is45 ? 1.25 : 1.0
-    }
 }
 
 // MARK: - View
@@ -64,7 +59,6 @@ struct TurntableHomeView: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    @State private var is45RPM = false
     @State private var isScrubbing = false
     @State private var scrubProgress: Double = 0
     @State private var showSmartLibrary = false
@@ -82,19 +76,15 @@ struct TurntableHomeView: View {
     }
 
     private var sleeves: [Track] {
-        TurntableHomeModel.sleeves(from: viewModel.artistSuggestions, limit: 12)
+        TurntableHomeModel.sleeves(from: viewModel.artistSuggestions, limit: 18)
     }
 
     var body: some View {
         VStack(spacing: 0) {
             DeckFasciaView(
                 profile: profile,
-                isPlaying: playerState.playbackState == .playing,
-                isConnected: true,
-                rpmLabel: is45RPM ? "45" : "33⅓",
                 hasSmartLibraryCandidates: SmartLibraryManager.shared.pendingCandidates != nil,
                 hasPendingCleanup: SmartLibraryManager.shared.pendingCleanup != nil,
-                onToggleRPM: { toggleRPM() },
                 onSmartLibrary: { showSmartLibrary = true },
                 onCleanup: { showCleanup = true }
             ) {
@@ -108,15 +98,18 @@ struct TurntableHomeView: View {
             ZStack {
                 PlatterView(
                     artworkURL: playerState.currentItem?.track.artworkURL,
-                    isPlaying: playerState.playbackState == .playing,
+                    trackIdentity: playerState.currentItem?.track.videoId ?? "",
+                    isPlaying: playerState.isTransportRunning,
                     progress: displayedProgress,
                     reduceMotion: reduceMotion,
-                    onTapSpindle: { toggleRPM() },
+                    onTapPlatter: {
+                        playerState.showFullPlayer = true
+                    },
                     onLongPress: {
                         playerState.showQueue = true
                     }
                 )
-                .frame(width: 320, height: 320)
+                .frame(width: PlatterView.diameter, height: PlatterView.diameter)
 
                 TonearmView(
                     progress: displayedProgress,
@@ -131,21 +124,44 @@ struct TurntableHomeView: View {
                         playerState.seek(to: value)
                     }
                 )
-                .frame(width: 320, height: 320)
+                .frame(width: PlatterView.diameter, height: PlatterView.diameter)
 
                 CueLeverView(
-                    isPlaying: playerState.playbackState == .playing,
+                    isPlaying: playerState.isTransportRunning,
                     onToggle: {
                         HapticManager.medium()
                         playerState.togglePlayPause()
                     }
                 )
-                .offset(x: 132, y: -76)
+                // The start/stop lever sits on the LEFT of the platter,
+                // the way it does on a Technics — the arm owns the
+                // right-hand side.
+                .offset(x: -132, y: -76)
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 10)
 
-            // Queue stack.
+            // The deck's output meter — a slim peak meter strip on the
+            // plinth, the way a turntable's aux VU meter sits beside
+            // the controls.
+            LevelMeterRow(
+                levels: visualizer.bands,
+                accent: Theme.cyberCyan
+            )
+            .frame(width: 150, height: 12)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(.black.opacity(0.55))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .strokeBorder(TurntableTokens.aluminium.opacity(0.22), lineWidth: 1)
+                    )
+            )
+            .padding(.bottom, 2)
+
+            // The shelf of queued records, under the deck.
             QueueStackView(
                 queue: playerState.queue,
                 currentIndex: playerState.currentIndex,
@@ -170,11 +186,6 @@ struct TurntableHomeView: View {
             .padding(.top, 12)
 
             Spacer(minLength: 8)
-
-            // Now-playing strip — the deck's only now-playing surface.
-            nowPlayingStrip
-                .padding(.horizontal, 14)
-                .padding(.bottom, 8)
         }
         .background(deckBackground)
         .sheet(isPresented: $showSmartLibrary) {
@@ -189,22 +200,18 @@ struct TurntableHomeView: View {
         }
     }
 
-    // MARK: - RPM
-
-    private func toggleRPM() {
-        HapticManager.selectionChanged()
-        is45RPM.toggle()
-        playerState.setPlaybackRate(TurntableHomeModel.playbackRate(forRPM: is45RPM))
-    }
-
     // MARK: - Nav chips
 
     /// The five existing Home destinations. They are passed into the
     /// fascia rather than owned by it, so Home keeps ownership of its
     /// NavigationStack routes.
+    ///
+    /// Each chip is a 30pt graphic inside a 44x44 touch target, so
+    /// the five of them fit the top-right corner without crowding the
+    /// profile chip.
     @ViewBuilder
     private var navChips: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 2) {
             NavigationLink(value: HomeDestination.timeCapsule) {
                 deckChip(icon: "hourglass", accent: Theme.cyberYellow)
             }
@@ -234,7 +241,7 @@ struct TurntableHomeView: View {
 
     private func deckChip(icon: String, accent: Color) -> some View {
         Image(systemName: icon)
-            .font(.system(size: 12, weight: .medium))
+            .font(.system(size: 13, weight: .medium))
             .foregroundColor(accent)
             .frame(width: 30, height: 30)
             .background(
@@ -246,69 +253,9 @@ struct TurntableHomeView: View {
                     )
             )
             .contentShape(Rectangle())
-    }
-
-    // MARK: - Now playing strip
-
-    private var nowPlayingStrip: some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(playerState.currentItem?.track.title ?? "Nothing playing")
-                    .font(Typography.playerTitle)
-                    .foregroundColor(TurntableTokens.cream)
-                    .lineLimit(1)
-
-                Text(playerState.currentItem?.track.artists.first ?? "Turn the record")
-                    .font(Typography.playerArtist)
-                    .foregroundColor(TurntableTokens.aluminium.opacity(0.75))
-                    .lineLimit(1)
-            }
-
-            Spacer(minLength: 8)
-
-            LevelMeterRow(
-                levels: visualizer.bands,
-                accent: Theme.cyberCyan
-            )
-            .frame(width: 110, height: 22)
-
-            // Time readout.
-            Text(timeReadout)
-                .font(Typography.playerTime)
-                .foregroundColor(TurntableTokens.aluminium.opacity(0.8))
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 9)
-        .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(Color.black.opacity(0.45))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12)
-                        .strokeBorder(TurntableTokens.aluminium.opacity(0.18), lineWidth: 1)
-                )
-        )
-        .contentShape(Rectangle())
-        .onTapGesture {
-            playerState.showFullPlayer = true
-        }
-        .accessibilityLabel("Now playing")
-        .accessibilityValue(playerState.currentItem?.track.title ?? "Nothing playing")
-        .accessibilityAddTraits(.isButton)
-    }
-
-    private var timeReadout: String {
-        let elapsed = formatTime(playerState.playbackClock.currentTime)
-        let total = formatTime(playerState.playbackClock.duration)
-        return "\(elapsed) / \(total)"
-    }
-
-    /// Formats seconds as m:ss. Local helper so the strip does not
-    /// depend on PlayerState's formatting helpers, which read the
-    /// legacy (frozen) currentTime / duration mirrors.
-    private func formatTime(_ seconds: Double) -> String {
-        guard seconds.isFinite, seconds >= 0 else { return "0:00" }
-        let total = Int(seconds.rounded())
-        return String(format: "%d:%02d", total / 60, total % 60)
+            // HIG minimum for an icon-only control.
+            .frame(width: 44, height: 44)
+            .contentShape(Rectangle())
     }
 
     // MARK: - Background

@@ -1,13 +1,18 @@
 //
 //  SleeveCrateView.swift
-//  YTAudioPlayer
+//  Views/Turntable
 //
 //  The record crate. Each sleeve is an album cover standing in a
 //  felt-lined wooden crate; tapping one plays it.
 //
+//  The crate is THREE ROWS deep — a single row read as a shelf, not
+//  as a crate. The rows live in one vertical scroll so the deck stays
+//  one screen tall: you see three rows at a time and flip down
+//  through the rest, the way you would work through a bin of
+//  records.
+//
 //  This replaces the "FOR YOU" favorite-artist list from the old
-//  Home. The crate is horizontal and scrollable, so the deck stays
-//  one screen tall.
+//  Home.
 //
 
 import SwiftUI
@@ -23,29 +28,15 @@ struct SleeveCrateView: View {
                 .font(Typography.eyebrow)
                 .foregroundColor(TurntableTokens.aluminium.opacity(0.7))
 
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 10) {
-                    ForEach(sleeves) { track in
-                        Button {
-                            onPlay(track)
-                        } label: {
-                            SleeveView(track: track)
-                        }
-                        .buttonStyle(.plain)
-                        .contextMenu {
-                            Button {
-                                onQueue(track)
-                            } label: {
-                                Label("Add to queue", systemImage: "text.badge.plus")
-                            }
-                        }
-                        .accessibilityLabel("\(track.title) by \(track.artists.first ?? "unknown artist")")
-                        .accessibilityHint("Double tap to play")
-                    }
-                }
-                .padding(.horizontal, 2)
-                .padding(.vertical, 4)
+            ScrollView(.vertical, showsIndicators: false) {
+                CrateGrid(
+                    sleeves: sleeves,
+                    onPlay: onPlay,
+                    onQueue: onQueue
+                )
+                .padding(.vertical, 2)
             }
+            .frame(height: CrateGrid.visibleHeight)
 
             // The crate's front rail — walnut, catching the key light.
             Rectangle()
@@ -71,9 +62,67 @@ struct SleeveCrateView: View {
     }
 }
 
+// MARK: - Crate grid
+
+/// The sleeves themselves, laid out in a centred grid.
+///
+/// The grid is deliberately NOT inside a scroll view here — the
+/// scroll view lives in `SleeveCrateView` so the crate can be
+/// rendered on its own in a snapshot test.
+struct CrateGrid: View {
+    let sleeves: [Track]
+    var onPlay: (Track) -> Void
+    var onQueue: (Track) -> Void
+
+    /// One sleeve's edge length.
+    static let sleeveSize: CGFloat = 64
+    /// Gap between sleeves, both across and down.
+    static let spacing: CGFloat = 8
+    /// How many rows the crate shows at once.
+    static let visibleRows: Int = 3
+    /// How many sleeves fit across the deck.
+    static let columnCount: Int = 5
+
+    /// The height of the crate's window.
+    static var visibleHeight: CGFloat {
+        CGFloat(visibleRows) * sleeveSize + CGFloat(visibleRows - 1) * spacing
+    }
+
+    private var columns: [GridItem] {
+        Array(
+            repeating: GridItem(.flexible(), spacing: Self.spacing, alignment: .center),
+            count: Self.columnCount
+        )
+    }
+
+    var body: some View {
+        LazyVGrid(columns: columns, spacing: Self.spacing) {
+            ForEach(sleeves) { track in
+                Button {
+                    HapticManager.medium()
+                    onPlay(track)
+                } label: {
+                    SleeveView(track: track)
+                }
+                .buttonStyle(.plain)
+                .contextMenu {
+                    Button {
+                        onQueue(track)
+                    } label: {
+                        Label("Add to queue", systemImage: "text.badge.plus")
+                    }
+                }
+                .accessibilityLabel("\(track.title) by \(track.artists.first ?? "unknown artist")")
+                .accessibilityHint("Double tap to play")
+            }
+        }
+        .frame(maxWidth: .infinity)
+    }
+}
+
 // MARK: - Sleeve
 
-private struct SleeveView: View {
+struct SleeveView: View {
     let track: Track
 
     var body: some View {
@@ -94,12 +143,12 @@ private struct SleeveView: View {
                         endPoint: .bottomTrailing
                     )
                     Image(systemName: "music.note")
-                        .font(.system(size: 16, weight: .light))
+                        .font(.system(size: 14, weight: .light))
                         .foregroundColor(TurntableTokens.aluminium.opacity(0.6))
                 }
             }
         }
-        .frame(width: 62, height: 62)
+        .frame(width: CrateGrid.sleeveSize, height: CrateGrid.sleeveSize)
         .clipShape(RoundedRectangle(cornerRadius: 4))
         // The sleeve's card stock edge.
         .overlay(
@@ -108,5 +157,7 @@ private struct SleeveView: View {
         )
         // Sleeves sit in the crate, so they cast a shadow downward.
         .shadow(color: .black.opacity(0.55), radius: 5, y: 3)
+        // Centre each sleeve inside its grid cell.
+        .frame(maxWidth: .infinity)
     }
 }

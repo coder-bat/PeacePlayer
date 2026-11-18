@@ -5,20 +5,19 @@
 //  The brushed-aluminium strip across the top of the deck.
 //
 //  It replaces the current Home header (profile chip + 5 nav chips).
-//  The strip is two rows because the deck is only 402pt wide:
 //
-//    Row 1 — the deck's own instrumentation. The profile chip on the
-//            left, the pilot lamps (amber for power, cyan for a live
-//            connection, magenta for a playing deck) and the RPM chip
-//            on the right.
-//    Row 2 — the app's navigation on the left, and the two actionable
-//            state lamps (Smart Library review, scheduled cleanup) on
-//            the right. Those two stand in for the SmartLibraryCard
-//            and the CleanupScheduledBanner from the old Home.
+//  The strip is ONE row: the profile chip on the left and the app's
+//  five destinations on the right, in the top-right corner where the
+//  old Home put its nav icons. The deck's instrumentation (the RPM
+//  chip and the three pilot lamps) was removed — the record itself is
+//  the instrument now, and a row of status dots above it was just
+//  chrome.
 //
-//  The lamps that stand in for real cards keep a full 44x44 touch
-//  target, which is why they get their own space rather than being
-//  squeezed into the instruments row.
+//  The only thing below the row is the pair of ACTIONABLE lamps
+//  (Smart Library review, scheduled cleanup). They stand in for the
+//  SmartLibraryCard and the CleanupScheduledBanner from the old Home
+//  and only appear when there is something to act on, so the strip
+//  normally stays a single row.
 //
 
 import SwiftUI
@@ -27,12 +26,8 @@ struct DeckFasciaView<Chips: View>: View {
     /// The profile chip, owned by Home so the avatar picker stays
     /// there.
     let profile: AnyView
-    let isPlaying: Bool
-    let isConnected: Bool
-    let rpmLabel: String
     let hasSmartLibraryCandidates: Bool
     let hasPendingCleanup: Bool
-    var onToggleRPM: () -> Void
     var onSmartLibrary: () -> Void
     var onCleanup: () -> Void
     private let navChips: () -> Chips
@@ -42,83 +37,45 @@ struct DeckFasciaView<Chips: View>: View {
     /// the buttons.
     init(
         profile: AnyView,
-        isPlaying: Bool,
-        isConnected: Bool,
-        rpmLabel: String,
         hasSmartLibraryCandidates: Bool,
         hasPendingCleanup: Bool,
-        onToggleRPM: @escaping () -> Void,
         onSmartLibrary: @escaping () -> Void,
         onCleanup: @escaping () -> Void,
         @ViewBuilder navChips: @escaping () -> Chips
     ) {
         self.profile = profile
-        self.isPlaying = isPlaying
-        self.isConnected = isConnected
-        self.rpmLabel = rpmLabel
         self.hasSmartLibraryCandidates = hasSmartLibraryCandidates
         self.hasPendingCleanup = hasPendingCleanup
-        self.onToggleRPM = onToggleRPM
         self.onSmartLibrary = onSmartLibrary
         self.onCleanup = onCleanup
         self.navChips = navChips
     }
 
     var body: some View {
-        VStack(spacing: 10) {
-            // Row 1 — instruments.
+        VStack(spacing: 8) {
+            // Row 1 — profile on the left, navigation on the right.
             HStack(spacing: 10) {
                 profile
                     .layoutPriority(1)
 
-                Spacer(minLength: 8)
+                Spacer(minLength: 4)
 
-                // Pilot lamps.
-                HStack(spacing: 6) {
-                    PilotLamp(color: TurntableTokens.amberLamp, isOn: true)
-                    PilotLamp(color: Theme.cyberCyan, isOn: isConnected)
-                    PilotLamp(color: Theme.cyberMagenta, isOn: isPlaying)
-                }
-
-                // RPM chip.
-                Button {
-                    onToggleRPM()
-                } label: {
-                    Text(rpmLabel)
-                        .font(.system(size: 11, weight: .bold, design: .monospaced))
-                        .foregroundColor(TurntableTokens.amberLamp)
-                        .padding(.horizontal, 9)
-                        .padding(.vertical, 5)
-                        .background(
-                            RoundedRectangle(cornerRadius: 5)
-                                .fill(TurntableTokens.amberLamp.opacity(0.12))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 5)
-                                        .strokeBorder(TurntableTokens.amberLamp.opacity(0.45), lineWidth: 1)
-                                )
-                        )
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Playback speed, \(rpmLabel)")
+                navChips()
             }
 
-            // Row 2 — navigation and anything that needs attention.
-            HStack(spacing: 8) {
-                navChips()
+            // Row 2 — only when there is something to act on.
+            if hasSmartLibraryCandidates || hasPendingCleanup {
+                HStack(spacing: 10) {
+                    Spacer(minLength: 0)
 
-                Spacer(minLength: 0)
-
-                // Actionable-state lamps. These replace the Smart
-                // Library card and the cleanup banner — both of which
-                // were the most important decision surfaces on the old
-                // Home.
-                if hasSmartLibraryCandidates {
-                    PilotLamp(color: Theme.cyberYellow, isOn: true, action: onSmartLibrary)
-                        .accessibilityLabel("Smart Library needs review")
-                }
-                if hasPendingCleanup {
-                    PilotLamp(color: Theme.cyberMagenta, isOn: true, action: onCleanup)
-                        .accessibilityLabel("Scheduled cleanup pending")
+                    if hasSmartLibraryCandidates {
+                        PilotLamp(color: Theme.cyberYellow, isOn: true, action: onSmartLibrary)
+                            .accessibilityLabel("Smart Library needs review")
+                    }
+                    if hasPendingCleanup {
+                        PilotLamp(color: Theme.cyberMagenta, isOn: true, action: onCleanup)
+                            .accessibilityLabel("Scheduled cleanup pending")
+                    }
                 }
             }
         }

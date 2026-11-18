@@ -149,7 +149,7 @@ struct MiniPlayer: View {
                     HapticManager.light()
                     playerState.togglePlayPause()
                 }) {
-                    Image(systemName: playerState.playbackState.isPlaying ? "pause.fill" : "play.fill")
+                    Image(systemName: playerState.isTransportRunning ? "pause.fill" : "play.fill")
                         .font(.system(size: 14, weight: .bold))
                         .foregroundColor(.white)
                         .frame(width: 28, height: 28)
@@ -161,7 +161,7 @@ struct MiniPlayer: View {
                 // visual size — HIG minimum for icon-only buttons.
                 .frame(minWidth: 44, minHeight: 44)
                 .contentShape(Rectangle())
-                .accessibilityLabel(playerState.playbackState.isPlaying ? "Pause" : "Play")
+                .accessibilityLabel(playerState.isTransportRunning ? "Pause" : "Play")
 
                 // Next — 26pt, no background ring.
                 Button(action: {
@@ -198,7 +198,7 @@ struct MiniPlayer: View {
             // Animated artwork
             ArtworkView(
                 artworkURL: playerState.currentItem?.track.artworkURL,
-                isPlaying: playerState.playbackState.isPlaying,
+                isPlaying: playerState.isTransportRunning,
                 isLoading: playerState.playbackState.isLoading
             )
             .frame(width: 44, height: 44)
@@ -267,12 +267,12 @@ struct MiniPlayer: View {
                     HapticManager.light()
                     playerState.togglePlayPause()
                 }) {
-                    Image(systemName: playerState.playbackState.isPlaying ? "pause.fill" : "play.fill")
+                    Image(systemName: playerState.isTransportRunning ? "pause.fill" : "play.fill")
                         .font(.system(size: 18, weight: .bold))
                         .foregroundColor(.cyberCyan)
                         .frame(width: 36, height: 36)
                 }
-                .accessibilityLabel(playerState.playbackState.isPlaying ? "Pause" : "Play")
+                .accessibilityLabel(playerState.isTransportRunning ? "Pause" : "Play")
             } else {
                 Spacer()
 
@@ -282,13 +282,13 @@ struct MiniPlayer: View {
                             HapticManager.light()
                             playerState.togglePlayPause()
                         }) {
-                            Image(systemName: playerState.playbackState.isPlaying ? "pause.fill" : "play.fill")
+                            Image(systemName: playerState.isTransportRunning ? "pause.fill" : "play.fill")
                                 .font(.system(size: 22))
                                 .foregroundColor(.cyberCyan)
                                 .frame(width: 44, height: 44)
                         }
                         .opacity(playerState.playbackState.isLoading ? 0 : 1)
-                        .accessibilityLabel(playerState.playbackState.isPlaying
+                        .accessibilityLabel(playerState.isTransportRunning
                             ? "Pause \(playerState.currentItem?.track.title ?? "")"
                             : "Play \(playerState.currentItem?.track.title ?? "")")
 

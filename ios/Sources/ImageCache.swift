@@ -74,6 +74,16 @@ class ImageCache {
     // MARK: - Public Methods
     
     /// Get image from cache or download it
+    /// The already-decoded image for a URL, if it is in the memory
+    /// cache.
+    ///
+    /// A synchronous lookup, so a view can show a cached image on its
+    /// very first layout pass instead of waiting a runloop turn for
+    /// the publisher to deliver it.
+    func cachedImage(for url: URL) -> UIImage? {
+        memoryCache.object(forKey: url.absoluteString as NSString)
+    }
+
     func image(for url: URL) -> AnyPublisher<UIImage?, Never> {
         let key = url.absoluteString as NSString
         #if DEBUG
@@ -98,6 +108,18 @@ class ImageCache {
         return Deferred { [weak self] () -> AnyPublisher<UIImage?, Never> in
             guard let self = self else {
                 return Just(nil).eraseToAnyPublisher()
+            }
+
+            // A local file is not a download. `URLSession` refuses
+            // file:// URLs, so read and decode it here — this is what
+            // lets the offscreen snapshot tests render the deck with
+            // real cover art.
+            if url.isFileURL {
+                let fileImage = self.decodedImage(at: url)
+                if let fileImage {
+                    self.memoryCache.setObject(fileImage, forKey: key, cost: fileImage.cacheCost)
+                }
+                return Just(fileImage).eraseToAnyPublisher()
             }
 
             // Try disk cache (sync file read + decode, but on the
@@ -231,6 +253,24 @@ class ImageCache {
     private func decodedImage(data: Data) -> UIImage? {
         let sourceOptions = [kCGImageSourceShouldCache: false] as CFDictionary
         guard let source = CGImageSourceCreateWithData(data as CFData, sourceOptions) else { return nil }
+        let thumbOptions = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: Self.maxDecodeDimension
+        ] as CFDictionary
+        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, thumbOptions) else { return nil }
+        return UIImage(cgImage: cgImage)
+    }
+
+    /// Decode an image that already lives on the local filesystem.
+    ///
+    /// Used for file:// artwork URLs — `URLSession` cannot fetch them,
+    /// and the offscreen snapshot tests need real cover art on the
+    /// platter.
+    private func decodedImage(at url: URL) -> UIImage? {
+        let sourceOptions = [kCGImageSourceShouldCache: false] as CFDictionary
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, sourceOptions) else { return nil }
         let thumbOptions = [
             kCGImageSourceCreateThumbnailFromImageAlways: true,
             kCGImageSourceShouldCacheImmediately: true,

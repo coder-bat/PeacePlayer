@@ -2,7 +2,7 @@
 //  TurntableHomeModelTests.swift
 //  YTAudioPlayerTests
 //
-//  The crate's sleeve list and the RPM switch's rate mapping.
+//  The crate's sleeve list and the crate's grid geometry.
 //
 //  The sleeve list matters because the crate is the Home screen's
 //  only browse surface now: a duplicate sleeve would show the same
@@ -48,19 +48,12 @@ final class TurntableHomeModelTests: XCTestCase {
         XCTAssertEqual(first.map(\.videoId), second.map(\.videoId))
     }
 
-    func testPlaybackRateForRPM() {
-        XCTAssertEqual(TurntableHomeModel.playbackRate(forRPM: false), 1.0, accuracy: 0.001)
-        XCTAssertEqual(TurntableHomeModel.playbackRate(forRPM: true), 1.25, accuracy: 0.001)
-    }
-
-    func testPlaybackRateStaysInsidePlayerStateAllowedRange() {
-        // PlayerState.setPlaybackRate rejects anything outside 0.5...3.0.
-        // The 45 RPM chip must not silently no-op.
-        for is45 in [false, true] {
-            let rate = TurntableHomeModel.playbackRate(forRPM: is45)
-            XCTAssertTrue((0.5...3.0).contains(rate),
-                          "Rate \(rate) would be rejected by setPlaybackRate")
-        }
+    func testCrateHoldsThreeRowsOfSleeves() {
+        // The crate shows five sleeves across and three rows deep, so
+        // the first screenful holds fifteen records.
+        XCTAssertEqual(CrateGrid.columnCount, 5)
+        XCTAssertEqual(CrateGrid.visibleRows, 3)
+        XCTAssertGreaterThanOrEqual(CrateGrid.columnCount * CrateGrid.visibleRows, 15)
     }
 
     private func makeTrack(id: String, title: String) -> Track {

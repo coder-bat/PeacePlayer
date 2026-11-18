@@ -8,21 +8,26 @@
 //
 //    1. Machined rim    - the aluminium edge of the platter
 //    2. Felt mat        - deep green, the record sits on it
-//    3. Groove surface  - the generated macro photograph of vinyl
-//                         grooves, clipped to a circle
-//    4. Groove rings    - concentric specular lines drawn on top so
-//                         the surface still reads as vinyl when the
-//                         texture is compressed on a small screen
-//    5. Specular sheen  - a soft off-centre highlight that catches the
-//                         light as the record turns
-//    6. Centre label    - the album art on a paper label, with the
-//                         label's own curved type ring
-//    7. Spindle         - the metal pin with a lit centre
+//    3. The record face - a PICTURE DISC: the album art fills the
+//                         whole 12", the way a custom-printed record
+//                         does. Groove arcs, a vignette and a specular
+//                         sheen are laid OVER the artwork so it still
+//                         reads as pressed vinyl rather than a photo
+//                         pasted on a circle. With no artwork the face
+//                         falls back to black vinyl with a cream
+//                         centre label.
+//    4. Spindle         - the metal pin with a lit centre
 //
 //  Rotation is a PURE FUNCTION of playback progress. There is no
 //  independent animation clock and no CADisplayLink: the record turns
 //  exactly once per track and stops dead the instant playback pauses.
 //  That is what keeps the deck visually honest against the audio.
+//
+//  Changing track flips the record face in 3D: the outgoing artwork
+//  rotates away around the vertical axis while the incoming artwork
+//  rotates in. That is the "cueing a new record" moment, and it gives
+//  the eye something to follow when a track changes from the crate or
+//  from the queue.
 //
 //  The progress source is `PlayerState.playbackClock.progress`, NOT
 //  `PlayerState.progress` — the latter is a legacy @Published mirror
@@ -58,10 +63,16 @@ enum PlatterGeometry {
 
 struct PlatterView: View {
     let artworkURL: URL?
+    /// Identity of the track on the record.
+    ///
+    /// The flip is keyed on the TRACK, not the artwork URL: two
+    /// consecutive tracks can share the same cover, and the record
+    /// still has to flip when the song changes.
+    let trackIdentity: String
     let isPlaying: Bool
     let progress: Double
     let reduceMotion: Bool
-    var onTapSpindle: () -> Void
+    var onTapPlatter: () -> Void
     var onLongPress: () -> Void
 
     /// The platter's outer diameter. Every other dimension below is
@@ -71,11 +82,21 @@ struct PlatterView: View {
     /// The record's diameter — smaller than the platter, so a ring of
     /// felt shows around it. A record that fills the platter edge to
     /// edge does not read as a record on a turntable.
-    static let recordDiameter: CGFloat = 276
+    static let recordDiameter: CGFloat = 288
 
     /// The paper label's diameter — about a third of the record, the
-    /// way a real 12" label sits on a 12" record.
+    /// way a real 12" label sits on a 12" record. Used only by the
+    /// blank (no artwork) fallback.
     static let labelDiameter: CGFloat = 96
+
+    /// The artwork currently on the record face.
+    @State private var displayedArt: URL?
+    /// The artwork that is flipping away.
+    @State private var outgoingArt: URL?
+    /// 0 = edge-on, 1 = flat. Drives the 3D flip.
+    @State private var flipProgress: Double = 1
+    /// The track the record is currently showing.
+    @State private var displayedTrack: String = ""
 
     var body: some View {
         ZStack {
@@ -118,20 +139,45 @@ struct PlatterView: View {
                 // spills over the mat as a square of green felt.
                 .clipShape(Circle())
 
-            // 3 + 4 + 5. The record.
-            record
+            // 3. The record face.
+            recordFace
                 .frame(width: Self.recordDiameter, height: Self.recordDiameter)
 
-            // 6. Centre label.
-            labelArtwork
+            // 3b. The specular sheen. It is NOT inside the rotating
+            // face: the highlight belongs to the room, so it stays
+            // still while the record turns under it. Drawing it inside
+            // the rotation is the classic tell of a fake record.
+            sheen
+                .frame(width: Self.recordDiameter, height: Self.recordDiameter)
 
-            // 7. Spindle.
+            // 4. Spindle.
             spindle
         }
         .frame(width: Self.diameter, height: Self.diameter)
+        .overlay(strobeDots)
         .contentShape(Circle())
-        .onTapGesture { onTapSpindle() }
+        .onTapGesture { onTapPlatter() }
         .onLongPressGesture(minimumDuration: 0.5) { onLongPress() }
+        .onAppear {
+            displayedArt = artworkURL
+            displayedTrack = trackIdentity
+        }
+        .onChange(of: trackIdentity) { _, newValue in
+            guard newValue != displayedTrack else { return }
+            displayedTrack = newValue
+            if reduceMotion {
+                displayedArt = artworkURL
+                outgoingArt = nil
+                flipProgress = 1
+                return
+            }
+            outgoingArt = displayedArt
+            displayedArt = artworkURL
+            flipProgress = 0
+            withAnimation(.spring(response: 0.55, dampingFraction: 0.78)) {
+                flipProgress = 1
+            }
+        }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Record")
         .accessibilityValue(
@@ -140,48 +186,149 @@ struct PlatterView: View {
         .accessibilityAddTraits(.isButton)
     }
 
-    // MARK: - Record
+    // MARK: - Record face
 
-    private var record: some View {
-        Circle()
-            .fill(TurntableTokens.vinyl)
-            .overlay(
-                Image(TurntableTexture.vinylGrooves)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .rotationEffect(.degrees(rotationDegrees))
-                    // The generated macro photograph is a bright, silvery
-                    // anisotropic sheen. Multiply it down so it reads as
-                    // black vinyl catching a light rather than as
-                    // brushed aluminium.
-                    .colorMultiply(Color(red: 0.30, green: 0.29, blue: 0.33))
-            )
-            .overlay(grooveRings)
-            .overlay(
-                // Specular sheen — off-centre highlight.
-                RadialGradient(
-                    colors: [
-                        .white.opacity(0.16),
-                        .white.opacity(0.04),
-                        .clear
-                    ],
-                    center: UnitPoint(x: 0.30, y: 0.22),
-                    startRadius: 0,
-                    endRadius: 220
-                )
-                .blendMode(.screen)
-                .allowsHitTesting(false)
-            )
-            .overlay(
-                // Inner shadow at the record's edge so it sits on the
-                // felt rather than floating on it.
-                Circle()
-                    .strokeBorder(.black.opacity(0.5), lineWidth: 10)
-                    .blur(radius: 7)
-                    .padding(-4)
+    /// The picture disc: the artwork fills the record, and everything
+    /// that makes it read as vinyl is layered on top of it.
+    private var recordFace: some View {
+        ZStack {
+            // The vinyl body. It shows through around the artwork's
+            // edges while the face is mid-flip, and it IS the record
+            // when there is no artwork at all.
+            Circle()
+                .fill(TurntableTokens.vinyl)
+
+            if let outgoingArt, flipProgress < 1 {
+                artworkFace(url: outgoingArt)
+                    .rotation3DEffect(
+                        .degrees(-90 * flipProgress),
+                        axis: (x: 0, y: 1, z: 0),
+                        perspective: 0.55
+                    )
+                    .opacity(1 - flipProgress)
                     .allowsHitTesting(false)
+            }
+
+            if let displayedArt {
+                artworkFace(url: displayedArt)
+                    .rotation3DEffect(
+                        .degrees(90 - 90 * flipProgress),
+                        axis: (x: 0, y: 1, z: 0),
+                        perspective: 0.55
+                    )
+                    .opacity(flipProgress)
+                    .allowsHitTesting(false)
+            } else {
+                blankLabel
+                    .opacity(flipProgress)
+                    .allowsHitTesting(false)
+            }
+
+            // Groove arcs, laid over the artwork so a picture disc
+            // still reads as pressed vinyl.
+            grooveRings
+                .opacity(displayedArt == nil ? 1 : 0.85)
+
+            // Edge vignette — the record is darker at the rim where
+            // the light falls off.
+            RadialGradient(
+                colors: [
+                    .clear,
+                    .clear,
+                    .black.opacity(0.32)
+                ],
+                center: .center,
+                startRadius: 0,
+                endRadius: Self.recordDiameter / 2
             )
-            .clipShape(Circle())
+            .allowsHitTesting(false)
+
+            // Inner shadow at the record's edge so it sits on the
+            // felt rather than floating on it.
+            Circle()
+                .strokeBorder(.black.opacity(0.5), lineWidth: 10)
+                .blur(radius: 7)
+                .padding(-4)
+                .allowsHitTesting(false)
+        }
+        .clipShape(Circle())
+        .rotationEffect(.degrees(rotationDegrees))
+    }
+
+    /// The specular highlight. It is drawn OUTSIDE the record's
+    /// rotation, so the record turns under a fixed light — the way a
+    /// record on a real deck catches the room lamp.
+    private var sheen: some View {
+        ZStack {
+            RadialGradient(
+                colors: [
+                    .white.opacity(0.18),
+                    .white.opacity(0.05),
+                    .clear
+                ],
+                center: UnitPoint(x: 0.30, y: 0.22),
+                startRadius: 0,
+                endRadius: 190
+            )
+            .blendMode(.screen)
+
+            // A second, cooler highlight from the lower right.
+            RadialGradient(
+                colors: [
+                    TurntableTokens.fillLight.opacity(0.10),
+                    .clear
+                ],
+                center: UnitPoint(x: 0.74, y: 0.78),
+                startRadius: 0,
+                endRadius: 150
+            )
+            .blendMode(.screen)
+        }
+        .clipShape(Circle())
+        .allowsHitTesting(false)
+    }
+
+    /// The strobe dots on the platter's rim.
+    ///
+    /// A row of small dots around the rim that appear to stand still
+    /// when the platter is at the right speed. It is the cheapest
+    /// possible proof that the deck is a real instrument.
+    private var strobeDots: some View {
+        GeometryReader { geo in
+            let radius = geo.size.width / 2 - 2.5
+            ZStack {
+                ForEach(0..<24, id: \.self) { index in
+                    let angle = Double(index) / 24.0 * 2 * .pi
+                    Circle()
+                        .fill(TurntableTokens.amberLamp.opacity(0.55))
+                        .frame(width: 3, height: 3)
+                        .shadow(color: TurntableTokens.amberLamp.opacity(0.5), radius: 2)
+                        .position(
+                            x: geo.size.width / 2 + radius * CGFloat(cos(angle)),
+                            y: geo.size.height / 2 + radius * CGFloat(sin(angle))
+                        )
+                }
+            }
+        }
+        .allowsHitTesting(false)
+    }
+
+    /// The artwork printed across the whole record.
+    private func artworkFace(url: URL) -> some View {
+        CachedAsyncImage(url: url) { image in
+            image
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+        } placeholder: {
+            // While the artwork loads the record shows plain vinyl, so
+            // the deck never flashes a grey square.
+            Circle().fill(TurntableTokens.vinyl)
+        }
+        .frame(width: Self.recordDiameter, height: Self.recordDiameter)
+        .clipped()
+        // Printed vinyl is ink on a black disc: knock the artwork down
+        // so the grooves and the sheen still read on top of it.
+        .colorMultiply(Color(red: 0.76, green: 0.75, blue: 0.80))
     }
 
     /// Concentric specular lines, drawn on top so the surface reads as
@@ -212,11 +359,14 @@ struct PlatterView: View {
         return PlatterGeometry.rotation(forProgress: progress)
     }
 
-    // MARK: - Label
+    // MARK: - Blank label
 
-    private var labelArtwork: some View {
+    /// Placeholder: an unprinted label with a magenta ring, so an
+    /// unloaded track still looks like a record with a blank label
+    /// rather than a grey square — and the record's centre does not
+    /// become a slab of neon.
+    private var blankLabel: some View {
         ZStack {
-            // Paper label disc, slightly proud of the record.
             Circle()
                 .fill(
                     RadialGradient(
@@ -228,9 +378,6 @@ struct PlatterView: View {
                 )
                 .frame(width: Self.labelDiameter, height: Self.labelDiameter)
                 .shadow(color: .black.opacity(0.55), radius: 6, y: 2)
-
-            // Album art, circular crop, on the label.
-            artworkDisc
 
             // Label type ring — the record's own typography, set on an
             // arc so it reads like a pressed paper label.
@@ -245,53 +392,17 @@ struct PlatterView: View {
             .frame(width: Self.labelDiameter, height: Self.labelDiameter)
             .allowsHitTesting(false)
         }
-        // The label spins with the record.
-        .rotationEffect(.degrees(rotationDegrees))
-    }
-
-    /// The artwork that sits on the paper label.
-    ///
-    /// The image loader is only built when there is a URL to load. A
-    /// `CachedAsyncImage` with a nil URL still owns `@State` and still
-    /// writes to it on appear, and SwiftUI's graph can release that
-    /// state twice when the platter is torn down — a crash that only
-    /// shows up offscreen, exactly where it is hardest to diagnose.
-    private var artworkDisc: some View {
-        Group {
-            if let artworkURL {
-                CachedAsyncImage(url: artworkURL) { image in
-                    image
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                } placeholder: {
-                    blankLabel
-                }
-            } else {
-                blankLabel
-            }
-        }
-        .frame(width: 62, height: 62)
-        .clipShape(Circle())
-        .overlay(Circle().strokeBorder(.black.opacity(0.25), lineWidth: 1))
-        .shadow(color: .black.opacity(0.35), radius: 3)
-    }
-
-    /// Placeholder: an unprinted label with a magenta ring, so an
-    /// unloaded track still looks like a record with a blank label
-    /// rather than a grey square — and the record's centre does not
-    /// become a slab of neon.
-    private var blankLabel: some View {
-        ZStack {
-            Circle().fill(TurntableTokens.walnut.opacity(0.22))
-            Circle().strokeBorder(Theme.cyberMagenta.opacity(0.5), lineWidth: 2)
-            Circle().fill(TurntableTokens.vinyl).frame(width: 22, height: 22)
-        }
     }
 
     // MARK: - Spindle
 
     private var spindle: some View {
         ZStack {
+            // The hole the record is pressed around.
+            Circle()
+                .fill(.black.opacity(0.85))
+                .frame(width: 11, height: 11)
+
             Circle()
                 .fill(
                     LinearGradient(
@@ -300,13 +411,13 @@ struct PlatterView: View {
                         endPoint: .bottomTrailing
                     )
                 )
-                .frame(width: 13, height: 13)
+                .frame(width: 10, height: 10)
                 .shadow(color: .black.opacity(0.6), radius: 2)
 
             Circle()
                 .fill(Theme.cyberCyan)
-                .frame(width: 5, height: 5)
-                .shadow(color: Theme.cyberCyan.opacity(0.9), radius: 5)
+                .frame(width: 4, height: 4)
+                .shadow(color: Theme.cyberCyan.opacity(0.9), radius: 4)
         }
     }
 }

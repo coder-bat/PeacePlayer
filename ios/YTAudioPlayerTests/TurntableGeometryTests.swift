@@ -57,7 +57,19 @@ final class TurntableGeometryTests: XCTestCase {
         let end = TonearmGeometry.angle(forProgress: 1)
         XCTAssertEqual(start, TonearmGeometry.startAngle, accuracy: 0.0001)
         XCTAssertEqual(end, TonearmGeometry.endAngle, accuracy: 0.0001)
-        XCTAssertGreaterThan(end, start, "Arm must sweep inward as the track plays")
+        // The pivot is on the back-RIGHT of the deck, so the arm
+        // sweeps anticlockwise (through 180°) as the stylus travels
+        // inward. The sweep itself is ~28 degrees, the same as a real
+        // arm's travel across a side.
+        XCTAssertLessThan(end, start, "Arm must sweep inward as the track plays")
+        XCTAssertEqual(start - end, 28.3 * .pi / 180, accuracy: 0.01)
+    }
+
+    func testArmPivotIsOnTheBackRightOfTheDeck() {
+        // Every real turntable mounts the arm on the right and the
+        // start/stop lever on the left. The deck follows suit.
+        XCTAssertGreaterThan(TonearmGeometry.pivotFraction.x, 0.5)
+        XCTAssertLessThan(TonearmGeometry.pivotFraction.y, 0.25)
     }
 
     func testArmAngleIsClampedOutsideZeroToOne() {
@@ -77,11 +89,12 @@ final class TurntableGeometryTests: XCTestCase {
 
     func testArmAngleIsMonotonicInProgress() {
         // The record must never turn backwards as progress advances.
+        // With the pivot on the right the arm's angle decreases.
         var previous = TonearmGeometry.angle(forProgress: 0)
         for step in 1...100 {
             let angle = TonearmGeometry.angle(forProgress: Double(step) / 100.0)
-            XCTAssertGreaterThanOrEqual(angle, previous,
-                                        "Arm angle went backwards at step \(step)")
+            XCTAssertLessThanOrEqual(angle, previous,
+                                     "Arm angle went backwards at step \(step)")
             previous = angle
         }
     }

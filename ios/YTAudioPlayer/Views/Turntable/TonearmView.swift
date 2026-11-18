@@ -10,10 +10,11 @@
 //  Dragging the arm therefore scrubs, and the arm's position is
 //  always an honest readout of where in the track we are.
 //
-//  The pivot assembly sits at the deck's back-LEFT corner — the
-//  back-right corner belongs to the cue lever — and the arm reaches
-//  across the record to the right-hand side, where the headshell
-//  travels down the grooves toward the label.
+//  The pivot assembly sits at the deck's back-RIGHT corner, the way
+//  it does on every real turntable (Technics SL-1200, Rega, Pro-Ject
+//  all mount the arm on the right and the start/stop lever on the
+//  left). The arm reaches across the record to the left-hand side,
+//  where the headshell travels down the grooves toward the label.
 //
 //  The stylus rides a circular arc about the pivot, exactly as a real
 //  arm does: the arm's length is fixed, so the stylus cannot travel
@@ -33,7 +34,10 @@ enum TonearmGeometry {
     static let nominalFrame: CGFloat = 320
 
     /// The pivot, as a fraction of the frame, measured from the top-left.
-    static let pivotFraction = CGPoint(x: 0.10625, y: 0.09375)
+    ///
+    /// Back-RIGHT: the arm assembly lives on the right of the platter
+    /// on a real deck, and the cue lever takes the left.
+    static let pivotFraction = CGPoint(x: 0.89375, y: 0.09375)
 
     /// The arm's length as a fraction of the frame.
     static let armLengthFraction: CGFloat = 0.671875
@@ -42,13 +46,18 @@ enum TonearmGeometry {
     ///
     /// Calibrated so the stylus lands ~130pt from the record's centre
     /// in a 320pt frame — just inside the record's 138pt edge.
-    static let startAngle: Double = 8.8 * .pi / 180
+    ///
+    /// The angles are measured from the +x axis. With the pivot on the
+    /// right the arm points leftwards, so the sweep runs backwards
+    /// through 180°: 171.2° at the outer groove down to 142.9° at the
+    /// label's edge.
+    static let startAngle: Double = 171.2 * .pi / 180
 
     /// Arm angle over the label's edge (the end of the track).
     ///
     /// Calibrated so the stylus lands ~45pt from the record's centre,
     /// which is the edge of the 96pt paper label.
-    static let endAngle: Double = 37.1 * .pi / 180
+    static let endAngle: Double = 142.9 * .pi / 180
 
     /// Arm angle for a given playback progress.
     static func angle(forProgress progress: Double) -> Double {

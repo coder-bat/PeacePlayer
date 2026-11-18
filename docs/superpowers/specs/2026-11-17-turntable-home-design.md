@@ -55,52 +55,59 @@ that already exists in `PlayerState`.
 ```
 ┌─────────────────────────────────┐
 │ FASCIA                          │  1
-│  ● ● ●   NIGHT   [33⅓]   ▮ ▮ ▮  │
+│  NIGHT ALEX        ▮ ▮ ▮ ▮ ▮    │  ← 5 links, top right
 ├─────────────────────────────────┤
+│ ● cue lever                      │  2
+│            ╱ TONEEARM ────────● │
+│           ╱                     │  3
+│      ( PICTURE DISC )           │  4
+│         ◉ spindle               │
 │                                 │
-│           ╱ TONEEARM  ───────● │  2 cue lever
-│          ╱                      │  3
-│      ( PLATTER )                │  4
-│         ◉ label                 │
-│                                 │
-│         ○ ○ ○   queue stack     │
-│  [A1][A2][A3][A4]  sleeve crate │  5
+│           ▁▃▅▂▇▃ VU strip      │  7
+│         ◎ ◎ ◎ ◎  queue shelf   │
+│  CRATE                           │  5
+│  [A1][A2][A3][A4][A5]           │
+│  [A6][A7][A8][A9][A10]          │
+│  [A11][A12][A13][A14][A15]     │
 │  ▬▬▬▬▬ rail                     │
-│  Midnight Signal      ▁▃▅▂▇▃    │  7 VU
 └─────────────────────────────────┘
 ```
 
 ### 4.1 Deck fascia (1)
 - Replaces `headerSection`. Brushed-metal strip, rounded, dark walnut gradient.
-- **Two rows.** The deck is 402pt wide; one row cannot hold the instruments, the
-  profile chip and five navigation chips without clipping, so:
-  - **Row 1 — instruments.** The profile chip (owned by `HomeView`, so the avatar
-    picker stays there) on the left; three indicator lamps (amber / cyan / magenta —
-    amber = power, cyan = connected, magenta = playing); the RPM chip on the right.
-  - **Row 2 — navigation and attention.** The existing 5 `CyberIconChip` destinations
-    (Time Capsule, Anti-Algorithm, Radio, Playlists, Settings) on the left, restyled
-    as square deck buttons; the two actionable lamps on the right.
-- **RPM chip** — `33⅓` / `45`, tappable. Maps to playback rate 1.0× / 1.25×
-  via `PlayerState.setPlaybackRate(_:)`.
+- **One row.** The profile chip (owned by `HomeView`, so the avatar picker stays
+  there) on the left; the existing 5 `CyberIconChip` destinations (Time Capsule,
+  Anti-Algorithm, Radio, Playlists, Settings) in the **top-right corner**, restyled
+  as square deck buttons.
+- **Revision (2026-11-18):** the RPM chip and the three indicator lamps were
+  removed — the record itself is the instrument, and a row of status dots above it
+  was chrome. The five links moved up into row 1, where the old Home put its nav
+  icons.
+- Each nav chip is a 30pt graphic inside a **44×44pt** touch target.
 - The two actionable lamps (Smart Library, scheduled cleanup) keep a full 44×44pt
-  touch target, which is why they get their own space on row 2 instead of being
-  squeezed into row 1.
+  touch target and appear on a second row **only** when there is something to act
+  on, so the strip normally stays a single row.
 - **These must keep working** — same `HomeDestination` navigation, no new routes.
 
 ### 4.2 Cue lever (2)
-- A vertical lever to the right of the platter.
+- A vertical lever to the **left** of the platter. (Revision 2026-11-18: the arm
+  moved to the back-right, so the lever took the left — the same arrangement as
+  a Technics SL-1200.)
 - **Lift = pause, drop = play.** Calls `PlayerState.shared.togglePlayPause()`.
 - Animation: lever rotates 14° on lift; the platter decelerates to a stop.
 - Must be a ≥44×44pt hit target even though the visible lever is ~10×46pt.
 
 ### 4.3 Tonearm (3)
-- Pivots from the deck's back-**left** corner — the back-right corner belongs to the
-  cue lever — and reaches across the record, with the headshell travelling down the
-  record's right-hand side.
+- Pivots from the deck's back-**right** corner and reaches across the record, with
+  the headshell travelling down the record's left-hand side. (Revision 2026-11-18:
+  the pivot moved from the back-left to the back-right after a reference review —
+  every real turntable mounts the arm on the right and the start/stop lever on the
+  left, and an arm on the left is the single most common tell of a fake deck.)
 - The arm is a rigid tube: the stylus rides a **circular arc about the pivot**, not a
-  straight line, exactly as on a real deck. The angles (8.8° at rest → 37.1° at the
-  end) are calibrated so the stylus starts on the outer groove and finishes at the
-  edge of the paper label; `TurntableGeometryTests` asserts both.
+  straight line, exactly as on a real deck. The angles (171.2° at rest → 142.9° at
+  the end, measured from the +x axis) are calibrated so the stylus starts on the
+  outer groove and finishes at the edge of the paper label; `TurntableGeometryTests`
+  asserts both.
 - **Drag to scrub.** The drag angle about the pivot maps to `0…1` progress; the seek is
   committed on release (`PlayerState.seek(to:)`).
 - **Haptic detent every 10%** — `HapticManager.selectionChanged()`, not `.light()`.
@@ -108,40 +115,54 @@ that already exists in `PlayerState`.
   distinct, and use `.light()` nowhere else.
 
 ### 4.4 Platter (4)
-- Built outside in: machined aluminium **rim** → **felt mat** → the **record** (the
-  generated vinyl macro photograph, multiplied down so it reads as black vinyl rather
-  than brushed metal) → concentric groove rings → a specular sheen that catches the
-  light as the record turns → the **centre label** → the lit cyan **spindle**.
-- The record is smaller than the platter, so a ring of green felt shows around it —
-  a record that fills the platter edge to edge does not read as a record.
-- The centre label is paper stock with the album art on it and the imprint
-  **"PEACEPLAYER" set on an arc**, the way a pressed label is.
-- **Label artwork = current track's album art** via the existing `CachedAsyncImage`.
+- Built outside in: machined aluminium **rim** (with 24 amber **strobe dots**) →
+  **felt mat** → the **record** → the lit cyan **spindle**.
+- **The record is a picture disc** (revision 2026-11-18): the album art fills the
+  whole 12", the way a custom-printed record does, instead of sitting as a small
+  circle on a cream label. Groove arcs, an edge vignette and a specular sheen are
+  laid OVER the artwork so it still reads as pressed vinyl rather than a photo
+  pasted on a circle. With no artwork the face falls back to black vinyl with the
+  cream **"PEACEPLAYER"** label.
+- The **sheen does not rotate with the record** — the highlight belongs to the
+  room, so the record turns under a fixed light.
+- The record is 288pt against a 320pt platter (0.9×), so a thin ring of green felt
+  shows around it.
+- **Artwork = current track's album art** via the existing `CachedAsyncImage`.
 - **Rotation = playback.** `progress` drives rotation so the record turns exactly
   once per track; when paused it holds still; when idle it is blank.
-- Tap the spindle → toggle 33/45.
+- **Track change flips the face in 3D** (revision 2026-11-18): the outgoing
+  artwork rotates away around the vertical axis while the incoming artwork rotates
+  in. The flip is keyed on the **track**, not the artwork URL — two consecutive
+  tracks can share a cover and the record still has to flip.
+- Tap the platter → open the full player (`PlayerState.showFullPlayer = true`).
 - Long-press the platter → open the queue stack (existing `showQueue` / `DownloadQueueView`).
 
 ### 4.5 Sleeve crate (5)
-- Horizontal row of album-art sleeves (64pt) for favourite-artist suggestions.
-- **Drag a sleeve up onto the platter to play it.** This is the primary
-  "browse → play" gesture and replaces the "FOR YOU" track list.
-- Tapping a sleeve plays it directly (accessibility fallback for the drag).
-- Drag threshold uses `DragGesture` with a translation check — no long-press needed.
+- **Three rows** of album-art sleeves (64pt, five across) for favourite-artist
+  suggestions (revision 2026-11-18: a single row read as a shelf, not a crate).
+- The rows live in one vertical scroll, so the deck stays one screen tall: three
+  rows at a time, and you flip down through the rest the way you would work
+  through a bin of records.
+- The grid is centred — each sleeve is centred in its cell.
+- Tapping a sleeve plays it; long-press offers "Add to queue".
 
-### 4.6 Queue stack
-- Three mini discs under the platter, coloured by the magenta / cyan / amber palette.
-- Shows queue depth. Long-press on the platter reveals it; tapping a disc jumps to it.
-- Hidden entirely when the queue is empty.
+### 4.6 Queue shelf
+- A horizontal shelf of up to **12 mini picture discs** under the platter
+  (revision 2026-11-18: was three plain discs; each is now a small record with the
+  track's album art printed across it, and the shelf holds twelve).
+- The current track's disc is ringed in cyan and sits slightly larger; the others
+  are dim vinyl.
+- Tapping a disc jumps to it. Hidden entirely when the queue is empty.
 
-### 4.7 Now-playing strip + VU meter (7)
-- Title + artist in the existing `Typography.playerTitle` / `playerArtist` tokens.
-- VU meter = live amplitude bars, reusing `NeuralFreqVisualizer`'s colour ramp
-  and bar logic.
-- **This strip replaces `MiniPlayer` on Home** (decided §7.1). `MiniPlayer` is
-  rendered by the global `BottomBar` in `ContentView`, so the hide has to happen
-  there — see §7.1 for the exact wiring.
-- Tapping the strip opens the full player (`PlayerState.showFullPlayer = true`).
+### 4.7 VU meter (7)
+- A slim peak-meter strip recessed into the plinth under the platter, reusing
+  `AudioVisualizerEngine`'s bands and `LevelMeterRow`'s bar logic.
+- **The now-playing strip was removed** (revision 2026-11-18) — it was a second
+  copy of what the record and the arm already say, and the user asked for the
+  bottom row of Home to go. The deck's now-playing surfaces are now: the artwork
+  on the record, the arm's position, and tap-the-platter → full player.
+- `MiniPlayer` is still hidden on Home (§7.1) — the deck replaced the strip's
+  role, so the global `BottomBar` must not also show it there.
 
 ## 5. Visual language
 
@@ -155,7 +176,7 @@ TurntableTokens
   aluminium   #C9C6BE   tonearm, pivot, deck buttons
   cream       #F3EDE0   label card, sleeve text
   felt        #2F4034   sleeve edge, crate interior
-  amberLamp   #F0A92B   active state, RPM chip, cue lever head
+  amberLamp   #F0A92B   active state, strobe dots, cue lever head
 ```
 
 Rule: **warm hardware tones carry the surface, cyan and magenta stay the only
@@ -175,8 +196,9 @@ IDLE ──play──▶ SPINNING ──pause──▶ PAUSED
   │               ▼                    │
   └─────────── SCRUB ──────────────────┘
 
-TAP SPINDLE:        SPINNING ⇄ 45 RPM (rate 1.0 ↔ 1.25)
+TAP PLATTER:        → FULL PLAYER
 LONG-PRESS PLATTER: → QUEUE STACK overlay
+TRACK CHANGE:       → 3D FACE FLIP (new artwork rotates in)
 ```
 
 Rotation is a pure function of `PlayerState.progress`; there is no independent
@@ -207,7 +229,7 @@ Hiding it on Home therefore has to be done at that level, not in `HomeView`:
 already has that branch for the "nothing playing" case, so the work is to reuse it.
 
 `MiniPlayer` also owns the swipe-to-collapse gesture and the full-player expansion.
-On Home the deck strip replaces that role: tapping the strip opens the full player
+On Home the deck replaces that role: tapping the **platter** opens the full player
 (`PlayerState.showFullPlayer = true`), and the deck's own transport controls
 (tonearm, cue lever) replace the mini player's buttons.
 
