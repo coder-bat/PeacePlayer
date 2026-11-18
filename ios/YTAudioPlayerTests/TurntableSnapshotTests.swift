@@ -211,10 +211,6 @@ final class TurntableSnapshotTests: XCTestCase {
     @MainActor
     func testRenderCrateGrid() throws {
         let crate = VStack(alignment: .leading, spacing: 8) {
-            Text("CRATE")
-                .font(Typography.eyebrow)
-                .foregroundColor(TurntableTokens.aluminium.opacity(0.7))
-
             CrateShelf(
                 sleeves: (0..<18).map {
                     Self.makeTrack(id: "crate-\($0)", title: "Track \($0)", artist: "Artist", artIndex: $0)
@@ -364,24 +360,18 @@ final class TurntableSnapshotTests: XCTestCase {
         )
     }
 
-    /// The crate as the user sees it: the label plus the first three
-    /// rows of the grid (the scrolling crate itself cannot be drawn by
-    /// the offscreen renderer).
+    /// The crate as the user sees it: the first three rows of the grid
+    /// (the scrolling crate itself cannot be drawn by the offscreen
+    /// renderer).
     @MainActor
     private var deckCrateVisible: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("CRATE")
-                .font(Typography.eyebrow)
-                .foregroundColor(TurntableTokens.aluminium.opacity(0.7))
-
-            CrateShelf(
-                sleeves: (0..<12).map {
-                    Self.makeTrack(id: "crate-\($0)", title: "Track \($0)", artist: "Artist", artIndex: $0)
-                },
-                onPlay: { _ in },
-                onQueue: { _ in }
-            )
-        }
+        CrateShelf(
+            sleeves: (0..<12).map {
+                Self.makeTrack(id: "crate-\($0)", title: "Track \($0)", artist: "Artist", artIndex: $0)
+            },
+            onPlay: { _ in },
+            onQueue: { _ in }
+        )
     }
 
     // MARK: - Helpers
