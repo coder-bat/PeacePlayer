@@ -190,6 +190,7 @@
 		D7127171F42347F38637528D /* OrbitalMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EA1D4C4CDD63B8286AFF416 /* OrbitalMenu.swift */; };
 		D9292EC18006F16F7C606D8D /* StreamInfoTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 437D9F674B858F98F1E5CE47 /* StreamInfoTests.swift */; };
 		DA380E94A24A6E6D34BAE339 /* DeepLinkIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5A04DBDA0BBC9882EB5B650 /* DeepLinkIndex.swift */; };
+		DECFD79DA2F441F1B38998F1 /* TurntableDeckQueueTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDE8FA3A56259867BA57BCF7 /* TurntableDeckQueueTests.swift */; };
 		E06930EDFBFCCD1AAFC5CA26 /* ResumeWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56CE1E3E13C142FD71EAE1CE /* ResumeWidget.swift */; };
 		E37768AADD792EE56D267B89 /* DebugOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8A3EC973B62ECA4F3E1F889 /* DebugOverlay.swift */; };
 		E4A057D3EE2614044B6A02BB /* RadioView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BED7A5996ADE9C070ADDB77E /* RadioView.swift */; };
@@ -444,6 +445,7 @@
 		DD1CDA2632A97CF4AA80E901 /* CDUserStats.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CDUserStats.swift; sourceTree = "<group>"; };
 		DD294748DED4ED3AD0D85677 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		DDBEFAC6083380091688C4A7 /* PlaybackQueueManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackQueueManager.swift; sourceTree = "<group>"; };
+		DDE8FA3A56259867BA57BCF7 /* TurntableDeckQueueTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurntableDeckQueueTests.swift; sourceTree = "<group>"; };
 		E11855B2FBA83953239DBFCC /* FeatureFlags.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeatureFlags.swift; sourceTree = "<group>"; };
 		E573FA0E404DC92944C06F18 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		E5A04DBDA0BBC9882EB5B650 /* DeepLinkIndex.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeepLinkIndex.swift; sourceTree = "<group>"; };
@@ -823,6 +825,7 @@
 				437D9F674B858F98F1E5CE47 /* StreamInfoTests.swift */,
 				6C152C0744206B1295B5B542 /* SyncIntegrationTests.swift */,
 				57CABD88998B1AE76F729843 /* SyncMergeTests.swift */,
+				DDE8FA3A56259867BA57BCF7 /* TurntableDeckQueueTests.swift */,
 				387ADE9CBE816B371F316706 /* TurntableGeometryTests.swift */,
 				17672ED78AF66972BC486DAB /* TurntableHomeModelTests.swift */,
 				90ABF327E9E9FB343038AC33 /* TurntableRotationTests.swift */,
@@ -1202,6 +1205,7 @@
 				D9292EC18006F16F7C606D8D /* StreamInfoTests.swift in Sources */,
 				80FF6BE2341A8C9DBF8EFE83 /* SyncIntegrationTests.swift in Sources */,
 				8262656CA1AFCD19BDF117CB /* SyncMergeTests.swift in Sources */,
+				DECFD79DA2F441F1B38998F1 /* TurntableDeckQueueTests.swift in Sources */,
 				C7F23D1098E9931FF1481EFE /* TurntableGeometryTests.swift in Sources */,
 				B7AA7DCE02B94BB0FC6E2743 /* TurntableHomeModelTests.swift in Sources */,
 				AD8324D9C45E32B947B3B802 /* TurntableRotationTests.swift in Sources */,
