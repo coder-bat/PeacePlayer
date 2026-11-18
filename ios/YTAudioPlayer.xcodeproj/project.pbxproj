@@ -151,6 +151,7 @@
 		AC30D021A828DC129499800D /* SleepTimerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 791B0D8E28834A5D34E9FA93 /* SleepTimerView.swift */; };
 		AD17B320A9303F57026099C7 /* SharedArtworkCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95FF18F20CBA21FA9070F595 /* SharedArtworkCache.swift */; };
 		AD268BEDECBAD8B85A77F81C /* LibraryTierBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31ED7C44104855658FDE76D2 /* LibraryTierBadge.swift */; };
+		AD8324D9C45E32B947B3B802 /* TurntableRotationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90ABF327E9E9FB343038AC33 /* TurntableRotationTests.swift */; };
 		AE10E8C030AFB8AB3F604D0D /* Snapshotable.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6D03E458F502F0ACF01C0B2 /* Snapshotable.swift */; };
 		B2E798633D3FE21CFA1B4EA7 /* SharedNowPlayingState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39607B6AF4B8C14661E4BD57 /* SharedNowPlayingState.swift */; };
 		B5A9F19389EDBC0B9918E9F3 /* PlaylistsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CAC504FA4E7BBC2BDCEBC5BD /* PlaylistsView.swift */; };
@@ -363,6 +364,7 @@
 		8CD2972C7769BDB5C6FFD707 /* DeepLinkIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeepLinkIntent.swift; sourceTree = "<group>"; };
 		8F0E8EAC13265471D606018E /* LocalFirstQueueItemTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalFirstQueueItemTests.swift; sourceTree = "<group>"; };
 		8FF9BD2E2E807AAF53D58A65 /* CleanupReviewSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CleanupReviewSheet.swift; sourceTree = "<group>"; };
+		90ABF327E9E9FB343038AC33 /* TurntableRotationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurntableRotationTests.swift; sourceTree = "<group>"; };
 		92383E8A72B74896B1FE7BAC /* QRCodeGenerator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QRCodeGenerator.swift; sourceTree = "<group>"; };
 		92F678B243A3E9D1A9E2BBA5 /* VinylRecordView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VinylRecordView.swift; sourceTree = "<group>"; };
 		939FE198F03898EA673D0821 /* AVPlayerController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AVPlayerController.swift; sourceTree = "<group>"; };
@@ -817,6 +819,7 @@
 				57CABD88998B1AE76F729843 /* SyncMergeTests.swift */,
 				387ADE9CBE816B371F316706 /* TurntableGeometryTests.swift */,
 				17672ED78AF66972BC486DAB /* TurntableHomeModelTests.swift */,
+				90ABF327E9E9FB343038AC33 /* TurntableRotationTests.swift */,
 				0B76C8D0AB363A480871DC1E /* TurntableSnapshotTests.swift */,
 				61E2A8F29F8FB683D98570A6 /* TurntableTokensTests.swift */,
 				C252F1F5C0F2736B511E4415 /* TurntableWiringTests.swift */,
@@ -1193,6 +1196,7 @@
 				8262656CA1AFCD19BDF117CB /* SyncMergeTests.swift in Sources */,
 				C7F23D1098E9931FF1481EFE /* TurntableGeometryTests.swift in Sources */,
 				B7AA7DCE02B94BB0FC6E2743 /* TurntableHomeModelTests.swift in Sources */,
+				AD8324D9C45E32B947B3B802 /* TurntableRotationTests.swift in Sources */,
 				FB2B8D22E9B82A68EE42889E /* TurntableSnapshotTests.swift in Sources */,
 				AA9615FED1DC72CD32BD4096 /* TurntableTokensTests.swift in Sources */,
 				A55BA37C68C31B284CBE212B /* TurntableWiringTests.swift in Sources */,

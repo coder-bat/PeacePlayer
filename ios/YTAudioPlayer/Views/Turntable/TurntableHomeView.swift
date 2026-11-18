@@ -127,14 +127,7 @@ struct TurntableHomeView: View {
         if isScrubbing { return scrubProgress }
         let clock = playerState.playbackClock
         guard playerState.isTransportRunning else { return clock.progress }
-
-        let elapsed = date.timeIntervalSince(clock.lastUpdateDate)
-        guard elapsed > 0, elapsed < 2 else { return clock.progress }
-
-        let projected = clock.currentTime + elapsed * Double(clock.rate)
-        let duration = clock.duration > 0 ? clock.duration : clock.expectedDuration
-        guard duration > 0 else { return clock.progress }
-        return min(1, max(0, projected / duration))
+        return clock.projectedProgress(at: date)
     }
 
     var body: some View {

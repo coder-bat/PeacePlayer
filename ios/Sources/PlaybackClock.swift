@@ -108,4 +108,25 @@ final class PlaybackClock: ObservableObject {
             rate = value
         }
     }
+
+    /// The position in the track, projected forward to `date`.
+    ///
+    /// The clock only ticks once a second, so a view that draws
+    /// straight from `progress` moves in one-second jumps — a record
+    /// that "turns" in visible bursts. Projecting the last known
+    /// position forward by the wall-clock time since the last tick
+    /// makes the motion continuous at any sampling rate, while the
+    /// value still comes from the player's own position in the track.
+    ///
+    /// The projection is only trusted for a short window (2 seconds):
+    /// after that the clock is stale and its own value is safer.
+    func projectedProgress(at date: Date) -> Double {
+        let elapsed = date.timeIntervalSince(lastUpdateDate)
+        guard elapsed > 0, elapsed < 2 else { return progress }
+
+        let projected = currentTime + elapsed * Double(rate)
+        let total = duration > 0 ? duration : expectedDuration
+        guard total > 0 else { return progress }
+        return min(1, max(0, projected / total))
+    }
 }
