@@ -32,6 +32,14 @@ final class WalkDJAppDelegate: NSObject, UIApplicationDelegate, UIWindowSceneDel
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
+        // UI tests run on a phone that auto-locks after half a minute
+        // of no interaction, and a locked phone cannot launch the test
+        // runner. The test launch argument keeps the screen awake for
+        // the length of the run (2026-11-18).
+        if ProcessInfo.processInfo.arguments.contains("-ui_test_keep_awake") {
+            application.isIdleTimerDisabled = true
+        }
+
         guard !YTAudioPlayerApp.isRunningTests else { return true }
         UNUserNotificationCenter.current().delegate = self
         AdaptiveWalkDJManager.shared.configure()

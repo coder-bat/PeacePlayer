@@ -34,7 +34,7 @@ final class TurntableDeckUITests: XCTestCase {
         continueAfterFailure = false
 
         app = XCUIApplication()
-        app.launchArguments = ["-ff_turntable_home", "YES"]
+        app.launchArguments = ["-ff_turntable_home", "YES", "-ui_test_keep_awake"]
         app.launch()
     }
 
