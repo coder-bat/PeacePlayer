@@ -26,7 +26,11 @@ class ImageCache {
     // the preloads complete. Previously they piled up in `cancellables`
     // forever.
     private var preloadCancellables = Set<AnyCancellable>()
-    private var activeDownloads: [URL: AnyCancellable] = [:]
+    private var activeDownloads: [URL: AnyPublisher<UIImage?, Never>] = [:]
+    /// Keeps each shared download alive so it actually runs. The
+    /// publisher itself is handed to the caller, but the download is
+    /// started by this internal subscription.
+    private var downloadKeepAlive: [URL: AnyCancellable] = [:]
     /// Guards `activeDownloads`.
     ///
     /// The publisher body runs on a background queue (`.subscribe(on:)`)
@@ -147,46 +151,74 @@ class ImageCache {
             // The check and the insert happen under one lock, so the
             // dictionary is never mutated concurrently and two threads
             // cannot both start a download for the same URL.
-            let download = URLSession.shared.dataTaskPublisher(for: url)
-                .map { [weak self] output -> UIImage? in
-                    // S17-G (perf 10 P0-F6): decode + downsample to
-                    // 1024px instead of full-resolution UIImage(data:).
-                    // See `decodedImage` for the rationale.
-                    self?.decodedImage(data: output.data)
-                }
-                .catch { _ in Just(nil) }
-                // S15: keep the download pipeline off main.
-                // Decoding + caching + disk save all happen on
-                // URLSession's background queue now; only the
-                // final delivery to subscribers hops to main.
-                .handleEvents(receiveOutput: { [weak self] image in
-                    guard let self = self, let image = image else { return }
-
-                    // Store in memory cache
-                    self.memoryCache.setObject(image, forKey: key, cost: image.cacheCost)
-
-                    // Store in disk cache on a background queue
-                    // (JPEG encoding + file write can stall).
-                    DispatchQueue.global(qos: .utility).async {
-                        self.saveToDisk(image: image, key: key)
-                    }
-
-                    // Remove from active downloads
-                    self.downloadsLock.lock()
-                    self.activeDownloads.removeValue(forKey: url)
-                    self.downloadsLock.unlock()
-                })
-                .share()
-                .eraseToAnyPublisher()
+            //
+            // The shared publisher is returned to the CALLER as well as
+            // being kept alive internally. It used to hand back
+            // `Just(nil)` — a placeholder — while the download ran in
+            // the background, so the view that asked for the artwork
+            // never received it: covers stayed on their placeholder
+            // until something else re-rendered the row and the memory
+            // cache happened to have the image by then. That was the
+            // "thumbnails glitch and never load" bug (2026-11-18).
+            let publisher: AnyPublisher<UIImage?, Never>
 
             downloadsLock.lock()
-            if activeDownloads[url] == nil {
-                activeDownloads[url] = download.sink { _ in }
+            if let existing = activeDownloads[url] {
+                publisher = existing
+            } else {
+                let shared = URLSession.shared.dataTaskPublisher(for: url)
+                    .map { [weak self] output -> UIImage? in
+                        // S17-G (perf 10 P0-F6): decode + downsample to
+                        // 1024px instead of full-resolution UIImage(data:).
+                        // See `decodedImage` for the rationale.
+                        self?.decodedImage(data: output.data)
+                    }
+                    .catch { _ in Just(nil) }
+                    // S15: keep the download pipeline off main.
+                    // Decoding + caching + disk save all happen on
+                    // URLSession's background queue now; only the
+                    // final delivery to subscribers hops to main.
+                    .handleEvents(receiveOutput: { [weak self] image in
+                        guard let self = self, let image = image else { return }
+
+                        // Store in memory cache
+                        self.memoryCache.setObject(image, forKey: key, cost: image.cacheCost)
+
+                        // Store in disk cache on a background queue
+                        // (JPEG encoding + file write can stall).
+                        DispatchQueue.global(qos: .utility).async {
+                            self.saveToDisk(image: image, key: key)
+                        }
+                    }, receiveCompletion: { [weak self] _ in
+                        // The download is done: drop it from the shared
+                        // table so a later request starts a fresh one
+                        // (the memory cache serves it in the meantime).
+                        guard let self = self else { return }
+                        self.downloadsLock.lock()
+                        self.activeDownloads.removeValue(forKey: url)
+                        self.downloadsLock.unlock()
+                        // Release the keep-alive subscription on the
+                        // next turn — cancelling it inside its own
+                        // completion handler is not safe.
+                        DispatchQueue.main.async {
+                            self.downloadsLock.lock()
+                            self.downloadKeepAlive.removeValue(forKey: url)
+                            self.downloadsLock.unlock()
+                        }
+                    })
+                    .share()
+                    .eraseToAnyPublisher()
+
+                activeDownloads[url] = shared
+                // The internal subscription is what actually starts the
+                // download; the caller gets the same shared publisher.
+                downloadKeepAlive[url] = shared.sink { _ in }
+                publisher = shared
             }
             downloadsLock.unlock()
 
-            // Return placeholder while loading
-            return Just(nil).eraseToAnyPublisher()
+            // Deliver the image when it arrives.
+            return publisher
         }
         .subscribe(on: DispatchQueue.global(qos: .userInitiated))
         .receive(on: DispatchQueue.main)
@@ -385,7 +417,8 @@ class ImageCache {
         
         // Cancel pending downloads
         downloadsLock.lock()
-        activeDownloads.values.forEach { $0.cancel() }
+        downloadKeepAlive.values.forEach { $0.cancel() }
+        downloadKeepAlive.removeAll()
         activeDownloads.removeAll()
         downloadsLock.unlock()
         

@@ -81,6 +81,8 @@ enum CrateGrid {
     /// air under it or the crate reads as one crowded shelf
     /// (revision 2026-11-18).
     static let rowSpacing: CGFloat = 20
+    /// How far the rail reaches past the sleeves standing on it.
+    static let railOverhang: CGFloat = 6
     /// How many sleeves fit across the deck.
     static let columnCount: Int = 5
     /// How many rows the crate shows at once.
@@ -146,6 +148,12 @@ struct CrateRow: View {
 
             // The rail the row stands on — walnut, catching the key
             // light along its top edge.
+            //
+            // The rail is as wide as the sleeves standing on it (plus a
+            // little overhang), not the full width of the deck: a
+            // divider that runs past the records makes the crate read
+            // as one long shelf instead of a row of records
+            // (revision 2026-11-18).
             Rectangle()
                 .fill(
                     LinearGradient(
@@ -157,7 +165,7 @@ struct CrateRow: View {
                         endPoint: .bottom
                     )
                 )
-                .frame(height: CrateGrid.railHeight)
+                .frame(width: railWidth, height: CrateGrid.railHeight)
                 .overlay(
                     Rectangle()
                         .fill(TurntableTokens.keyLight.opacity(0.18))
@@ -166,7 +174,16 @@ struct CrateRow: View {
                 )
                 .clipShape(RoundedRectangle(cornerRadius: 2))
                 .padding(.top, CrateGrid.railGap)
+                .frame(maxWidth: .infinity, alignment: .center)
         }
+    }
+
+    /// How wide the rail is: the width of the sleeves in this row plus
+    /// a small overhang at each end.
+    private var railWidth: CGFloat {
+        let gaps = CGFloat(max(0, sleeves.count - 1)) * CrateGrid.spacing
+        let sleeves = CGFloat(sleeves.count) * CrateGrid.sleeveSize
+        return sleeves + gaps + CrateGrid.railOverhang * 2
     }
 }
 

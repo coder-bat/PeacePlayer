@@ -88,12 +88,33 @@ struct TurntableHomeView: View {
     @ObservedObject var favoriteArtists: FavoriteArtistsManager
     @ObservedObject var playerState: PlayerState
 
+    /// The queue lives in its own observable so queue mutations do not
+    /// re-render every PlayerState observer.
+    ///
+    /// The deck HAS to follow it: it shows the record that is playing
+    /// and the queue of records coming up, and both change when
+    /// playback starts somewhere else (the Library tab, a shortcut,
+    /// the notification). Watching only `playerState` left the deck
+    /// showing the old song and an empty shelf (2026-11-18).
+    @ObservedObject var queueStore: QueueStore
+
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var isScrubbing = false
     @State private var scrubProgress: Double = 0
     @State private var showSmartLibrary = false
     @State private var showCleanup = false
+
+    init(
+        viewModel: HomeViewModel,
+        favoriteArtists: FavoriteArtistsManager,
+        playerState: PlayerState
+    ) {
+        self.viewModel = viewModel
+        self.favoriteArtists = favoriteArtists
+        self.playerState = playerState
+        self.queueStore = playerState.queueStore
+    }
 
     /// The progress the deck shows. While the user drags the tonearm
     /// the arm wins; otherwise playback drives it.
@@ -202,7 +223,10 @@ struct TurntableHomeView: View {
             )
             .padding(.horizontal, 18)
 
-            // The crate.
+            // The crate. It sits well below the shelf of queued discs:
+            // the discs belong to the track that is playing (what is
+            // coming up), the crate is a different thing entirely —
+            // what else there is to play (revision 2026-11-18).
             SleeveCrateView(
                 sleeves: sleeves,
                 onPlay: { track in
@@ -214,7 +238,7 @@ struct TurntableHomeView: View {
                 }
             )
             .padding(.horizontal, 14)
-            .padding(.top, 12)
+            .padding(.top, 30)
 
             Spacer(minLength: 8)
         }

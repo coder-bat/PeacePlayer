@@ -38,6 +38,9 @@ final class AudioVisualizerEngine: ObservableObject {
 
     private var smoothedBands: [Float] = Array(repeating: 0, count: 32)
     private var tapRef: MTAudioProcessingTap?
+    /// Bumped on every install/remove so a late-arriving async track
+    /// lookup cannot attach a tap to a track that is no longer playing.
+    private var installGeneration: Int = 0
     private var fftSetup: FFTSetup?
     private var log2n: vDSP_Length = 0
     private var halfN: Int = 0
@@ -104,13 +107,52 @@ final class AudioVisualizerEngine: ObservableObject {
     // MARK: - Public API
 
     /// Attach audio tap to the given player item's first audio track.
+    ///
+    /// The track lookup is ASYNCHRONOUS on purpose.
+    /// `AVAsset.tracks(withMediaType:)` is a synchronous XPC
+    /// round-trip to the media daemon: on a remote stream it can block
+    /// for many seconds, and doing it on the main thread froze the app
+    /// long enough for iOS to kill it (watchdog kill — "Failed to
+    /// terminate gracefully" / "scene-update watchdog", seen on the
+    /// device on 2026-11-18 every time a crate record was tapped).
+    /// `loadTracks(withMediaType:)` does the same work without
+    /// blocking the caller.
+    ///
+    /// A generation counter drops the result if a newer track has
+    /// already been started in the meantime.
     func installTap(on playerItem: AVPlayerItem) {
         removeTap()
 
-        guard let audioTrack = playerItem.asset.tracks(withMediaType: .audio).first else {
-            return
-        }
+        let generation = installGeneration
 
+        Task { [weak self] in
+            guard let self = self else { return }
+
+            let audioTracks: [AVAssetTrack]
+            do {
+                audioTracks = try await playerItem.asset.loadTracks(withMediaType: .audio)
+            } catch {
+                #if DEBUG
+                PlayCrashDiagnostics.log(.artwork, "AudioVisualizerEngine: no audio track (\(error.localizedDescription))")
+                #endif
+                return
+            }
+
+            guard let audioTrack = audioTracks.first else { return }
+
+            await MainActor.run {
+                guard generation == self.installGeneration else { return }
+                self.attachTap(track: audioTrack, to: playerItem)
+            }
+        }
+    }
+
+    /// Create the tap and hang it off the player item's audio mix.
+    ///
+    /// Main thread only: `AVMutableAudioMixInputParameters` and
+    /// `playerItem.audioMix` are cheap, and AVFoundation expects the
+    /// player item to be configured on the main thread.
+    private func attachTap(track: AVAssetTrack, to playerItem: AVPlayerItem) {
         var callbacks = MTAudioProcessingTapCallbacks(
             version: kMTAudioProcessingTapCallbacksVersion_0,
             clientInfo: Unmanaged.passRetained(self).toOpaque(),
@@ -135,7 +177,7 @@ final class AudioVisualizerEngine: ObservableObject {
 
         tapRef = tap
 
-        let inputParams = AVMutableAudioMixInputParameters(track: audioTrack)
+        let inputParams = AVMutableAudioMixInputParameters(track: track)
         inputParams.audioTapProcessor = tapRef
 
         let mix = AVMutableAudioMix()
@@ -148,6 +190,9 @@ final class AudioVisualizerEngine: ObservableObject {
 
     /// Remove the tap and stop publishing.
     func removeTap() {
+        // Drop any in-flight async install for a previous track.
+        installGeneration += 1
+
         stopDisplayTimer()
         tapRef = nil
 

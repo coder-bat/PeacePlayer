@@ -374,6 +374,15 @@ the codebase has already hit twice.
     an app relaunch.
 12. `SmartLibraryCard` and `CleanupScheduledBanner` state changes light their
     corresponding fascia lamp within one render cycle.
+13. **Tapping a crate record must never block the main thread.** The audio tap's
+    track lookup is async (`loadTracks(withMediaType:)`); the synchronous
+    `AVAsset.tracks(withMediaType:)` froze the app long enough for iOS to
+    watchdog-kill it (2026-11-18).
+14. **The deck follows playback started elsewhere.** The record and the shelf of
+    upcoming discs update when the queue changes in another tab, a shortcut or a
+    notification — the deck observes the queue store, not just `PlayerState`.
+15. **Every cover loads.** The image cache delivers the downloaded artwork to the
+    view that asked for it; covers do not sit on their placeholder.
 
 ## 11. Reference
 
