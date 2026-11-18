@@ -100,10 +100,18 @@ final class TurntableDeckUITests: XCTestCase {
 
             sleeve.tap()
 
-            // If the app had crashed, this is where the run dies with
-            // "Application is not running".
-            XCTAssertEqual(app.state, .runningForeground,
-                           "The app left the foreground after tapping sleeve \(index)")
+            // A crash is the thing we are hunting. It shows up as an
+            // app that is no longer running at all.
+            XCTAssertNotEqual(app.state, .notRunning,
+                              "PeacePlayer is GONE after tapping sleeve \(index) — it crashed")
+
+            // Losing the foreground is NOT a crash: someone picked the
+            // phone up and opened another app. Bring PeacePlayer back
+            // and carry on.
+            if app.state != .runningForeground {
+                print("UI-TEST app was backgrounded after sleeve \(index) — reactivating")
+                app.activate()
+            }
 
             // The deck must survive the tap: the record is still there.
             XCTAssertTrue(record.waitForExistence(timeout: 10),
@@ -111,7 +119,8 @@ final class TurntableDeckUITests: XCTestCase {
         }
 
         // And it must still be alive at the end.
-        XCTAssertEqual(app.state, .runningForeground)
+        XCTAssertNotEqual(app.state, .notRunning,
+                          "PeacePlayer died during the run")
     }
 
     /// The record must turn CONTINUOUSLY, not in one-degree steps
@@ -124,16 +133,18 @@ final class TurntableDeckUITests: XCTestCase {
         let count = sleeves.count
         XCTAssertGreaterThan(count, 0, "The crate is empty — nothing to play")
         sleeves.element(boundBy: 0).tap()
-        XCTAssertEqual(app.state, .runningForeground)
+        XCTAssertNotEqual(app.state, .notRunning, "PeacePlayer died on the first tap")
 
-        // Wait for the deck to say it is spinning.
+        // Wait for the deck to say it is spinning. Without this the
+        // frame comparison below would pass on a still image for the
+        // wrong reason.
         let spinning = NSPredicate(format: "value CONTAINS %@", "Spinning")
         let spinningExpectation = XCTNSPredicateExpectation(predicate: spinning, object: record)
         let spinningResult = XCTWaiter().wait(for: [spinningExpectation], timeout: 45)
         if spinningResult != .completed {
             print("UI-TEST record value: \(record.value)")
-            // Not fatal for the smoothness check — sample anyway and
-            // let the frame comparison decide.
+            XCTFail("The record never started spinning (value: \"\(record.value ?? "nil")\") "
+                    + "— nothing is playing, so the rotation cannot be measured")
         }
 
         // Two frames a fraction of a second apart.
