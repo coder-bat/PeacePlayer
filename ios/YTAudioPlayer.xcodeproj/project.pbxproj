@@ -121,6 +121,7 @@
 		868315246CB5FA92279670B5 /* BackendConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 573E6FA7C50ADB94868C2932 /* BackendConfiguration.swift */; };
 		88A50F33382CF82BBEAD774A /* EmptyStateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B81D655E3DE40EE89C5400B4 /* EmptyStateView.swift */; };
 		89F62BF1FA5DAA7E3F82BC5E /* GestureEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = B09F71767D3BB29E47770E59 /* GestureEngine.swift */; };
+		8AC08B1079B5209347A0EE36 /* QueueStoreThreadSafetyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D11251C760C280AF60692E9 /* QueueStoreThreadSafetyTests.swift */; };
 		8AEBC8B304E47DC0CCE29413 /* GenrePickerSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2649617A9D406FC9ADE4F5BD /* GenrePickerSheet.swift */; };
 		8B1FF9A708E9B49E655C70F5 /* PlaylistManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A034B260A80AFAE29827DB83 /* PlaylistManager.swift */; };
 		8B8A6A1865FF679994D2EFDC /* DebugBridgeManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA5515844102468F2E8BE646 /* DebugBridgeManager.swift */; };
@@ -263,6 +264,7 @@
 		0BFC375ECD06E998CB697145 /* QueueRestorer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueueRestorer.swift; sourceTree = "<group>"; };
 		0C5E9F809A825611AC8B66A3 /* GestureCoachOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GestureCoachOverlay.swift; sourceTree = "<group>"; };
 		0C9BFDB6B77D2C5D06F71961 /* MemoryTimelineViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryTimelineViewModel.swift; sourceTree = "<group>"; };
+		0D11251C760C280AF60692E9 /* QueueStoreThreadSafetyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueueStoreThreadSafetyTests.swift; sourceTree = "<group>"; };
 		0F15FD3F181894856FF634D2 /* PeacePlayerWidgetBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeacePlayerWidgetBundle.swift; sourceTree = "<group>"; };
 		11202B44153242E8AEF9B843 /* DailyRecapNotifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DailyRecapNotifier.swift; sourceTree = "<group>"; };
 		12DF773336B5A83BFF1FC347 /* PlayerState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerState.swift; sourceTree = "<group>"; };
@@ -816,6 +818,7 @@
 				345D733DD588ABBB240AA767 /* NowPlayingServiceTests.swift */,
 				D3BCCC013A5A0005C2CF2B3C /* PlaybackClockTests.swift */,
 				84DB5EC5B5DE6F4D95E1CD96 /* QueueItemTests.swift */,
+				0D11251C760C280AF60692E9 /* QueueStoreThreadSafetyTests.swift */,
 				AD743B89FCFE06A2D1B15870 /* SmartLibraryManagerTests.swift */,
 				437D9F674B858F98F1E5CE47 /* StreamInfoTests.swift */,
 				6C152C0744206B1295B5B542 /* SyncIntegrationTests.swift */,
@@ -1194,6 +1197,7 @@
 				00F3E9D5D4553861DF133D34 /* NowPlayingServiceTests.swift in Sources */,
 				C2E1A49F1093057097408A45 /* PlaybackClockTests.swift in Sources */,
 				67670C1DD46FCE786F5AF63C /* QueueItemTests.swift in Sources */,
+				8AC08B1079B5209347A0EE36 /* QueueStoreThreadSafetyTests.swift in Sources */,
 				F409B0AC58AC8D8195743B64 /* SmartLibraryManagerTests.swift in Sources */,
 				D9292EC18006F16F7C606D8D /* StreamInfoTests.swift in Sources */,
 				80FF6BE2341A8C9DBF8EFE83 /* SyncIntegrationTests.swift in Sources */,

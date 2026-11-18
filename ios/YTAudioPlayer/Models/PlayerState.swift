@@ -712,6 +712,12 @@ class PlayerState: ObservableObject {
                 return items[index]
             }
             .removeDuplicates { $0?.track.videoId == $1?.track.videoId }
+            // `currentItem` is `@Published`, so it must only ever be
+            // written on the main thread. The store publishes on
+            // main now, but `receive(on:)` makes that guarantee
+            // local to this subscription instead of depending on a
+            // fact about another file.
+            .receive(on: DispatchQueue.main)
             .sink { [weak self] newItem in
                 self?.currentItem = newItem
             }
@@ -1788,6 +1794,13 @@ class PlayerState: ObservableObject {
     
     private func refreshAndPlay(item: QueueItem, at index: Int) {
         StreamURLCache.shared.getStreamUrl(videoId: item.track.videoId)
+            // The URL publisher delivers on its own queue. Everything
+            // below writes `@Published` state (`playbackState`,
+            // `currentItem`), so the work is moved onto the main
+            // thread — a background publish is dropped by SwiftUI and
+            // logs "Publishing changes from background threads is not
+            // allowed".
+            .receive(on: DispatchQueue.main)
             .sink(
                 receiveCompletion: { [weak self] result in
                     if case .failure(let error) = result {
@@ -1842,6 +1855,13 @@ class PlayerState: ObservableObject {
         print("🔄 [S11] refreshAndPlayCurrentItem ENTRY videoId=\(item.track.videoId) title=\(item.track.title)")
 
         StreamURLCache.shared.getStreamUrl(videoId: item.track.videoId)
+            // The URL publisher delivers on its own queue. Everything
+            // below writes `@Published` state (`playbackState`,
+            // `currentItem`), so the work is moved onto the main
+            // thread — a background publish is dropped by SwiftUI and
+            // logs "Publishing changes from background threads is not
+            // allowed".
+            .receive(on: DispatchQueue.main)
             .sink(
                 receiveCompletion: { [weak self] result in
                     if case .failure(let error) = result {
