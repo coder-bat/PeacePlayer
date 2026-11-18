@@ -132,12 +132,7 @@ struct TurntableHomeView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            DeckFasciaView(
-                hasSmartLibraryCandidates: SmartLibraryManager.shared.pendingCandidates != nil,
-                hasPendingCleanup: SmartLibraryManager.shared.pendingCleanup != nil,
-                onSmartLibrary: { showSmartLibrary = true },
-                onCleanup: { showCleanup = true }
-            ) {
+            DeckFasciaView {
                 navChips
             }
             .padding(.horizontal, 14)
@@ -254,15 +249,16 @@ struct TurntableHomeView: View {
 
     // MARK: - Nav chips
 
-    /// The five existing Home destinations. They are passed into the
-    /// fascia rather than owned by it, so Home keeps ownership of its
-    /// NavigationStack routes.
+    /// The five existing Home destinations, plus the two actionable
+    /// indicators when there is something to act on. They are passed
+    /// into the fascia rather than owned by it, so Home keeps ownership
+    /// of its NavigationStack routes.
     ///
-    /// Each chip is a 30pt graphic inside a 44x44 touch target, so
-    /// the five of them fit the top-right corner.
+    /// Each chip is a 30pt graphic inside a 44x44 touch target. The
+    /// row is centred over the deck (revision 2026-11-18).
     @ViewBuilder
     private var navChips: some View {
-        HStack(spacing: 2) {
+        HStack(spacing: 6) {
             NavigationLink(value: HomeDestination.timeCapsule) {
                 deckChip(icon: "hourglass", accent: Theme.cyberYellow)
             }
@@ -282,6 +278,30 @@ struct TurntableHomeView: View {
                 deckChip(icon: "music.note.list", accent: TurntableTokens.aluminium)
             }
             .buttonStyle(.plain)
+
+            // The two actionable indicators used to be lamps on a row
+            // below the strip. They are icons in the row now (revision
+            // 2026-11-18), sitting just left of Settings — the strip
+            // has no background and no dots.
+            if SmartLibraryManager.shared.pendingCandidates != nil {
+                Button {
+                    showSmartLibrary = true
+                } label: {
+                    deckChip(icon: "wand.and.stars", accent: Theme.cyberYellow)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Smart Library needs review")
+            }
+
+            if SmartLibraryManager.shared.pendingCleanup != nil {
+                Button {
+                    showCleanup = true
+                } label: {
+                    deckChip(icon: "trash.circle", accent: Theme.cyberMagenta)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Scheduled cleanup pending")
+            }
 
             NavigationLink(value: HomeDestination.settings) {
                 deckChip(icon: "gearshape.fill", accent: TurntableTokens.aluminium)

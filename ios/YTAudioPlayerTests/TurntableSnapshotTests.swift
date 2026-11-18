@@ -267,14 +267,9 @@ final class TurntableSnapshotTests: XCTestCase {
 
     @MainActor
     private var deckFascia: some View {
-        DeckFasciaView(
-            hasSmartLibraryCandidates: true,
-            hasPendingCleanup: true,
-            onSmartLibrary: {},
-            onCleanup: {}
-        ) {
-            HStack(spacing: 2) {
-                ForEach(["hourglass", "dice.fill", "antenna.radiowaves.left.and.right", "music.note.list", "gearshape.fill"], id: \.self) { icon in
+        DeckFasciaView {
+            HStack(spacing: 6) {
+                ForEach(["hourglass", "dice.fill", "antenna.radiowaves.left.and.right", "music.note.list"], id: \.self) { icon in
                     Image(systemName: icon)
                         .font(.system(size: 13, weight: .medium))
                         .foregroundColor(Theme.cyberCyan)
@@ -290,6 +285,36 @@ final class TurntableSnapshotTests: XCTestCase {
                         .frame(width: 44, height: 44)
                         .contentShape(Rectangle())
                 }
+                // The two actionable indicators, in the row, left of
+                // Settings.
+                Image(systemName: "wand.and.stars")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(Theme.cyberYellow)
+                    .frame(width: 30, height: 30)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(Color.black.opacity(0.35))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 6)
+                                    .strokeBorder(Theme.cyberYellow.opacity(0.35), lineWidth: 1)
+                            )
+                    )
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+                Image(systemName: "gearshape.fill")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(TurntableTokens.aluminium)
+                    .frame(width: 30, height: 30)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(Color.black.opacity(0.35))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 6)
+                                    .strokeBorder(TurntableTokens.aluminium.opacity(0.35), lineWidth: 1)
+                            )
+                    )
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
             }
         }
         .padding(.horizontal, 14)

@@ -55,7 +55,7 @@ that already exists in `PlayerState`.
 ```
 ┌─────────────────────────────────┐
 │ FASCIA                          │  1
-│  PEACEPLAYER       ▮ ▮ ▮ ▮ ▮    │  ← 5 links, top right
+│        ▮ ▮ ▮ ▮ ▮                │  ← 5 links, centred
 ├─────────────────────────────────┤
 │ ● cue lever                      │  2
 │            ╱ TONEEARM ────────● │
@@ -74,10 +74,14 @@ that already exists in `PlayerState`.
 ```
 
 ### 4.1 Deck fascia (1)
-- Replaces `headerSection`. Brushed-metal strip, rounded, dark walnut gradient.
-- **One row.** The deck's etched **PEACEPLAYER** wordmark on the left; the existing 5
-  `CyberIconChip` destinations (Time Capsule, Anti-Algorithm, Radio, Playlists,
-  Settings) in the **top-right corner**, restyled as square deck buttons.
+- Replaces `headerSection`. **No background at all** (revision 2026-11-18): no frosted
+  material, no border, no shadow. The strip is a row of icons floating over the deck.
+- **One row, centred.** The existing 5 `CyberIconChip` destinations (Time Capsule,
+  Anti-Algorithm, Radio, Playlists, Settings) restyled as square deck buttons, with
+  the two actionable indicators **as icons in the same row**, just left of Settings:
+  `wand.and.stars` (amber, Smart Library review) and `trash.circle` (magenta,
+  scheduled cleanup). Both appear only when there is something to act on.
+- **The etched PEACEPLAYER wordmark is gone** (revision 2026-11-18).
 - **The profile chip is gone** (revision 2026-11-18). The deck is a record player,
   not an account screen: the avatar, display name and sign-out sheet moved to
   **Settings**, where tapping the email row opens it. The legacy Home keeps its
@@ -87,9 +91,9 @@ that already exists in `PlayerState`.
   was chrome. The five links moved up into row 1, where the old Home put its nav
   icons.
 - Each nav chip is a 30pt graphic inside a **44×44pt** touch target.
-- The two actionable lamps (Smart Library, scheduled cleanup) keep a full 44×44pt
-  touch target and appear on a second row **only** when there is something to act
-  on, so the strip normally stays a single row.
+- The two actionable indicators are **icons in the row** now (revision 2026-11-18),
+  each with the same 44×44pt touch target, and appear **only** when there is
+  something to act on.
 - **These must keep working** — same `HomeDestination` navigation, no new routes.
 
 ### 4.2 Cue lever (2)

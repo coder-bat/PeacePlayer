@@ -162,14 +162,14 @@ final class TurntableDeckUITests: XCTestCase {
                           "The record stopped moving after the first sample")
     }
 
-    /// The deck's layout must be the new one: no profile chip on the
-    /// fascia, and the crate stands on its rails.
-    func testDeckShowsTheEtchedWordmarkAndNoProfileChip() throws {
+    /// The deck's fascia must carry no brand text and no profile chip.
+    func testDeckFasciaHasNoWordmarkAndNoProfileChip() throws {
         XCTAssertTrue(waitForDeck(), "The turntable deck never appeared")
 
-        // The fascia's wordmark.
-        XCTAssertTrue(app.staticTexts["PEACEPLAYER"].exists,
-                      "The deck's etched wordmark is missing")
+        // The etched PEACEPLAYER wordmark was removed when the strip
+        // became frosted glass (revision 2026-11-18).
+        XCTAssertFalse(app.staticTexts["PEACEPLAYER"].exists,
+                       "The fascia still carries the old PEACEPLAYER wordmark")
 
         // The old profile chip showed a greeting ("NIGHT", "SYNC"…)
         // and a display name next to the avatar. There must be no
