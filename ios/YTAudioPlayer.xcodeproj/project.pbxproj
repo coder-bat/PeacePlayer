@@ -144,6 +144,7 @@
 		A1B72610100844DB0578DB24 /* QueueView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3007A251835509D5F31DE2BF /* QueueView.swift */; };
 		A55BA37C68C31B284CBE212B /* TurntableWiringTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C252F1F5C0F2736B511E4415 /* TurntableWiringTests.swift */; };
 		A5D3267D0600BD8A5D88AA60 /* SmartLibraryReviewSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8193DF9200145D16D8EE219E /* SmartLibraryReviewSheet.swift */; };
+		A6E9E3870A16850DA2623791 /* TurntableDeckUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4DA67ED9B429F46CBCDFCCB /* TurntableDeckUITests.swift */; };
 		A7D37324FCFE5908B5D0E85A /* PeacePlayerWidgetBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F15FD3F181894856FF634D2 /* PeacePlayerWidgetBundle.swift */; };
 		AA9615FED1DC72CD32BD4096 /* TurntableTokensTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61E2A8F29F8FB683D98570A6 /* TurntableTokensTests.swift */; };
 		AB91C2EEBB54FBEAB25F0CED /* ShortcutPlaybackController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2EB0B5914F7E53240295D03C /* ShortcutPlaybackController.swift */; };
@@ -226,6 +227,13 @@
 			remoteGlobalIDString = 716416BF920B6C9F1C6A6424;
 			remoteInfo = PeacePlayerWidget;
 		};
+		F14BD6CE4FCCF708E17C29D0 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = C6D22BD0FE745FD63CB08F3D /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 1C1AD7A86C5BEA7222BCA2D5;
+			remoteInfo = YTAudioPlayer;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -276,6 +284,7 @@
 		2649617A9D406FC9ADE4F5BD /* GenrePickerSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GenrePickerSheet.swift; sourceTree = "<group>"; };
 		291054BB5EAE5ACCBA8C8EF9 /* RadioViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RadioViewModel.swift; sourceTree = "<group>"; };
 		2A75748BC0958AC14B9F83ED /* AuthService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthService.swift; sourceTree = "<group>"; };
+		2CA80246E936EB789AD07697 /* YTAudioPlayerUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = YTAudioPlayerUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		2D823E6945F2F8CBC4462532 /* Track.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Track.swift; sourceTree = "<group>"; };
 		2DC7C7A6C85A67E6E8A396B7 /* APIService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIService.swift; sourceTree = "<group>"; };
 		2EB0B5914F7E53240295D03C /* ShortcutPlaybackController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutPlaybackController.swift; sourceTree = "<group>"; };
@@ -417,6 +426,7 @@
 		D33505D848F52ECC770A4E76 /* TimeCapsuleRevealView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimeCapsuleRevealView.swift; sourceTree = "<group>"; };
 		D353D6C05094B36F8EA15622 /* FullPlayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FullPlayer.swift; sourceTree = "<group>"; };
 		D3BCCC013A5A0005C2CF2B3C /* PlaybackClockTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackClockTests.swift; sourceTree = "<group>"; };
+		D4DA67ED9B429F46CBCDFCCB /* TurntableDeckUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurntableDeckUITests.swift; sourceTree = "<group>"; };
 		D53A927EC1C5C1DF71714B3C /* CueLeverView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CueLeverView.swift; sourceTree = "<group>"; };
 		D66426E9E8814FA9004E37E8 /* AdaptiveQualityManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdaptiveQualityManager.swift; sourceTree = "<group>"; };
 		D6D03E458F502F0ACF01C0B2 /* Snapshotable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Snapshotable.swift; sourceTree = "<group>"; };
@@ -536,6 +546,7 @@
 				EEF09BAF35538031E49EF185 /* PeacePlayerWidget.appex */,
 				CC5BFAE5E936B767B033FB34 /* YTAudioPlayer.app */,
 				1E960EF8B8DB05376F90DF90 /* YTAudioPlayerTests.xctest */,
+				2CA80246E936EB789AD07697 /* YTAudioPlayerUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -559,6 +570,7 @@
 				3CF5087538BB50482203ED42 /* Sources */,
 				A22DEF899D9FF4981C036CF4 /* YTAudioPlayer */,
 				E5E62FB816ED95876FBDD2BB /* YTAudioPlayerTests */,
+				EEE28CD139A2133377E26EFD /* YTAudioPlayerUITests */,
 				2A5805C9EE6676DE1CD6F2D3 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -812,6 +824,14 @@
 			path = YTAudioPlayerTests;
 			sourceTree = "<group>";
 		};
+		EEE28CD139A2133377E26EFD /* YTAudioPlayerUITests */ = {
+			isa = PBXGroup;
+			children = (
+				D4DA67ED9B429F46CBCDFCCB /* TurntableDeckUITests.swift */,
+			);
+			path = YTAudioPlayerUITests;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -834,6 +854,24 @@
 			productName = YTAudioPlayer;
 			productReference = CC5BFAE5E936B767B033FB34 /* YTAudioPlayer.app */;
 			productType = "com.apple.product-type.application";
+		};
+		4A5F645156F9C507E78B5A38 /* YTAudioPlayerUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = CD6E076CCBC7D608CA2DEA35 /* Build configuration list for PBXNativeTarget "YTAudioPlayerUITests" */;
+			buildPhases = (
+				99DF4A7F64637272EF86560D /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				5F7D5DE07CF397CFB94FD6C9 /* PBXTargetDependency */,
+			);
+			name = YTAudioPlayerUITests;
+			packageProductDependencies = (
+			);
+			productName = YTAudioPlayerUITests;
+			productReference = 2CA80246E936EB789AD07697 /* YTAudioPlayerUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
 		};
 		716416BF920B6C9F1C6A6424 /* PeacePlayerWidget */ = {
 			isa = PBXNativeTarget;
@@ -883,13 +921,18 @@
 						DevelopmentTeam = 4Y85577Z4G;
 						ProvisioningStyle = Manual;
 					};
+					4A5F645156F9C507E78B5A38 = {
+						DevelopmentTeam = 4Y85577Z4G;
+						ProvisioningStyle = Manual;
+						TestTargetID = 1C1AD7A86C5BEA7222BCA2D5;
+					};
 					716416BF920B6C9F1C6A6424 = {
 						DevelopmentTeam = 4Y85577Z4G;
 						ProvisioningStyle = Manual;
 					};
 					7195BDACE5345E91F0F6C0F5 = {
 						DevelopmentTeam = 4Y85577Z4G;
-						ProvisioningStyle = Automatic;
+						ProvisioningStyle = Manual;
 					};
 				};
 			};
@@ -910,6 +953,7 @@
 				1C1AD7A86C5BEA7222BCA2D5 /* YTAudioPlayer */,
 				716416BF920B6C9F1C6A6424 /* PeacePlayerWidget */,
 				7195BDACE5345E91F0F6C0F5 /* YTAudioPlayerTests */,
+				4A5F645156F9C507E78B5A38 /* YTAudioPlayerUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -1123,6 +1167,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		99DF4A7F64637272EF86560D /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A6E9E3870A16850DA2623791 /* TurntableDeckUITests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		A81012510CF76ED9254913AC /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -1150,6 +1202,11 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		5F7D5DE07CF397CFB94FD6C9 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 1C1AD7A86C5BEA7222BCA2D5 /* YTAudioPlayer */;
+			targetProxy = F14BD6CE4FCCF708E17C29D0 /* PBXContainerItemProxy */;
+		};
 		C33D818FAD23900FC50CDCA1 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = 716416BF920B6C9F1C6A6424 /* PeacePlayerWidget */;
@@ -1163,6 +1220,29 @@
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		069F2AA846D0697FDB0CA5F6 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_IDENTITY = "Apple Development: Created via API (J522WUTHAK)";
+				CODE_SIGN_STYLE = Manual;
+				DEVELOPMENT_TEAM = 4Y85577Z4G;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.ytaudioplayer.app.uitests;
+				PROVISIONING_PROFILE_SPECIFIER = "PeacePlayerUITests Runner Dev";
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.9;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = YTAudioPlayer;
+			};
+			name = Release;
+		};
 		0A033F6EB8425F5F046277AA /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -1191,7 +1271,8 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
-				CODE_SIGN_STYLE = Automatic;
+				CODE_SIGN_IDENTITY = "Apple Development: Created via API (J522WUTHAK)";
+				CODE_SIGN_STYLE = Manual;
 				DEVELOPMENT_TEAM = 4Y85577Z4G;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
@@ -1201,6 +1282,7 @@
 					"@loader_path/Frameworks",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.ytaudioplayer.app.tests;
+				PROVISIONING_PROFILE_SPECIFIER = "PeacePlayerTests Dev";
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 5.9;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -1274,7 +1356,8 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
-				CODE_SIGN_STYLE = Automatic;
+				CODE_SIGN_IDENTITY = "Apple Development: Created via API (J522WUTHAK)";
+				CODE_SIGN_STYLE = Manual;
 				DEVELOPMENT_TEAM = 4Y85577Z4G;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
@@ -1284,6 +1367,7 @@
 					"@loader_path/Frameworks",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.ytaudioplayer.app.tests;
+				PROVISIONING_PROFILE_SPECIFIER = "PeacePlayerTests Dev";
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 5.9;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -1424,6 +1508,29 @@
 			};
 			name = Release;
 		};
+		CD6158F1FD9DFD2AF1C9702A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_IDENTITY = "Apple Development: Created via API (J522WUTHAK)";
+				CODE_SIGN_STYLE = Manual;
+				DEVELOPMENT_TEAM = 4Y85577Z4G;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.ytaudioplayer.app.uitests;
+				PROVISIONING_PROFILE_SPECIFIER = "PeacePlayerUITests Runner Dev";
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.9;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = YTAudioPlayer;
+			};
+			name = Debug;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -1459,6 +1566,15 @@
 			buildConfigurations = (
 				B9C9C8DA5EA9F9892451F09F /* Debug */,
 				0A033F6EB8425F5F046277AA /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		CD6E076CCBC7D608CA2DEA35 /* Build configuration list for PBXNativeTarget "YTAudioPlayerUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				CD6158F1FD9DFD2AF1C9702A /* Debug */,
+				069F2AA846D0697FDB0CA5F6 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;

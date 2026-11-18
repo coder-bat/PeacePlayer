@@ -165,9 +165,36 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.ytaudioplayer.app.tests
-        CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: "Apple Development: Created via API (J522WUTHAK)"
+        PROVISIONING_PROFILE_SPECIFIER: "PeacePlayerTests Dev"
         DEVELOPMENT_TEAM: 4Y85577Z4G
         SWIFT_VERSION: "5.9"
         GENERATE_INFOPLIST_FILE: YES
         BUNDLE_LOADER: "$(TEST_HOST)"
         TEST_HOST: "$(BUILT_PRODUCTS_DIR)/PeacePlayer.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/PeacePlayer"
+
+  # UI tests that drive the real app on a real device — the only way
+  # to check the parts the offscreen renderer cannot reach: tapping a
+  # crate record (which used to crash), and the record's rotation
+  # between frames.
+  YTAudioPlayerUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: YTAudioPlayerUITests
+    dependencies:
+      - target: YTAudioPlayer
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.ytaudioplayer.app.uitests
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: "Apple Development: Created via API (J522WUTHAK)"
+        # The UI-test runner app is <bundle id>.xctrunner and needs
+        # its own profile.
+        PROVISIONING_PROFILE_SPECIFIER: "PeacePlayerUITests Runner Dev"
+        DEVELOPMENT_TEAM: 4Y85577Z4G
+        SWIFT_VERSION: "5.9"
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: YTAudioPlayer

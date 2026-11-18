@@ -137,6 +137,9 @@ struct CrateRow: View {
                     }
                     .accessibilityLabel("\(track.title) by \(track.artists.first ?? "unknown artist")")
                     .accessibilityHint("Double tap to play")
+                    // Identifier so the UI test can find and tap a
+                    // specific sleeve on the device.
+                    .accessibilityIdentifier("crate.sleeve.\(track.videoId)")
                 }
             }
             // The row is centred, so a short last row sits in the

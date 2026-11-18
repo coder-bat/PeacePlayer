@@ -203,6 +203,9 @@ struct PlatterView: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Record")
+        // Identifier so the UI test can grab the record's own
+        // screenshot and prove it is animating between frames.
+        .accessibilityIdentifier("turntable.record")
         .accessibilityValue(
             isPlaying ? "Spinning, \(Int(progress * 100)) percent through track" : "Stopped"
         )
