@@ -105,15 +105,28 @@ say "Transferring secrets (scp; never echoed)"
 "${SSH[@]}" "chmod 600 '${REMOTE_ROOT}/private/service.env'"
 
 say "Copying data (this is the slow part)"
+# The sync store and the user accounts are LIVE server state, not a
+# build artefact: data/sync holds the device's playlists, favourites,
+# FAVOURITE ARTISTS and history, and data/users holds the Apple
+# sign-ins. Copying the Mac's older copies over them replaces the
+# device's data with a stale snapshot, and the device's next sync then
+# reads the missing items as deletions and drops them. That is not
+# hypothetical: on 2026-11-20 a deploy overwrote the sync store and the
+# phone's Selected Artists list came back empty, taking the album
+# shelf with it.
+#
+# The host keeps its own copies of both. Everything else under data/
+# (audio cache, hls) is a cache and is fine to overwrite.
+DATA_EXCLUDES=(--exclude 'sync/' --exclude 'users/')
 if [ -d "$LOCAL_LIBRARY" ]; then
   "${SSH[@]}" "mkdir -p '${REMOTE_ROOT}/library'"
-  rsync -az --stats -e "ssh -o BatchMode=yes" \
+  rsync -az --stats "${DATA_EXCLUDES[@]}" -e "ssh -o BatchMode=yes" \
     "${LOCAL_DATA}/" "${USER}@${HOST}:${REMOTE_ROOT}/data/"
   rsync -az --stats -e "ssh -o BatchMode=yes" \
     "${LOCAL_LIBRARY}/" "${USER}@${HOST}:${REMOTE_ROOT}/library/"
 else
   say "NOTE: library dir ${LOCAL_LIBRARY} absent; copying data only"
-  rsync -az --stats -e "ssh -o BatchMode=yes" \
+  rsync -az --stats "${DATA_EXCLUDES[@]}" -e "ssh -o BatchMode=yes" \
     "${LOCAL_DATA}/" "${USER}@${HOST}:${REMOTE_ROOT}/data/"
 fi
 
