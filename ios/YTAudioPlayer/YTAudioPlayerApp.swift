@@ -91,6 +91,15 @@ struct YTAudioPlayerApp: App {
                 DailyRecapNotifier.shared.evaluateRecapState()
             }
 
+            // 2026-11-20: persist the playback snapshot on the way to
+            // the background, so the next cold launch can restore the
+            // queue, the current track and the playhead position.
+            // This is the only reliable "the app is going away" signal
+            // on iOS — `willTerminate` is not called for a force quit.
+            if phase == .background {
+                PlayerState.shared.persistPlaybackSnapshot()
+            }
+
             // S18 (QW-1): set the app icon badge to the number of
             // ready-to-open Time Capsules whenever the scene phase
             // changes (any direction). 0 clears the badge. The badge

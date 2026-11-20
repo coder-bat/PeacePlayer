@@ -10,6 +10,9 @@ import Combine
 
 enum SearchFilter: String, CaseIterable, Identifiable {
     case all = "All"
+    /// 2026-11-21: what the user already has — downloaded, liked,
+    /// their own playlists. Found on the device.
+    case library = "Library"
     case songs = "Songs"
     case playlists = "Playlists"
     
@@ -22,6 +25,14 @@ struct SearchView: View {
     @State private var searchDebounceTask: Task<Void, Never>?
     @State private var selectedTrackForPlaylist: Track?
     @State private var selectedYouTubePlaylist: YouTubePlaylist?
+    /// One of the user's own playlists, picked from the library results.
+    @State private var selectedLibraryPlaylist: Playlist?
+    // 2026-11-21: Search is the second screen on the Deck design
+    // system (docs/design/deck-design-system.md). Same arrangement as
+    // the Library: Deck drawing with the Turntable Home flag on, the
+    // old drawing with it off.
+    @ObservedObject private var featureFlags = FeatureFlags.shared
+    private var deck: Bool { featureFlags.turntableHome }
     @State private var cancellables = Set<AnyCancellable>()
     @FocusState private var isSearchFocused: Bool
 
@@ -55,70 +66,76 @@ struct SearchView: View {
                 VStack(spacing: 16) {
                     HStack {
                         Text("Search")
-                            .font(.system(size: 24, weight: .bold, design: .monospaced))
-                            .foregroundColor(.white)
-                            .shadow(color: Color.cyberCyan.opacity(0.5), radius: 10, x: 0, y: 0)
+                            .font(deck ? DeckType.screenTitle : .system(size: 24, weight: .bold, design: .monospaced))
+                            .foregroundColor(deck ? TurntableTokens.cream : .white)
+                            .shadow(color: deck ? .clear : Color.cyberCyan.opacity(0.5), radius: 10, x: 0, y: 0)
                         Spacer()
                     }
                     .padding(.horizontal, 16)
 
                     // Cyberpunk search input
-                    HStack(spacing: 12) {
-                        Image(systemName: "magnifyingglass")
-                            .font(.system(size: 15, weight: .medium))
-                            .foregroundColor(isSearchFocused || !viewModel.searchText.isEmpty ? .cyberCyan : .cyberDim)
+                    if deck {
+                        deckSearchField
+                    } else {
+                        HStack(spacing: 12) {
+                            Image(systemName: "magnifyingglass")
+                                .font(.system(size: 15, weight: .medium))
+                                .foregroundColor(isSearchFocused || !viewModel.searchText.isEmpty ? .cyberCyan : .cyberDim)
 
-                        TextField("", text: $viewModel.searchText,
-                                  prompt: Text("FIND MUSIC...")
-                                      .foregroundColor(Color.cyberDim)
-                                      .font(.system(size: 15, design: .monospaced)))
-                            .foregroundColor(.white)
-                            .font(.system(size: 15, design: .monospaced))
-                            .focused($isSearchFocused)
-                            .submitLabel(.search)
-                            .autocorrectionDisabled()
-                            .textInputAutocapitalization(.never)
-                            .onSubmit {
-                                guard !viewModel.searchText.isEmpty else { return }
-                                HapticManager.medium()
-                                viewModel.search(query: viewModel.searchText)
-                                isSearchFocused = false
-                            }
+                            TextField("", text: $viewModel.searchText,
+                                      prompt: Text("SONGS, ARTISTS, YOUR LIBRARY...")
+                                          .foregroundColor(Color.cyberDim)
+                                          .font(.system(size: 15, design: .monospaced)))
+                                .foregroundColor(.white)
+                                .font(.system(size: 15, design: .monospaced))
+                                .focused($isSearchFocused)
+                                .submitLabel(.search)
+                                .autocorrectionDisabled()
+                                .textInputAutocapitalization(.never)
+                                .onSubmit {
+                                    guard !viewModel.searchText.isEmpty else { return }
+                                    HapticManager.medium()
+                                    viewModel.search(query: viewModel.searchText)
+                                    isSearchFocused = false
+                                }
 
-                        if !viewModel.searchText.isEmpty {
-                            Button {
-                                viewModel.searchText = ""
-                                viewModel.clearSearch()
-                                viewModel.activeFilter = .all
-                            } label: {
-                                Image(systemName: "xmark.circle.fill")
-                                    .font(.system(size: 16))
-                                    .foregroundColor(.cyberDim)
+                            if !viewModel.searchText.isEmpty {
+                                Button {
+                                    viewModel.searchText = ""
+                                    viewModel.clearSearch()
+                                    viewModel.activeFilter = .all
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .font(.system(size: 16))
+                                        .foregroundColor(.cyberDim)
+                                }
                             }
                         }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
+                        .background(Color.cyberSurface)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: CornerRadius.md)
+                                .stroke(
+                                    isSearchFocused || !viewModel.searchText.isEmpty
+                                        ? Color.cyberCyan.opacity(0.5)
+                                        : Color.cyberDim.opacity(0.3),
+                                    lineWidth: 1
+                                )
+                        )
+                        .cornerRadius(CornerRadius.md)
+                        .padding(.horizontal, 16)
+                        .animation(.easeInOut(duration: 0.2), value: isSearchFocused)
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
-                    .background(Color.cyberSurface)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: CornerRadius.md)
-                            .stroke(
-                                isSearchFocused || !viewModel.searchText.isEmpty
-                                    ? Color.cyberCyan.opacity(0.5)
-                                    : Color.cyberDim.opacity(0.3),
-                                lineWidth: 1
-                            )
-                    )
-                    .cornerRadius(CornerRadius.md)
-                    .padding(.horizontal, 16)
-                    .animation(.easeInOut(duration: 0.2), value: isSearchFocused)
                 }
                 .padding(.top, 8)
-                .padding(.bottom, 0)
-                .background(Theme.cyberBackground)
+                .padding(.bottom, deck ? 10 : 0)
+                .background(deck ? Color.clear : Theme.cyberBackground)
 
                 ZStack {
-                    Theme.cyberBackground.ignoresSafeArea()
+                    if !deck {
+                        Theme.cyberBackground.ignoresSafeArea()
+                    }
 
                     // v1.8.6 / S18-SEARCH-KEEP-OLD: only show the
                     // skeleton on the FIRST-EVER search (no prior
@@ -127,12 +144,19 @@ struct SearchView: View {
                     // and the new ones replace them when ready.
                     // The "Updating..." pill above the list is the
                     // signal that a new search is in flight.
+                    // 2026-11-21: library matches are found on the
+                    // device, so they are shown at once — the list
+                    // does not wait behind the skeleton for the
+                    // catalogue to answer.
                     if viewModel.isLoading
                         && viewModel.results.isEmpty
-                        && viewModel.playlistResults.isEmpty {
+                        && viewModel.playlistResults.isEmpty
+                        && viewModel.libraryResults.isEmpty {
                         skeletonLoadingView
                             .transition(.opacity)
-                    } else if viewModel.results.isEmpty && viewModel.playlistResults.isEmpty {
+                    } else if viewModel.results.isEmpty
+                        && viewModel.playlistResults.isEmpty
+                        && viewModel.libraryResults.isEmpty {
                         emptyStateView
                             .transition(.opacity)
                     } else {
@@ -141,7 +165,14 @@ struct SearchView: View {
                     }
                 }
             }
-            .background(Theme.cyberBackground.ignoresSafeArea())
+            .background {
+                if deck {
+                    DeckRoom()
+                } else {
+                    Theme.cyberBackground.ignoresSafeArea()
+                }
+            }
+            .environment(\.deckStyle, deck)
             .navigationTitle("")
             .navigationBarHidden(true)
             .preferredColorScheme(.dark)
@@ -158,6 +189,9 @@ struct SearchView: View {
                 viewModel.refreshDownloadedIds()
             }
             .onChange(of: viewModel.searchText) { _, newValue in
+                // The library answers every keystroke; only the
+                // catalogue request below is debounced.
+                viewModel.searchLibrary(query: newValue)
                 searchDebounceTask?.cancel()
                 if newValue.isEmpty {
                     if viewModel.hasSearched {
@@ -184,6 +218,9 @@ struct SearchView: View {
             }
             .sheet(item: $selectedYouTubePlaylist) { playlist in
                 PlaylistPreviewView(playlist: playlist)
+            }
+            .sheet(item: $selectedLibraryPlaylist) { playlist in
+                PlaylistDetailView(playlist: playlist)
             }
         }
     }
@@ -215,6 +252,27 @@ struct SearchView: View {
             // default row separator that previously appeared
             // as a divider under the chips).
             ScrollView(.horizontal, showsIndicators: false) {
+                if deck {
+                    // Deck: a selector in a panel, lamp on the chosen one.
+                    HStack(spacing: 2) {
+                        ForEach(SearchFilter.allCases) { filter in
+                            DeckChip(
+                                title: filter.rawValue,
+                                count: resultCount(for: filter),
+                                isSelected: viewModel.activeFilter == filter
+                            ) {
+                                HapticManager.selectionChanged()
+                                withAnimation(DeckMotion.move) {
+                                    viewModel.activeFilter = filter
+                                }
+                            }
+                        }
+                    }
+                    .padding(4)
+                    .deckPanel()
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 6)
+                } else {
                 HStack(spacing: 12) {
                     ForEach(SearchFilter.allCases) { filter in
                         FilterChip(
@@ -229,8 +287,9 @@ struct SearchView: View {
                     }
                 }
                 .padding(.horizontal, 16)
+                }
             }
-            .listRowInsets(EdgeInsets(top: 16, leading: 0, bottom: 16, trailing: 0))
+            .listRowInsets(EdgeInsets(top: deck ? 2 : 16, leading: 0, bottom: deck ? 8 : 16, trailing: 0))
             .listRowBackground(Color.clear)
             .listRowSeparator(.hidden)
 
@@ -247,10 +306,10 @@ struct SearchView: View {
                 HStack(spacing: 8) {
                     ProgressView()
                         .scaleEffect(0.7)
-                        .tint(Color.cyberCyan)
+                        .tint(deck ? DeckSignal.power : Color.cyberCyan)
                     Text("Updating for \"\(pending)\"…")
                         .font(.system(size: 12, weight: .medium, design: .monospaced))
-                        .foregroundColor(.cyberDim)
+                        .foregroundColor(deck ? TurntableTokens.cream.opacity(0.5) : .cyberDim)
                         .lineLimit(1)
                         .truncationMode(.tail)
                 }
@@ -264,19 +323,30 @@ struct SearchView: View {
             }
 
             // Songs Section
+            librarySection
+
+            if viewModel.isLoading && viewModel.results.isEmpty && viewModel.playlistResults.isEmpty
+                && viewModel.activeFilter != .library {
+                // The library has answered; the catalogue has not.
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .scaleEffect(0.7)
+                        .tint(deck ? DeckSignal.power : Color.cyberCyan)
+                    Text("Searching the catalogue…")
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .foregroundColor(deck ? TurntableTokens.cream.opacity(0.5) : .cyberDim)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .listRowInsets(EdgeInsets())
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+            }
+
             if shouldShowSongs {
                 if !viewModel.results.isEmpty {
-                    Section(header:
-                        HStack {
-                            Text("SONGS")
-                                .font(Typography.eyebrow)
-                                .foregroundColor(.cyberDim)
-                            Spacer()
-                            Text("\(viewModel.results.count)")
-                                .font(.system(size: 11, weight: .bold, design: .monospaced))
-                                .foregroundColor(.cyberDim)
-                        }
-                    ) {
+                    Section(header: sectionHeader("Songs", count: viewModel.results.count)) {
                         ForEach(viewModel.results) { track in
                             let downloadTask = downloadManager.taskForTrack(track)
 
@@ -306,7 +376,7 @@ struct SearchView: View {
                                     selectedTrackForPlaylist = track
                                 }
                             )
-                            .listRowBackground(Color.cyberSurface)
+                            .listRowBackground(deck ? Color.clear : Color.cyberSurface)
                         }
                     }
                 }
@@ -315,17 +385,7 @@ struct SearchView: View {
             // Playlists Section
             if shouldShowPlaylists {
                 if !viewModel.playlistResults.isEmpty {
-                    Section(header:
-                        HStack {
-                            Text("PLAYLISTS")
-                                .font(.system(size: 11, weight: .bold, design: .monospaced))
-                                .foregroundColor(.cyberDim)
-                            Spacer()
-                            Text("\(viewModel.playlistResults.count)")
-                                .font(.system(size: 11, weight: .bold, design: .monospaced))
-                                .foregroundColor(.cyberDim)
-                        }
-                    ) {
+                    Section(header: sectionHeader("Playlists", count: viewModel.playlistResults.count)) {
                         ForEach(viewModel.playlistResults) { playlist in
                             PlaylistSearchRow(
                                 playlist: playlist,
@@ -342,7 +402,7 @@ struct SearchView: View {
                                     queueYouTubePlaylist(playlist)
                                 }
                             )
-                            .listRowBackground(Color.cyberSurface)
+                            .listRowBackground(deck ? Color.clear : Color.cyberSurface)
                         }
                     }
                 }
@@ -355,6 +415,7 @@ struct SearchView: View {
         // is iOS 16+; on iOS 15 the .listStyle(.plain) + .background
         // modifier on the list itself is enough.
         .listStyle(.plain)
+        .listRowSeparatorTint(deck ? TurntableTokens.cream.opacity(0.08) : nil)
         .modifier(ListBackgroundHider())
         .environment(\.defaultMinListRowHeight, 0)  // S7: shrink row insets
         .task(id: viewModel.results.map(\.videoId)) {
@@ -374,6 +435,311 @@ struct SearchView: View {
         }
     }
 
+    // MARK: - Deck parts
+
+    /// Deck: the text lies in a well; its edge lights while it has
+    /// the keyboard.
+    private var deckSearchField: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundColor(TurntableTokens.aluminium.opacity(isSearchFocused ? 1 : 0.7))
+
+            TextField("", text: $viewModel.searchText,
+                      prompt: Text("Songs, artists, your library")
+                          .foregroundColor(TurntableTokens.cream.opacity(0.4)))
+                .font(DeckType.body)
+                .foregroundColor(TurntableTokens.cream)
+                .focused($isSearchFocused)
+                .submitLabel(.search)
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.never)
+                .tint(DeckSignal.live)
+                .onSubmit {
+                    guard !viewModel.searchText.isEmpty else { return }
+                    HapticManager.medium()
+                    viewModel.search(query: viewModel.searchText)
+                    isSearchFocused = false
+                }
+
+            if !viewModel.searchText.isEmpty {
+                Button {
+                    HapticManager.light()
+                    viewModel.searchText = ""
+                    viewModel.clearSearch()
+                    viewModel.activeFilter = .all
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 17))
+                        .foregroundColor(TurntableTokens.aluminium.opacity(0.6))
+                        .frame(width: 34, height: 44)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Clear search")
+            }
+        }
+        .padding(.leading, 18)
+        .padding(.trailing, viewModel.searchText.isEmpty ? 18 : 6)
+        .frame(height: 48)
+        .deckWell(Capsule(), lit: isSearchFocused ? DeckSignal.live : nil)
+        .padding(.horizontal, 16)
+        .animation(.easeInOut(duration: 0.2), value: isSearchFocused)
+    }
+
+    /// A results section's header. Deck: a ledge the rows hang under.
+    @ViewBuilder
+    private func sectionHeader(_ title: String, count: Int, accent: Color = .cyberDim) -> some View {
+        if deck {
+            DeckLedge(title: title, count: count)
+                .padding(.top, 8)
+                .padding(.bottom, 4)
+                .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+        } else {
+            HStack {
+                Text(title.uppercased())
+                    .font(Typography.eyebrow)
+                    .foregroundColor(accent)
+                Spacer()
+                Text("\(count)")
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .foregroundColor(.cyberDim)
+            }
+        }
+    }
+
+    /// Deck: the catalogue is still answering.
+    private var deckSkeleton: some View {
+        VStack(spacing: 0) {
+            ForEach(0..<7, id: \.self) { _ in
+                HStack(spacing: 12) {
+                    RoundedRectangle(cornerRadius: 2.5)
+                        .fill(TurntableTokens.cream.opacity(0.07))
+                        .frame(width: 46, height: 46)
+                    VStack(alignment: .leading, spacing: 7) {
+                        RoundedRectangle(cornerRadius: 2).fill(TurntableTokens.cream.opacity(0.09)).frame(width: 170, height: 12)
+                        RoundedRectangle(cornerRadius: 2).fill(TurntableTokens.cream.opacity(0.05)).frame(width: 110, height: 10)
+                    }
+                    Spacer()
+                }
+                .frame(height: 58)
+                .shimmer()
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 8)
+        .accessibilityLabel("Searching")
+    }
+
+    /// Deck: nothing found anywhere.
+    private var deckNoResults: some View {
+        VStack(spacing: 8) {
+            Spacer()
+            Text("Nothing found")
+                .font(DeckType.title)
+                .foregroundColor(TurntableTokens.cream)
+            Text("No songs or playlists match \"\(viewModel.searchText)\", in the catalogue or in your library.")
+                .font(DeckType.subtitle)
+                .foregroundColor(TurntableTokens.cream.opacity(0.55))
+                .multilineTextAlignment(.center)
+            DeckButton(title: "Clear search", symbol: "xmark") {
+                viewModel.searchText = ""
+                viewModel.clearSearch()
+                viewModel.activeFilter = .all
+            }
+            .padding(.top, 14)
+            Spacer()
+            Spacer()
+        }
+        .padding(.horizontal, 40)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// The six starting points, as (title, symbol, query).
+    private static let genres: [(String, String, String)] = [
+        ("Pop", "sparkles", "Pop music"),
+        ("Trending", "flame.fill", "Trending music 2024"),
+        ("Rock", "guitars.fill", "Rock and roll"),
+        ("Hip-Hop", "mic.fill", "Hip hop rap"),
+        ("Electronic", "waveform", "Electronic dance music"),
+        ("Jazz", "music.note", "Jazz classics")
+    ]
+
+    /// Deck: what Search shows before anything is typed — genre keys
+    /// in a panel, then the recent searches hanging under a ledge.
+    private var deckBrowse: some View {
+        ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 0) {
+                LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible())], spacing: 10) {
+                    ForEach(Self.genres, id: \.0) { genre in
+                        DeckButton(title: genre.0, symbol: genre.1, fillsWidth: true) {
+                            HapticManager.light()
+                            viewModel.searchText = genre.0 == "Hip-Hop" ? "Hip Hop" : genre.0
+                            viewModel.search(query: genre.2)
+                        }
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 6)
+
+                DeckLedge(title: "Browse", count: nil)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 14)
+
+                if !viewModel.recentSearches.isEmpty {
+                    DeckLedge(title: "Recent searches", count: viewModel.recentSearches.count)
+                        .padding(.horizontal, 16)
+                        .padding(.top, 30)
+                        .padding(.bottom, 4)
+
+                    ForEach(viewModel.recentSearches, id: \.self) { query in
+                        HStack(spacing: 12) {
+                            Button {
+                                viewModel.searchText = query
+                                viewModel.search(query: query)
+                            } label: {
+                                HStack(spacing: 12) {
+                                    Image(systemName: "clock.arrow.circlepath")
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .foregroundColor(TurntableTokens.aluminium.opacity(0.7))
+                                        .frame(width: 20)
+                                    Text(query)
+                                        .font(DeckType.body)
+                                        .foregroundColor(TurntableTokens.cream)
+                                        .lineLimit(1)
+                                    Spacer(minLength: 8)
+                                }
+                                .frame(minHeight: 48)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+
+                            Button {
+                                withAnimation(.easeInOut(duration: 0.25)) {
+                                    viewModel.removeRecentSearch(query)
+                                }
+                                HapticManager.medium()
+                            } label: {
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 10, weight: .bold))
+                                    .foregroundColor(TurntableTokens.cream.opacity(0.4))
+                                    .frame(width: 44, height: 44)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Remove \(query) from recent searches")
+                        }
+                        .padding(.leading, 20)
+                        .padding(.trailing, 6)
+                        .overlay(alignment: .bottom) {
+                            Rectangle()
+                                .fill(TurntableTokens.cream.opacity(0.08))
+                                .frame(height: 0.5)
+                                .padding(.leading, 20)
+                        }
+                        .transition(.opacity.combined(with: .move(edge: .trailing)))
+                    }
+                }
+            }
+            .padding(.bottom, 120)
+        }
+    }
+
+    // MARK: - Library results
+
+    /// How many library songs the All filter shows before "Show all".
+    private static let libraryPreviewCount = 4
+
+    /// What the user already has, above what the catalogue offers.
+    /// Under All it is a short preview; the Library filter shows it
+    /// whole.
+    @ViewBuilder
+    private var librarySection: some View {
+        let library = viewModel.libraryResults
+        let showsAll = viewModel.activeFilter == .library
+        if (viewModel.activeFilter == .all || showsAll) && !library.isEmpty {
+            Section(header: sectionHeader("In your library", count: library.count, accent: .cyberCyan)) {
+                let tracks = showsAll ? library.tracks : Array(library.tracks.prefix(Self.libraryPreviewCount))
+                ForEach(tracks) { track in
+                    SearchResultRow(
+                        track: track,
+                        isDownloaded: library.downloadedIDs.contains(track.videoId),
+                        isPlaying: viewModel.isCurrentlyPlaying(track),
+                        downloadTask: downloadManager.taskForTrack(track),
+                        onPlay: {
+                            HapticManager.medium()
+                            viewModel.playTrack(track)
+                        },
+                        onDownload: {
+                            HapticManager.light()
+                            viewModel.downloadTrack(track)
+                        },
+                        onAddToQueue: {
+                            HapticManager.light()
+                            viewModel.addToQueue(track)
+                        },
+                        onPlayNext: {
+                            HapticManager.light()
+                            viewModel.playNext(track)
+                        },
+                        onAddToPlaylist: {
+                            HapticManager.light()
+                            selectedTrackForPlaylist = track
+                        }
+                    )
+                    .listRowBackground(deck ? Color.clear : Color.cyberSurface)
+                    .accessibilityIdentifier("search.library.\(track.videoId)")
+                }
+
+                let playlists = showsAll ? library.playlists : Array(library.playlists.prefix(2))
+                ForEach(playlists) { playlist in
+                    UserPlaylistListRowCyberpunk(playlist: playlist) {
+                        HapticManager.light()
+                        selectedLibraryPlaylist = playlist
+                    }
+                    .listRowInsets(EdgeInsets(top: deck ? 0 : 4, leading: deck ? 20 : 12, bottom: deck ? 0 : 4, trailing: deck ? 20 : 12))
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(deck ? .visible : .hidden)
+                }
+
+                let hidden = library.count - tracks.count - playlists.count
+                if hidden > 0 {
+                    Button {
+                        HapticManager.light()
+                        withAnimation(.spring()) {
+                            viewModel.activeFilter = .library
+                        }
+                    } label: {
+                        HStack {
+                            Text("SHOW ALL \(library.count) IN YOUR LIBRARY")
+                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                .tracking(deck ? 1.0 : 0)
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 11, weight: .bold))
+                        }
+                        .foregroundColor(deck ? TurntableTokens.brass : .cyberCyan)
+                        .padding(.vertical, 6)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .listRowBackground(deck ? Color.clear : Color.cyberSurface)
+                    .accessibilityIdentifier("search.library.showAll")
+                }
+            }
+        } else if showsAll {
+            Text("Nothing in your library matches \"\(viewModel.searchText)\".")
+                .font(.system(size: 13))
+                .foregroundColor(deck ? TurntableTokens.cream.opacity(0.55) : .cyberDim)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 24)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .listRowInsets(EdgeInsets())
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+        }
+    }
+
     private var shouldShowSongs: Bool {
         viewModel.activeFilter == .all || viewModel.activeFilter == .songs
     }
@@ -385,7 +751,9 @@ struct SearchView: View {
     private func resultCount(for filter: SearchFilter) -> Int {
         switch filter {
         case .all:
-            return viewModel.results.count + viewModel.playlistResults.count
+            return viewModel.results.count + viewModel.playlistResults.count + viewModel.libraryResults.count
+        case .library:
+            return viewModel.libraryResults.count
         case .songs:
             return viewModel.results.count
         case .playlists:
@@ -441,7 +809,16 @@ struct SearchView: View {
     }
     
     // MARK: - Skeleton Loading
+    @ViewBuilder
     private var skeletonLoadingView: some View {
+        if deck {
+            deckSkeleton
+        } else {
+            legacySkeletonLoadingView
+        }
+    }
+
+    private var legacySkeletonLoadingView: some View {
         List {
             ForEach(0..<8, id: \.self) { _ in
                 HStack(spacing: 12) {
@@ -465,7 +842,7 @@ struct SearchView: View {
                     Spacer()
                 }
                 .padding(.vertical, 4)
-                .listRowBackground(Color.cyberSurface)
+                .listRowBackground(deck ? Color.clear : Color.cyberSurface)
             }
         }
         .listStyle(.insetGrouped)
@@ -474,7 +851,13 @@ struct SearchView: View {
     // MARK: - Empty State
     @ViewBuilder
     private var emptyStateView: some View {
-        if viewModel.hasSearched {
+        if deck {
+            if viewModel.hasSearched {
+                deckNoResults
+            } else {
+                deckBrowse
+            }
+        } else if viewModel.hasSearched {
             // No results - use EmptyStateView
             EmptyStateView(
                 type: .noResults(query: viewModel.searchText),
@@ -644,14 +1027,82 @@ struct PlaylistSearchRow: View {
     let onClone: () -> Void
     let onPlayAll: () -> Void
     let onAddToQueue: () -> Void
-    
-    var body: some View {
+    @Environment(\.deckStyle) private var deck
+
+    private var deckRow: some View {
         HStack(spacing: 12) {
-            // Artwork with video count
-            // v1.8.7: was 60x60. Standardized to 50x50 to match
-            // SearchResultRow's song thumbnails (also 50x50) so
-            // the whole search tab has one list-row thumbnail
-            // size. The video-count badge still fits at this size.
+            ArtworkThumbnail(url: playlist.artworkURL)
+                .frame(width: 46, height: 46)
+                .deckCover(cornerRadius: 2.5)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(playlist.title)
+                    .font(DeckType.title)
+                    .foregroundColor(TurntableTokens.cream)
+                Text("by \(playlist.author)")
+                    .font(DeckType.subtitle)
+                    .foregroundColor(TurntableTokens.cream.opacity(0.55))
+            }
+            .lineLimit(1)
+
+            Spacer(minLength: 8)
+
+            Text(DeckFormat.tracks(playlist.videoCount).uppercased())
+                .font(DeckType.smallPrint)
+                .foregroundColor(TurntableTokens.brass)
+        }
+        .frame(minHeight: 58)
+    }
+
+    @ViewBuilder
+    private var row: some View {
+        if deck {
+            deckRow
+        } else {
+            legacyRow
+        }
+    }
+
+    var body: some View {
+        row
+        .contentShape(Rectangle())
+        .onTapGesture {
+            onTap()
+        }
+        .contextMenu {
+            Button(action: onTap) {
+                Label("Preview", systemImage: "eye")
+            }
+            
+            Button(action: onPlayAll) {
+                Label("Play All", systemImage: "play.fill")
+            }
+            
+            Button(action: onAddToQueue) {
+                Label("Add to Queue", systemImage: "plus")
+            }
+            
+            Divider()
+            
+            Button(action: onClone) {
+                Label("Clone to Library", systemImage: "doc.on.doc")
+            }
+        }
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            Button(action: onClone) {
+                Label("Clone", systemImage: "doc.on.doc")
+            }
+            .tint(deck ? TurntableTokens.brass : .cyberCyan)
+
+            Button(action: onAddToQueue) {
+                Label("Queue", systemImage: "plus")
+            }
+            .tint(deck ? Color(white: 0.3) : .cyberMagenta)
+        }
+    }
+
+    private var legacyRow: some View {
+        HStack(spacing: 12) {
             ZStack(alignment: .bottomTrailing) {
                 ArtworkThumbnail(url: playlist.artworkURL)
                     .frame(width: 50, height: 50)
@@ -696,44 +1147,9 @@ struct PlaylistSearchRow: View {
                 .font(.caption)
         }
         .padding(.vertical, 8)
-        .contentShape(Rectangle())
-        .onTapGesture {
-            onTap()
-        }
-        .contextMenu {
-            Button(action: onTap) {
-                Label("Preview", systemImage: "eye")
-            }
-            
-            Button(action: onPlayAll) {
-                Label("Play All", systemImage: "play.fill")
-            }
-            
-            Button(action: onAddToQueue) {
-                Label("Add to Queue", systemImage: "plus")
-            }
-            
-            Divider()
-            
-            Button(action: onClone) {
-                Label("Clone to Library", systemImage: "doc.on.doc")
-            }
-        }
-        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-            Button(action: onClone) {
-                Label("Clone", systemImage: "doc.on.doc")
-            }
-            .tint(.cyberCyan)
-
-            Button(action: onAddToQueue) {
-                Label("Queue", systemImage: "plus")
-            }
-            .tint(.cyberMagenta)
-        }
     }
 }
 
-// MARK: - Artwork Thumbnail
 
 struct ArtworkThumbnail: View {
     let url: URL?
@@ -815,6 +1231,30 @@ struct SearchResultRow: View {
     let onPlayNext: () -> Void
     let onAddToPlaylist: () -> Void
     @StateObject private var playlistManager = PlaylistManager.shared
+    @Environment(\.deckStyle) private var deck
+
+    /// Deck: sleeve, print, small print; a lamp on the row that is
+    /// playing. A download in flight is an amber lamp, pulsing; a song
+    /// already on disk has a small engraved arrow.
+    private var deckLabel: some View {
+        DeckTrackRow(
+            title: track.title,
+            subtitle: track.displayArtist,
+            artworkURL: track.artworkURL,
+            smallPrint: DeckFormat.runtime(track.durationSeconds),
+            isPlaying: isPlaying
+        ) {
+            if let task = downloadTask, task.status.isActive {
+                DeckLamp(color: DeckSignal.power, state: .working)
+                    .accessibilityLabel("Downloading")
+            } else if isDownloaded {
+                Image(systemName: "arrow.down")
+                    .font(.system(size: 9, weight: .heavy))
+                    .foregroundColor(TurntableTokens.aluminium.opacity(0.7))
+                    .accessibilityLabel("Downloaded")
+            }
+        }
+    }
 
     var body: some View {
         // 2026-06-29 (S9): match the HomeRecentTrackRow design.
@@ -823,6 +1263,9 @@ struct SearchResultRow: View {
         // play indicator cluster with download status and an
         // animated equalizer when playing. No big play button.
         Button(action: onPlay) {
+            if deck {
+                deckLabel
+            } else {
             HStack(spacing: 12) {
                 CachedAsyncImage(url: track.artworkURL) {
                     RoundedRectangle(cornerRadius: 8)
@@ -885,6 +1328,7 @@ struct SearchResultRow: View {
                     }
                 }
                 .frame(width: 36)
+            }
             }
         }
         .buttonStyle(.plain)
@@ -974,12 +1418,12 @@ struct SearchResultRow: View {
             Button(action: onDownload) {
                 Label("Download", systemImage: "arrow.down")
             }
-            .tint(.cyberCyan)
+            .tint(deck ? TurntableTokens.brass : .cyberCyan)
 
             Button(action: onAddToQueue) {
                 Label("Queue", systemImage: "plus")
             }
-            .tint(.cyberMagenta)
+            .tint(deck ? Color(white: 0.3) : .cyberMagenta)
         }
         .accessibilityElement(children: .combine)
     }
@@ -1009,6 +1453,11 @@ struct CircularProgressView: View {
 class SearchViewModel: ObservableObject {
     @Published var results: [Track] = []
     @Published var playlistResults: [YouTubePlaylist] = []
+    /// 2026-11-21: what the user's own library holds for the query.
+    @Published var libraryResults = LibrarySearchResults()
+    /// The downloaded songs, read once per visit to the field rather
+    /// than on every keystroke.
+    private var downloadedSnapshot: [Track]?
     @Published var isLoading = false
     @Published var hasSearched = false
     @Published var downloadedVideoIds: Set<String> = []
@@ -1189,9 +1638,39 @@ class SearchViewModel: ObservableObject {
             .store(in: &cancellables)
     }
 
+    /// Searches the user's own library. Local and synchronous: no
+    /// request, so it is called on every keystroke.
+    @MainActor
+    func searchLibrary(query: String) {
+        guard !LibrarySearch.fold(query).isEmpty else {
+            libraryResults = LibrarySearchResults()
+            // The next search starts from a fresh read of the disk.
+            downloadedSnapshot = nil
+            return
+        }
+        let downloaded: [Track]
+        if let downloadedSnapshot {
+            downloaded = downloadedSnapshot
+        } else {
+            downloaded = LibrarySearch.downloadedTracks(in: PersistenceController.shared.viewContext)
+            downloadedSnapshot = downloaded
+        }
+        let manager = PlaylistManager.shared
+        let likedOrder = manager.playlists.first(where: { $0.isLikedSongsPlaylist })?.trackIds
+            ?? manager.likedTracks.sorted()
+        libraryResults = LibrarySearch.results(
+            for: query,
+            downloaded: downloaded,
+            liked: TrackStore.shared.getTracks(videoIds: likedOrder),
+            playlists: manager.playlists
+        )
+    }
+
     func clearSearch() {
         results = []
         playlistResults = []
+        libraryResults = LibrarySearchResults()
+        downloadedSnapshot = nil
         hasSearched = false
         pendingSearchQuery = nil
         cancellables.removeAll()

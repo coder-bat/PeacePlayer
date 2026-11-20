@@ -127,16 +127,27 @@ struct LibraryContent: View {
     @State private var showDownloadQueue = false
     @State private var selectedTracks: Set<String> = []
     @State private var isEditing = false
-    @State private var searchQuery = ""
-    // 2026-08-14: search bar focus state. Matches the
-    // SearchView's `isSearchFocused` pattern — drives the
-    // animated cyan-stroke border on the input.
-    @FocusState private var isSearchFocused: Bool
     // v1.6.9 (CV-15b): segmented Picker state. Default
     // Downloaded so the first thing the user sees is
     // the offline-available library they already know
     // — the Liked view is one tap away.
     @State private var libraryMode: LibraryMode = .downloaded
+    // 2026-11-20: Playlists are a third section of the Library. The
+    // turntable Home lost its Playlists icon and this tab is where
+    // they live now. Kept as its own flag rather than a third
+    // `LibraryMode` case: that enum means "which list of TRACKS", and
+    // every switch over it (sort options, delete vs unlike, row
+    // accessories) would need an arm that makes no sense for a list
+    // of playlists.
+    @State private var showsPlaylists = false
+    // 2026-11-21: the Library is the first screen moved onto the Deck
+    // design system (docs/design/deck-design-system.md). It is drawn
+    // the Deck way when the Turntable Home flag is on and the old way
+    // when it is off, so the app is never half-and-half. Each piece
+    // below keeps its old drawing as `legacy…` until the flag retires.
+    @ObservedObject private var featureFlags = FeatureFlags.shared
+    private var deck: Bool { featureFlags.turntableHome }
+    @State private var showCreatePlaylist = false
     // v1.6.9 (CV-15b): Combine cancellables for the
     // async stream-URL fetches kicked off by
     // playLikedTracks / addLikedTrackToQueue /
@@ -162,9 +173,13 @@ struct LibraryContent: View {
         // restyled in this pass — see `modePicker`,
         // `searchBar`, and `listView`.
         ZStack {
-            // Cyberpunk background
-            Theme.cyberBackground
-                .ignoresSafeArea()
+            // The room (Deck) or the cyberpunk background (legacy).
+            if deck {
+                DeckRoom()
+            } else {
+                Theme.cyberBackground
+                    .ignoresSafeArea()
+            }
 
             VStack(spacing: 0) {
                 customHeader
@@ -178,7 +193,19 @@ struct LibraryContent: View {
                 // active segment — not a single global
                 // "library is empty" overlay that hides
                 // both modes.
-                if currentTracks.isEmpty {
+                // 2026-11-20: the section picker sits above the
+                // empty check now. It used to live inside
+                // `contentView`, so an empty Downloaded list hid
+                // the only way to switch to Liked.
+                modePicker
+                    .padding(.bottom, 12)
+
+                if showsPlaylists {
+                    PlaylistsContent(
+                        viewMode: viewMode == .grid ? .grid : .list,
+                        showCreateSheet: $showCreatePlaylist
+                    )
+                } else if currentTracks.isEmpty {
                     emptyView
                 } else {
                     contentView
@@ -249,6 +276,7 @@ struct LibraryContent: View {
         } message: {
             Text(deleteAlertMessage)
         }
+        .environment(\.deckStyle, deck)
         .preferredColorScheme(.dark)
         // 2026-08-14: hide the system nav bar so the
         // customHeader is the only header chrome. When
@@ -313,10 +341,12 @@ struct LibraryContent: View {
             // matches the rest of the app's screen-level
             // titles (e.g. Home's "Downloaded", Search's
             // "Search").
+            // Deck: a screen's name is print on the wall — not
+            // monospaced, and it does not glow.
             Text("Library")
-                .font(.system(size: 22, weight: .bold, design: .monospaced))
-                .foregroundColor(.white)
-                .shadow(color: Theme.cyberCyan.opacity(0.4), radius: 8, x: 0, y: 0)
+                .font(deck ? DeckType.screenTitle : .system(size: 22, weight: .bold, design: .monospaced))
+                .foregroundColor(deck ? TurntableTokens.cream : .white)
+                .shadow(color: deck ? .clear : Theme.cyberCyan.opacity(0.4), radius: 8, x: 0, y: 0)
 
             Spacer()
 
@@ -382,6 +412,32 @@ struct LibraryContent: View {
                         )
                     }
                     .buttonStyle(.plain)
+                }
+            } else if showsPlaylists {
+                // 2026-11-20: the Playlists section has its own two
+                // actions, the ones its old screen kept in the nav bar.
+                headerIconButton(
+                    systemImage: viewMode == .grid ? "list.bullet" : "square.grid.2x2",
+                    badge: nil,
+                    badgeColor: .cyberCyan,
+                    accessibilityLabel: viewMode == .grid ? "Switch to list view" : "Switch to grid view",
+                    accessibilityHint: nil
+                ) {
+                    HapticManager.light()
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        viewMode = viewMode == .grid ? .list : .grid
+                    }
+                }
+
+                headerIconButton(
+                    systemImage: "plus",
+                    badge: nil,
+                    badgeColor: .cyberCyan,
+                    accessibilityLabel: "New playlist",
+                    accessibilityHint: nil
+                ) {
+                    HapticManager.light()
+                    showCreatePlaylist = true
                 }
             } else {
                 // Normal (non-edit) action cluster: 4 glass
@@ -504,7 +560,7 @@ struct LibraryContent: View {
                 badgeColor: badgeColor
             )
         }
-        .buttonStyle(.plain)
+        .buttonStyle(DeckPressStyle())
         .accessibilityLabel(accessibilityLabel)
         .accessibilityHint(accessibilityHint ?? "")
     }
@@ -516,6 +572,51 @@ struct LibraryContent: View {
     // wrapper.
     @ViewBuilder
     private func headerIconCircle(
+        systemImage: String,
+        badge: String? = nil,
+        badgeColor: Color = .cyberCyan
+    ) -> some View {
+        if deck {
+            // Deck: a small metal push button. A badge lights the
+            // button's lamp ring and puts the count on a card beside
+            // it — never a coloured pill on top.
+            ZStack(alignment: .topTrailing) {
+                DeckMetalCap(
+                    symbol: Self.deckSymbol(for: systemImage),
+                    accent: badgeColor == Theme.cyberMagenta ? DeckSignal.attention : DeckSignal.power,
+                    size: 28,
+                    isOn: badge != nil
+                )
+                if let badge {
+                    Text(badge)
+                        .font(.system(size: 8.5, weight: .bold, design: .monospaced))
+                        .foregroundColor(TurntableTokens.walnut)
+                        .padding(.horizontal, 3.5)
+                        .frame(minWidth: 13, minHeight: 13)
+                        .background(Capsule().fill(TurntableTokens.cream))
+                        .overlay(Capsule().strokeBorder(TurntableTokens.brass, lineWidth: 0.8))
+                        .offset(x: 5, y: -4)
+                }
+            }
+            .frame(width: 36, height: 36)
+            .contentShape(Rectangle())
+        } else {
+            legacyHeaderIconCircle(systemImage: systemImage, badge: badge, badgeColor: badgeColor)
+        }
+    }
+
+    /// Engraving wants solid shapes: outline symbols cut too thin to
+    /// read in a 28pt metal face.
+    private static func deckSymbol(for systemImage: String) -> String {
+        switch systemImage {
+        case "arrow.down.circle": return "arrow.down"
+        case "checkmark.circle": return "checkmark"
+        default: return systemImage
+        }
+    }
+
+    @ViewBuilder
+    private func legacyHeaderIconCircle(
         systemImage: String,
         badge: String? = nil,
         badgeColor: Color = .cyberCyan
@@ -565,7 +666,51 @@ struct LibraryContent: View {
         return failedCount > 0 ? Theme.cyberMagenta : Theme.cyberYellow
     }
 
+    @ViewBuilder
     private var emptyView: some View {
+        if deck {
+            deckEmptyView
+        } else {
+            legacyEmptyView
+        }
+    }
+
+    /// Deck: an empty shelf, and what to do about it.
+    private var deckEmptyView: some View {
+        VStack(spacing: 0) {
+            Spacer(minLength: 24)
+            VStack(spacing: 8) {
+                Text(libraryMode == .liked ? "Nothing liked yet" : "Nothing downloaded yet")
+                    .font(DeckType.title)
+                    .foregroundColor(TurntableTokens.cream)
+                Text(
+                    libraryMode == .liked
+                        ? "Tap the heart on a song and it will stand here."
+                        : "Songs you download play without a connection."
+                )
+                .font(DeckType.subtitle)
+                .foregroundColor(TurntableTokens.cream.opacity(0.55))
+                .multilineTextAlignment(.center)
+            }
+            .padding(.horizontal, 40)
+            .padding(.bottom, 18)
+
+            DeckLedge(title: libraryMode == .liked ? "Liked" : "Downloaded", count: 0)
+                .padding(.horizontal, 16)
+
+            if libraryMode == .downloaded {
+                DeckButton(title: "Search music", symbol: "magnifyingglass", kind: .card) {
+                    NotificationCenter.default.post(name: .openSearch, object: nil)
+                }
+                .padding(.top, 30)
+            }
+            Spacer(minLength: 24)
+            Spacer(minLength: 104)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var legacyEmptyView: some View {
         // v1.6.9 (CV-15b): the empty state changes
         // with the active segment. Downloaded =
         // "go search and download something" with
@@ -603,10 +748,6 @@ struct LibraryContent: View {
             // the "show both in the same view" goal
             // without burying one mode behind a card
             // or a sheet.
-            modePicker
-                .padding(.horizontal, 16)
-                .padding(.bottom, 12)
-
             // 2026-11-14: Play All / Shuffle row. Shown in BOTH
             // modes now (it was Liked-only). The Home page used to
             // carry the Downloaded section with its own Play All /
@@ -618,23 +759,22 @@ struct LibraryContent: View {
                     .padding(.bottom, 12)
             }
 
-            // Search bar
-            searchBar
-                .padding(.horizontal, 16)
-                .padding(.bottom, 12)
+            // 2026-11-21: the Library's own search field is gone.
+            // The Search tab finds what is in the library as well as
+            // what is in the catalogue (see `LibrarySearch`).
 
             // Stats bar
             HStack {
                 Text("\(currentTracks.count) TRACK\(currentTracks.count == 1 ? "" : "S")")
-                    .font(.system(size: 12, design: .monospaced))
-                    .foregroundColor(Theme.cyberDim)
+                    .font(deck ? DeckType.smallPrint : .system(size: 12, design: .monospaced))
+                    .foregroundColor(deck ? TurntableTokens.cream.opacity(0.5) : Theme.cyberDim)
 
                 Spacer()
 
                 if libraryMode == .downloaded {
                     Text(viewModel.totalSizeFormatted.uppercased())
-                        .font(.system(size: 12, design: .monospaced))
-                        .foregroundColor(Theme.cyberDim)
+                        .font(deck ? DeckType.smallPrint : .system(size: 12, design: .monospaced))
+                        .foregroundColor(deck ? TurntableTokens.brass : Theme.cyberDim)
                 }
             }
             .padding(.horizontal, 16)
@@ -664,35 +804,118 @@ struct LibraryContent: View {
     // downloaded count) so the user can see at a glance
     // how many tracks are in each mode without switching
     // to find out.
+    @ViewBuilder
     private var modePicker: some View {
-        HStack(spacing: 10) {
-            // Liked chip
-            LibraryModeChip(
-                title: "Liked",
-                icon: "heart.fill",
-                count: playlistManager.likedTracks.count,
-                isSelected: libraryMode == .liked
-            ) {
-                HapticManager.medium()
-                withAnimation(.spring(response: 0.3)) {
-                    libraryMode = .liked
-                }
-            }
+        if deck {
+            deckModePicker
+        } else {
+            legacyModePicker
+        }
+    }
 
-            // Downloaded chip
-            LibraryModeChip(
-                title: "Downloaded",
-                icon: "arrow.down.circle.fill",
-                count: viewModel.tracks.count,
-                isSelected: libraryMode == .downloaded
-            ) {
-                HapticManager.medium()
-                withAnimation(.spring(response: 0.3)) {
-                    libraryMode = .downloaded
+    /// Deck: a selector. Three positions in an anodised panel; the
+    /// chosen one has its lamp lit.
+    private var deckModePicker: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 2) {
+                DeckChip(
+                    title: "Liked",
+                    count: playlistManager.likedTracks.count,
+                    isSelected: !showsPlaylists && libraryMode == .liked
+                ) {
+                    HapticManager.selectionChanged()
+                    withAnimation(DeckMotion.move) {
+                        showsPlaylists = false
+                        libraryMode = .liked
+                    }
                 }
+                DeckChip(
+                    title: "Downloaded",
+                    count: viewModel.tracks.count,
+                    isSelected: !showsPlaylists && libraryMode == .downloaded
+                ) {
+                    HapticManager.selectionChanged()
+                    withAnimation(DeckMotion.move) {
+                        showsPlaylists = false
+                        libraryMode = .downloaded
+                    }
+                }
+                DeckChip(
+                    title: "Playlists",
+                    count: playlistManager.playlists.filter { !$0.isSmart }.count,
+                    isSelected: showsPlaylists
+                ) {
+                    HapticManager.selectionChanged()
+                    isEditing = false
+                    selectedTracks.removeAll()
+                    withAnimation(DeckMotion.move) {
+                        showsPlaylists = true
+                    }
+                }
+                .accessibilityIdentifier("library.section.playlists")
             }
+            .padding(4)
+            .deckPanel()
+            .padding(.horizontal, 16)
+            // Room for the panel's shadow inside the scroll view.
+            .padding(.vertical, 6)
+        }
+        .padding(.vertical, -6)
+    }
 
-            Spacer()
+    private var legacyModePicker: some View {
+        // Three chips do not fit a 375pt screen side by side, so the
+        // strip scrolls.
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 10) {
+                // Liked chip
+                LibraryModeChip(
+                    title: "Liked",
+                    icon: "heart.fill",
+                    count: playlistManager.likedTracks.count,
+                    isSelected: !showsPlaylists && libraryMode == .liked
+                ) {
+                    HapticManager.medium()
+                    withAnimation(.spring(response: 0.3)) {
+                        showsPlaylists = false
+                        libraryMode = .liked
+                    }
+                }
+
+                // Downloaded chip
+                LibraryModeChip(
+                    title: "Downloaded",
+                    icon: "arrow.down.circle.fill",
+                    count: viewModel.tracks.count,
+                    isSelected: !showsPlaylists && libraryMode == .downloaded
+                ) {
+                    HapticManager.medium()
+                    withAnimation(.spring(response: 0.3)) {
+                        showsPlaylists = false
+                        libraryMode = .downloaded
+                    }
+                }
+
+                // Playlists chip (2026-11-20). The count is the
+                // user's own playlists; the smart ones are always
+                // there.
+                LibraryModeChip(
+                    title: "Playlists",
+                    icon: "music.note.list",
+                    count: playlistManager.playlists.filter { !$0.isSmart }.count,
+                    isSelected: showsPlaylists
+                ) {
+                    HapticManager.medium()
+                    // Leaving a track list ends any selection in it.
+                    isEditing = false
+                    selectedTracks.removeAll()
+                    withAnimation(.spring(response: 0.3)) {
+                        showsPlaylists = true
+                    }
+                }
+                .accessibilityIdentifier("library.section.playlists")
+            }
+            .padding(.horizontal, 16)
         }
     }
 
@@ -700,7 +923,34 @@ struct LibraryContent: View {
     // "PLAY ALL" is the primary CTA (cyan fill), "SHUFFLE" is the
     // secondary one (outlined). Both act on `currentTracks`, i.e. the
     // filtered list the user is looking at.
+    @ViewBuilder
     private var playAllRow: some View {
+        if deck {
+            deckPlayAllRow
+        } else {
+            legacyPlayAllRow
+        }
+    }
+
+    /// Deck: the cream card is the screen's one main action; shuffle
+    /// is a key beside it.
+    private var deckPlayAllRow: some View {
+        HStack(spacing: 12) {
+            DeckButton(title: "Play all", symbol: "play.fill", kind: .card, fillsWidth: true) {
+                HapticManager.medium()
+                playAll(shuffled: false)
+            }
+            .accessibilityLabel("Play all \(currentTracks.count) tracks")
+
+            DeckButton(title: "Shuffle", symbol: "shuffle", fillsWidth: true) {
+                HapticManager.medium()
+                playAll(shuffled: true)
+            }
+            .accessibilityLabel("Shuffle all \(currentTracks.count) tracks")
+        }
+    }
+
+    private var legacyPlayAllRow: some View {
         HStack(spacing: 10) {
             Button {
                 HapticManager.medium()
@@ -849,7 +1099,7 @@ struct LibraryContent: View {
     private var currentTracks: [DownloadedTrackItem] {
         switch libraryMode {
         case .downloaded:
-            return viewModel.filteredTracks(searchQuery: searchQuery)
+            return viewModel.filteredTracks(searchQuery: "")
         case .liked:
             return likedTracksAsItems
         }
@@ -880,32 +1130,8 @@ struct LibraryContent: View {
             orderedIds = videoIds
         }
         // Apply search filter
-        let filteredIds: [String]
-        if searchQuery.isEmpty {
-            filteredIds = orderedIds
-        } else {
-            let q = searchQuery.lowercased()
-            filteredIds = orderedIds.filter { id in
-                // We don't have direct access to the
-                // track's title/artist here without
-                // looking it up, so we do that in the
-                // next pass.
-                return true
-            }
-        }
-        // Build items, applying the search filter
-        // against the actual track metadata.
-        let tracks = TrackStore.shared.getTracks(videoIds: filteredIds)
+        let tracks = TrackStore.shared.getTracks(videoIds: orderedIds)
         return tracks.compactMap { track in
-            // Search filter on title/artist
-            if !searchQuery.isEmpty {
-                let q = searchQuery.lowercased()
-                let matchesTitle = track.title.lowercased().contains(q)
-                let matchesArtist = track.displayArtist.lowercased().contains(q)
-                if !matchesTitle && !matchesArtist {
-                    return nil
-                }
-            }
             return DownloadedTrackItem.likedPlaceholder(track: track)
         }
     }
@@ -945,62 +1171,6 @@ struct LibraryContent: View {
         }
     }
 
-    // MARK: - Search Bar
-
-    // 2026-08-14: restyled to match SearchView's
-    // "FIND MUSIC..." treatment. Same monospaced
-    // placeholder, same animated focus border, same
-    // magnifier icon color transition, same xmark
-    // clear button. The placeholder is uppercased
-    // ("SEARCH LIBRARY...") to match the "FIND MUSIC..."
-    // pattern from SearchView.
-    private var searchBar: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 15, weight: .medium))
-                .foregroundColor(isSearchFocused || !searchQuery.isEmpty ? .cyberCyan : .cyberDim)
-
-            TextField("", text: $searchQuery,
-                      prompt: Text("SEARCH LIBRARY...")
-                          .foregroundColor(Color.cyberDim)
-                          .font(.system(size: 14, design: .monospaced)))
-                .foregroundColor(.white)
-                .font(.system(size: 14, design: .monospaced))
-                .focused($isSearchFocused)
-                .submitLabel(.search)
-                .autocorrectionDisabled()
-                .textInputAutocapitalization(.never)
-                .accentColor(Theme.cyberCyan)
-
-            if !searchQuery.isEmpty {
-                Button {
-                    HapticManager.light()
-                    searchQuery = ""
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 16))
-                        .foregroundColor(.cyberDim)
-                }
-                .buttonStyle(.plain)
-                .transition(.opacity)
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .background(Color.cyberSurface)
-        .overlay(
-            RoundedRectangle(cornerRadius: CornerRadius.md)
-                .stroke(
-                    isSearchFocused || !searchQuery.isEmpty
-                        ? Color.cyberCyan.opacity(0.5)
-                        : Color.cyberDim.opacity(0.3),
-                    lineWidth: 1
-                )
-        )
-        .cornerRadius(CornerRadius.md)
-        .animation(.easeInOut(duration: 0.2), value: isSearchFocused)
-    }
-
     private var gridView: some View {
         ScrollView {
             LazyVGrid(
@@ -1023,6 +1193,7 @@ struct LibraryContent: View {
                         isPlaying: viewModel.isCurrentlyPlaying(track),
                         memoryPreview: songMemoryManager.memory(for: track.track)?.previewText,
                         mode: libraryMode,
+                        deck: deck,
                         onTap: {
                             if isEditing {
                                 toggleSelection(track)
@@ -1155,30 +1326,11 @@ struct LibraryContent: View {
                     // artwork, title + artist subtitle,
                     // cyber-cyan playing highlight, 36pt
                     // right-side accessory cluster.
-                    TrackRow(
-                        title: track.title,
-                        subtitle: track.artist,
-                        subtitle2: nil,  // no album/duration
-                        artworkURL: track.thumbnailURL,
-                        isPlaying: isPlaying,
-                        // 2026-08-14: dropped subtitle2
-                        // (no file-size line) for visual
-                        // parity with SearchView's
-                        // `SearchResultRow`. The file
-                        // size is still shown in the
-                        // header stats bar above the
-                        // list (`.padding(.horizontal)`
-                        // row with "X TRACKS · Y MB")
-                        // for Downloaded mode.
-                        showSubtitle: true,
-                        accessory: .custom(AnyView(
-                            libraryAccessoryCluster(
-                                isPlaying: isPlaying,
-                                isDownloaded: trackIsOnDisk,
-                                isEditing: isEditing
-                            )
-                        )),
-                        onTap: {
+                    if deck {
+                        // Deck: sleeve, print, small print. The lamp
+                        // on the playing row is the same cyan as the
+                        // ring round the current record in the tray.
+                        Button {
                             if isEditing {
                                 HapticManager.light()
                                 toggleSelection(track)
@@ -1186,11 +1338,63 @@ struct LibraryContent: View {
                                 HapticManager.medium()
                                 viewModel.playTrack(track)
                             }
+                        } label: {
+                            DeckTrackRow(
+                                title: track.title,
+                                subtitle: track.artist,
+                                artworkURL: track.thumbnailURL,
+                                smallPrint: DeckFormat.runtime(track.durationSeconds),
+                                isPlaying: isPlaying
+                            ) {
+                                if trackIsOnDisk && !isDownloadedTrack {
+                                    // In Liked, mark the ones that
+                                    // also play offline.
+                                    Image(systemName: "arrow.down")
+                                        .font(.system(size: 9, weight: .heavy))
+                                        .foregroundColor(TurntableTokens.aluminium.opacity(0.7))
+                                        .accessibilityLabel("Downloaded")
+                                }
+                            }
                         }
-                    )
+                        .buttonStyle(.plain)
+                    } else {
+                        TrackRow(
+                            title: track.title,
+                            subtitle: track.artist,
+                            subtitle2: nil,  // no album/duration
+                            artworkURL: track.thumbnailURL,
+                            isPlaying: isPlaying,
+                            // 2026-08-14: dropped subtitle2
+                            // (no file-size line) for visual
+                            // parity with SearchView's
+                            // `SearchResultRow`. The file
+                            // size is still shown in the
+                            // header stats bar above the
+                            // list (`.padding(.horizontal)`
+                            // row with "X TRACKS · Y MB")
+                            // for Downloaded mode.
+                            showSubtitle: true,
+                            accessory: .custom(AnyView(
+                                libraryAccessoryCluster(
+                                    isPlaying: isPlaying,
+                                    isDownloaded: trackIsOnDisk,
+                                    isEditing: isEditing
+                                )
+                            )),
+                            onTap: {
+                                if isEditing {
+                                    HapticManager.light()
+                                    toggleSelection(track)
+                                } else {
+                                    HapticManager.medium()
+                                    viewModel.playTrack(track)
+                                }
+                            }
+                        )
+                    }
                 }
-                .listRowBackground(Color.cyberSurface)
-                .listRowSeparatorTint(Theme.cyberDim.opacity(0.2))
+                .listRowBackground(deck ? Color.clear : Color.cyberSurface)
+                .listRowSeparatorTint(deck ? TurntableTokens.cream.opacity(0.08) : Theme.cyberDim.opacity(0.2))
                 .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
                 .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                     // 2026-08-14: trailing swipe action
@@ -1272,7 +1476,7 @@ struct LibraryContent: View {
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
-        .background(Theme.cyberBackground)
+        .background(deck ? Color.clear : Theme.cyberBackground)
         .refreshable {
             // v1.6.9 (CV-15b): same as gridView —
             // pull-to-refresh only refreshes
@@ -1474,14 +1678,127 @@ struct GridTrackCell: View {
     // in Liked mode (the placeholder item has no
     // real size).
     let mode: LibraryMode
+    /// Drawn the Deck way: a sleeve with its record showing.
+    var deck: Bool = false
     let onTap: () -> Void
     let onPlay: () -> Void
     let onPlayNext: () -> Void
     let onAddToQueue: () -> Void
     let onDelete: () -> Void
 
+    /// Deck: the cover is a sleeve — square-cornered card, lit edge,
+    /// the record peeking from its opening. No play button drawn over
+    /// the art: the whole sleeve plays, and the art is the point.
+    private var deckSleeve: some View {
+        Color.clear
+            .aspectRatio(1, contentMode: .fit)
+            .overlay(
+                GeometryReader { geo in
+                    let side = geo.size.width
+                    ZStack {
+                        if !isPlaying {
+                            Circle()
+                                .fill(
+                                    RadialGradient(
+                                        colors: [Color(white: 0.20), TurntableTokens.vinyl],
+                                        center: .center,
+                                        startRadius: side / 3,
+                                        endRadius: side / 2
+                                    )
+                                )
+                                .overlay(Circle().strokeBorder(.white.opacity(0.2), lineWidth: 0.8))
+                                .frame(width: side - 10, height: side - 10)
+                                .offset(x: 12)
+                        }
+
+                        ZStack {
+                            TurntableTokens.walnut
+                            if let url = track.thumbnailURL {
+                                CachedAsyncImage(url: url) {
+                                    Image(systemName: "music.note")
+                                        .font(.system(size: 34, weight: .light))
+                                        .foregroundColor(TurntableTokens.aluminium.opacity(0.6))
+                                }
+                                .frame(width: side, height: side)
+                                .clipped()
+                            } else {
+                                Image(systemName: "music.note")
+                                    .font(.system(size: 34, weight: .light))
+                                    .foregroundColor(TurntableTokens.aluminium.opacity(0.6))
+                            }
+                        }
+                        .frame(width: side, height: side)
+                        .deckCover()
+
+                        if memoryPreview != nil {
+                            SongMemoryBadge(text: nil)
+                                .padding(8)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                        }
+
+                        if isPlaying {
+                            Image(systemName: "waveform")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundColor(.black)
+                                .frame(width: 24, height: 24)
+                                .background(Circle().fill(DeckSignal.live))
+                                .shadow(color: DeckSignal.live.opacity(0.7), radius: 5)
+                                .padding(7)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                        }
+
+                        if isEditing {
+                            Circle()
+                                .fill(isSelected ? DeckSignal.live : Color.black.opacity(0.55))
+                                .frame(width: 26, height: 26)
+                                .overlay(Circle().strokeBorder(TurntableTokens.cream.opacity(0.7), lineWidth: 1.2))
+                                .overlay(
+                                    Image(systemName: isSelected ? "checkmark" : "")
+                                        .font(.system(size: 12, weight: .bold))
+                                        .foregroundColor(.black)
+                                )
+                                .padding(8)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                        }
+                    }
+                    .frame(width: side, height: side)
+                }
+            )
+            // The record shows past the sleeve's right edge.
+            .padding(.trailing, 12)
+    }
+
+    private var deckCaption: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(track.title)
+                .font(DeckType.title)
+                .foregroundColor(isPlaying ? DeckSignal.live : TurntableTokens.cream)
+                .lineLimit(1)
+            Text(track.artist)
+                .font(DeckType.subtitle)
+                .foregroundColor(TurntableTokens.cream.opacity(0.55))
+                .lineLimit(1)
+            let small = [
+                DeckFormat.runtime(track.durationSeconds),
+                mode == .downloaded ? track.fileSizeFormatted.uppercased() : nil
+            ].compactMap { $0 }.joined(separator: "  ·  ")
+            if !small.isEmpty {
+                Text(small)
+                    .font(DeckType.smallPrint)
+                    .foregroundColor(TurntableTokens.brass)
+                    .lineLimit(1)
+                    .padding(.top, 1)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: deck ? 10 : 8) {
+            if deck {
+                deckSleeve
+                deckCaption
+            } else {
             // v1.8.7 / S18-LIBRARY-GRID-OVERFLOW: the ZStack used
             // to host a CachedAsyncImage with no frame. The
             // CachedAsyncImage renders at the image's natural
@@ -1712,6 +2029,7 @@ struct GridTrackCell: View {
             // the `.lineLimit(1)` on the Text views
             // truncates cleanly at the column edge.
             .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
         // 2026-08-14 / OVERFLOW-4: bound the outer
         // VStack to the column width. Without this,

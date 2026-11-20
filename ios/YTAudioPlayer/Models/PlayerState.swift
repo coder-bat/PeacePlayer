@@ -375,6 +375,12 @@ class PlayerState: ObservableObject {
     /// mirror here means it lives for the lifetime of the
     /// singleton — exactly what we want.
     private var lifetimeCancellables = Set<AnyCancellable>()
+    // 2026-11-20: subscriptions for lazily resolving a restored queue
+    // item's stream URL. Kept separate from the per-player cancellables
+    // (which `stop()` clears) because the resolution spans a `stop()` —
+    // it finishes by calling `play(item:)`, which tears the old player
+    // down.
+    private var restoreCancellables = Set<AnyCancellable>()
     // S17-H / Tier 4: was `private`; promoted to internal for
     // `AVPlayerController` (which reads these in
     // `handlePlayerItemStatus` to drive the retry-after-failure
@@ -751,7 +757,15 @@ class PlayerState: ObservableObject {
             }
             .store(in: &lifetimeCancellables)
 
-        restoreQueue()
+        // 2026-11-20: the queue restore used to run here
+        // (`restoreQueue()`), which refetched a stream URL for every
+        // queue item in parallel at launch. When the backend was cold
+        // or unreachable, every fetch failed and the restore produced
+        // an EMPTY queue — the app came back with nothing. The restore
+        // now lives in `QueueRestorer.restoreLastSession()`, which
+        // rebuilds the queue from CoreData metadata only and resolves
+        // stream URLs lazily on play. `ContentView` calls it on
+        // appear.
 
         // C-2 fix: register memory warning via token (so we can clean up
         // consistently if needed; previously this used the selector-based
@@ -851,50 +865,105 @@ class PlayerState: ObservableObject {
     // MARK: - Queue Restoration
 
     /// S17-H (perf 10 P1-F5): tracks whether the user has touched
-    /// playback before `restoreQueue` completed. The restore fires
+    /// playback before a restore completed. The restore used to fire
     /// N HTTP calls in parallel (PlaybackQueueManager.restoreQueue),
     /// which on a large saved queue can take several seconds. The
     /// previous code unconditionally overwrote whatever the user
     /// did in that window — so tapping a track first and then
     /// having the saved queue clobber it was a real bug, not just
     /// a perf issue.
+    ///
+    /// 2026-11-20: the launch restore no longer fetches stream URLs,
+    /// so it completes synchronously and this guard is no longer load
+    /// bearing on the cold-launch path. It is kept because the
+    /// user-touched entry points still mark the queue before mutating
+    /// it, and a future "resume from widget" flow may need it.
     private var hasUserTouchedPlayback = false
 
-    private func restoreQueue() {
-        // Use PlaybackQueueManager to restore queue with fresh stream URLs
-        PlaybackQueueManager.shared.restoreQueue { [weak self] items in
-            guard let self = self, !items.isEmpty else { return }
+    // MARK: - Restore (2026-11-20)
 
-            DispatchQueue.main.async {
-                // S17-H (P1-F5): if the user has already started
-                // playing, the restore would clobber their choice.
-                // Skip the restore in that case — the saved queue
-                // is "stale" by definition once the user has made
-                // a decision.
-                if self.hasUserTouchedPlayback {
-                    print("📱 Skipping queue restore — user has already started playing")
-                    return
-                }
+    /// Position (0...1) the next `play(item:)` should seek to once the
+    /// player is actually ready. Set by the launch restore, consumed by
+    /// `AVPlayerController` when the `AVPlayerItem` reports
+    /// `readyToPlay`.
+    var pendingResumeFraction: Double?
 
-                // S17-G: forward to the store. The store handles
-                // the index clamping via setCurrentIndex.
-                self.queueStore.replace(with: items)
-                let savedIndex = PlaybackQueueManager.shared.getSavedCurrentIndex()
-                self.queueStore.setCurrentIndex(savedIndex)
+    /// Applies a restored session to the player: the current track's
+    /// duration and the paused playhead position.
+    ///
+    /// The item is passed in explicitly rather than read from
+    /// `currentItem`: the store's mirror subscription publishes
+    /// `currentItem` on the NEXT main-queue turn, so at restore time
+    /// `currentItem` is still nil and reading it here would silently
+    /// drop the restored position.
+    ///
+    /// The scrubber and the time labels read from `playbackClock`, so
+    /// the restored position is seeded there. Without this the app
+    /// would come back showing the right track but at 0:00.
+    func applyRestoredState(item: QueueItem, snapshot: PlaybackSnapshot?) {
+        let trackDuration = Double(item.track.durationSeconds)
+        updateExpectedDuration(trackDuration)
 
-                let currentIndex = self.queueStore.currentIndex
-                print("📱 Restored queue with \(items.count) items, current index: \(currentIndex)")
+        guard let snapshot,
+              snapshot.trackId == item.track.videoId else { return }
 
-                // Restore the current item without auto-playing.
-                // The mirror subscription will also set currentItem,
-                // but we do it here to call updateExpectedDuration
-                // synchronously (the mirror fires on the next runloop).
-                if currentIndex >= 0, currentIndex < items.count {
-                    let item = items[currentIndex]
-                    self.updateExpectedDuration(Double(item.track.durationSeconds))
-                }
-            }
+        let fraction = max(0, min(snapshot.progress, 0.99))
+        playbackClock.setRestoredPosition(
+            currentTime: fraction * effectiveDuration,
+            progress: fraction,
+            expectedDuration: trackDuration
+        )
+        // Nudge PlayerState's own @Published mirrors. The clock is a
+        // NESTED ObservableObject: writing to it does not notify
+        // PlayerState's observers, so the views that read
+        // `playerState.playbackClock.progress` through PlayerState (the
+        // turntable deck) would keep showing the pre-restore position
+        // until something else happened to re-render them.
+        progress = fraction
+        currentTime = fraction * effectiveDuration
+        pendingResumeFraction = fraction
+        print("⏪ Restored position: \(Int(fraction * 100))% of \(item.track.title)")
+    }
+
+    /// Applies the pending resume position to the live player.
+    ///
+    /// Called when the `AVPlayerItem` reports `readyToPlay`, so the
+    /// seek lands on a prepared player rather than fighting the
+    /// buffering state.
+    func applyPendingResumePosition() {
+        guard let fraction = pendingResumeFraction else { return }
+        pendingResumeFraction = nil
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+            self?.seek(to: fraction)
+            print("⏩ Resumed at \(Int(fraction * 100))% of the track")
         }
+    }
+
+    /// Persists the current playback snapshot (track, queue index,
+    /// playhead) so the next cold launch can restore it.
+    ///
+    /// Called on track change, on throttled progress updates and on
+    /// every background transition.
+    func persistPlaybackSnapshot() {
+        // `currentItem` is the source of truth, but the store's mirror
+        // publishes it on the next main-queue turn — during a launch
+        // restore it is still nil. Fall back to the queue slot at the
+        // current index so the restored state is persisted too.
+        let item = currentItem ?? {
+            let items = queueStore.items
+            let index = queueStore.currentIndex
+            return items.indices.contains(index) ? items[index] : nil
+        }()
+        guard let item = item else { return }
+        dataManager.savePlaybackSnapshot(
+            PlaybackSnapshot(
+                trackId: item.track.videoId,
+                queueIndex: currentIndex,
+                progress: playbackClock.progress,
+                wasPlaying: playbackState == .playing,
+                savedAt: Date()
+            )
+        )
     }
 
     /// S17-H (P1-F5): called by any user-initiated playback entry
@@ -1264,10 +1333,65 @@ class PlayerState: ObservableObject {
         }
     }
 
+    /// Resolves a fresh stream URL for a queue item restored at launch
+    /// and plays it.
+    ///
+    /// 2026-11-20: the launch restore rebuilds the queue from CoreData
+    /// metadata only — streamed tracks get a placeholder URL. This
+    /// resolves the real URL the moment the user presses play, so the
+    /// restore itself stays instant and does not depend on the backend
+    /// being reachable at launch.
+    private func playRestoredItem(_ item: QueueItem) {
+        playbackState = .loading
+
+        StreamURLCache.shared.getStreamUrl(videoId: item.track.videoId)
+            .receive(on: DispatchQueue.main)
+            .sink(
+                receiveCompletion: { [weak self] result in
+                    if case .failure(let error) = result {
+                        print("❌ Failed to resolve stream URL for \(item.track.title): \(error)")
+                        self?.playbackState = .error("Failed to load audio")
+                        ErrorHandler.shared.show(
+                            .playbackFailed("Couldn't load \"\(item.track.title)\". Check your connection and try again.")
+                        )
+                    }
+                },
+                receiveValue: { [weak self] streamInfo in
+                    guard let self = self else { return }
+                    let resolved = QueueItem(
+                        track: item.track,
+                        streamUrl: streamInfo.streamUrl,
+                        source: .stream,
+                        replayGain: streamInfo.replayGain
+                    )
+                    // Swap the placeholder out in the queue so the
+                    // restored slot holds a usable URL from now on.
+                    var updated = self.queueStore.items
+                    if let idx = updated.firstIndex(where: { $0.track.videoId == item.track.videoId }) {
+                        updated[idx] = resolved
+                        self.queueStore.replace(with: updated)
+                    }
+                    self.play(item: resolved, addToQueue: false)
+                }
+            )
+            .store(in: &restoreCancellables)
+    }
+
     func play(item: QueueItem, addToQueue: Bool = true) {
         #if DEBUG
         PlayCrashDiagnostics.log(.playback, "play(item:) ENTRY videoId=\(item.track.videoId) title=\(item.track.title) source=\(item.source) currentItem.videoId=\(currentItem?.track.videoId ?? "nil") playbackState=\(playbackState)")
         #endif
+
+        // 2026-11-20: a queue item restored at launch carries a
+        // PLACEHOLDER stream URL — the restore rebuilds the queue from
+        // CoreData metadata only and deliberately does not fetch
+        // stream URLs (doing that for every item at launch was what
+        // wiped the queue whenever the backend was cold). Resolve a
+        // fresh URL here, on demand, and re-enter this method with it.
+        if item.source == .stream && item.streamUrl.isEmpty {
+            playRestoredItem(item)
+            return
+        }
 
         // S17-H / Tier 4 dual-load fix: dedup at the AVPlayer
         // creation site. If another play for the same videoId
@@ -1349,6 +1473,12 @@ class PlayerState: ObservableObject {
         updateExpectedDuration(Double(item.track.durationSeconds))
         print("🎵 CRITICAL: Set expectedDuration = \(expectedDuration) from track.durationSeconds = \(item.track.durationSeconds)")
         playbackState = .loading
+
+        // 2026-11-20: `stop()` (called above) already reset the
+        // playback clock, so this track starts at 0:00. Record the new
+        // snapshot so a cold launch comes back on THIS track rather
+        // than the previous one.
+        persistPlaybackSnapshot()
 
         if addToQueue {
             // S17-G: add to the store (dedup + set currentIndex to
@@ -2673,6 +2803,10 @@ class PlayerState: ObservableObject {
             if Int(newProgress * 100) % 5 == 0 {
                 if let item = currentItem {
                     dataManager.updatePlaybackProgress(for: item.track.videoId, progress: newProgress)
+                    // 2026-11-20: keep the launch-restore snapshot fresh
+                    // as the track plays, so a cold launch comes back at
+                    // roughly the position the user left off at.
+                    persistPlaybackSnapshot()
                 }
             }
 

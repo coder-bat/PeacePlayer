@@ -187,6 +187,149 @@ struct YouTubePlaylistDetails: Codable {
     let tracks: [Track]
 }
 
+// MARK: - Album (from the backend's album search)
+
+/// One album, as the backend's album search returns it.
+///
+/// The backend answers with YouTube Music's own album browse id
+/// ("MPREb_..."), the album's title and year, and its cover art. The
+/// tracks are not here — they come from `AlbumDetails` when the album
+/// is opened.
+struct Album: Identifiable, Codable, Equatable {
+    /// YouTube Music's browse id for the album.
+    let browseId: String
+    let title: String
+    /// The album's artists, without the type label YouTube Music puts
+    /// in front of them ("Album", "Single", "EP").
+    let artists: [String]
+    /// "1997" and the like; empty when the year is not known.
+    let year: String
+    /// "Album", "Single" or "EP".
+    let type: String
+    /// How many tracks the album has. Zero when the backend does not
+    /// know yet — album search does not carry the count.
+    let trackCount: Int
+    let thumbnails: [Thumbnail]
+    let thumbnailSmall: Thumbnail?
+    let thumbnailLarge: Thumbnail?
+
+    var id: String { browseId }
+
+    /// The cover for a shelf-sized card.
+    var artworkURL: URL? {
+        thumbnailSmall?.url ?? thumbnails.last?.url
+    }
+
+    /// The cover at full size, for a detail card.
+    var fullArtworkURL: URL? {
+        thumbnailLarge?.url ?? thumbnails.last?.url
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case browseId, title, artists, year, type, trackCount
+        case thumbnails, thumbnailSmall, thumbnailLarge
+    }
+
+    /// The memberwise initializer, written out because the custom
+    /// decoder below suppresses Swift's own.
+    init(
+        browseId: String,
+        title: String,
+        artists: [String],
+        year: String,
+        type: String,
+        trackCount: Int,
+        thumbnails: [Thumbnail],
+        thumbnailSmall: Thumbnail?,
+        thumbnailLarge: Thumbnail?
+    ) {
+        self.browseId = browseId
+        self.title = title
+        self.artists = artists
+        self.year = year
+        self.type = type
+        self.trackCount = trackCount
+        self.thumbnails = thumbnails
+        self.thumbnailSmall = thumbnailSmall
+        self.thumbnailLarge = thumbnailLarge
+    }
+
+    /// Decoded leniently: a backend that does not know a field yet
+    /// must not empty the whole shelf.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        browseId = try c.decode(String.self, forKey: .browseId)
+        title = try c.decode(String.self, forKey: .title)
+        artists = try c.decodeIfPresent([String].self, forKey: .artists) ?? []
+        year = try c.decodeIfPresent(String.self, forKey: .year) ?? ""
+        type = try c.decodeIfPresent(String.self, forKey: .type) ?? "Album"
+        trackCount = try c.decodeIfPresent(Int.self, forKey: .trackCount) ?? 0
+        thumbnails = try c.decodeIfPresent([Thumbnail].self, forKey: .thumbnails) ?? []
+        thumbnailSmall = try c.decodeIfPresent(Thumbnail.self, forKey: .thumbnailSmall)
+        thumbnailLarge = try c.decodeIfPresent(Thumbnail.self, forKey: .thumbnailLarge)
+    }
+}
+
+/// An album and the tracks on it.
+struct AlbumDetails: Codable, Equatable {
+    let browseId: String
+    let title: String
+    let artists: [String]
+    let year: String
+    let type: String
+    let trackCount: Int
+    let thumbnails: [Thumbnail]
+    let thumbnailSmall: Thumbnail?
+    let thumbnailLarge: Thumbnail?
+    /// The album's tracks, in the order they run.
+    let tracks: [Track]
+
+    private enum CodingKeys: String, CodingKey {
+        case browseId, title, artists, year, type, trackCount
+        case thumbnails, thumbnailSmall, thumbnailLarge, tracks
+    }
+
+    /// The memberwise initializer, written out because the custom
+    /// decoder below suppresses Swift's own.
+    init(
+        browseId: String,
+        title: String,
+        artists: [String],
+        year: String,
+        type: String,
+        trackCount: Int,
+        thumbnails: [Thumbnail],
+        thumbnailSmall: Thumbnail?,
+        thumbnailLarge: Thumbnail?,
+        tracks: [Track]
+    ) {
+        self.browseId = browseId
+        self.title = title
+        self.artists = artists
+        self.year = year
+        self.type = type
+        self.trackCount = trackCount
+        self.thumbnails = thumbnails
+        self.thumbnailSmall = thumbnailSmall
+        self.thumbnailLarge = thumbnailLarge
+        self.tracks = tracks
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        browseId = try c.decode(String.self, forKey: .browseId)
+        title = try c.decode(String.self, forKey: .title)
+        artists = try c.decodeIfPresent([String].self, forKey: .artists) ?? []
+        year = try c.decodeIfPresent(String.self, forKey: .year) ?? ""
+        type = try c.decodeIfPresent(String.self, forKey: .type) ?? "Album"
+        trackCount = try c.decodeIfPresent(Int.self, forKey: .trackCount) ?? 0
+        thumbnails = try c.decodeIfPresent([Thumbnail].self, forKey: .thumbnails) ?? []
+        thumbnailSmall = try c.decodeIfPresent(Thumbnail.self, forKey: .thumbnailSmall)
+        thumbnailLarge = try c.decodeIfPresent(Thumbnail.self, forKey: .thumbnailLarge)
+        tracks = try c.decodeIfPresent([Track].self, forKey: .tracks) ?? []
+    }
+}
+
 // MARK: - Default Playlists
 
 extension Playlist {

@@ -135,7 +135,18 @@ final class AntiAlgorithmEngine: ObservableObject {
 
     // MARK: - Session Management
 
-    func startExplorationSession() {
+    /// - Parameter replacingQueue: the deck's DIG key (2026-11-20).
+    ///   The session's tracks REPLACE the queue instead of being
+    ///   appended to it, and a session that is already running is
+    ///   ended and dealt again. The record that is playing is kept as
+    ///   the queue's first item until the first new one starts, so
+    ///   the player is never left holding a track the queue does not
+    ///   know about.
+    func startExplorationSession(replacingQueue: Bool = false) {
+        if replacingQueue {
+            guard !isLoading else { return }
+            if isExploring { endExplorationSession() }
+        }
         guard !isExploring else { return }
 
         // S18 / v1.6.3: os_log breadcrumbs for the v1.6.1 real-device
@@ -201,6 +212,11 @@ final class AntiAlgorithmEngine: ObservableObject {
                 // they autoplay when the current track ends. This
                 // matches the user's mental model: "Start Exploring"
                 // means start, not "show me the list".
+                if replacingQueue {
+                    let store = PlayerState.shared.queueStore
+                    store.replace(with: store.currentItem.map { [$0] } ?? [])
+                    store.setCurrentIndex(0)
+                }
                 self.playFirstAndQueueRest(tracks: tracks, log: log)
             } catch {
                 os_log(.error, log: log, "AA: save+publish failed: %{public}@", String(describing: error))
@@ -244,6 +260,10 @@ final class AntiAlgorithmEngine: ObservableObject {
         // ends.
         let remaining = Array(tracks.dropFirst())
         let maxQueueSize = max(50, remaining.count + 5)
+        // A session can now be dealt again while the last one's
+        // stream URLs are still coming back; those belong to a queue
+        // that no longer exists.
+        let sessionID = currentSession?.id
         for track in remaining {
             StreamURLCache.shared.getStreamUrl(videoId: track.videoId, quality: "low")
                 .sink(
@@ -265,7 +285,7 @@ final class AntiAlgorithmEngine: ObservableObject {
                         // the session mid-flight, the next add
                         // will be a no-op against the dropped
                         // session.
-                        guard let self = self, self.isExploring else {
+                        guard let self = self, self.isExploring, self.currentSession?.id == sessionID else {
                             os_log(.info, log: log, "AA: dropping queued track (session ended) %{public}@", track.videoId)
                             return
                         }

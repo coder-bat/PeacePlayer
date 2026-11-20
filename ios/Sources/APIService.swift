@@ -609,6 +609,76 @@ class APIService {
             .eraseToAnyPublisher()
     }
     
+    // MARK: - Albums
+
+    /// Searches for albums by an artist.
+    ///
+    /// The backend answers with YouTube Music's album browse ids, the
+    /// album's title and year, and its cover art — not its tracks.
+    /// Those come from `getAlbumDetails(browseId:)` when the album is
+    /// opened.
+    func searchAlbums(query: String, limit: Int = 10) -> AnyPublisher<[Album], APIError> {
+        guard let url = URL(string: "\(baseURL)/search/albums") else {
+            return Fail(error: APIError.invalidURL).eraseToAnyPublisher()
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        addAuthHeader(to: &request)
+
+        let body: [String: Any] = ["query": query, "limit": limit]
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+
+        return dataTaskWithRetry(for: request)
+            .mapError { APIError.networkError($0) }
+            .flatMap { data, response -> AnyPublisher<Data, APIError> in
+                guard let httpResponse = response as? HTTPURLResponse else {
+                    return Fail(error: APIError.invalidResponse).eraseToAnyPublisher()
+                }
+                if httpResponse.statusCode != 200 {
+                    let body = String(data: data, encoding: .utf8) ?? ""
+                    print("❌ [APIService] album search HTTP \(httpResponse.statusCode): \(body.prefix(300))")
+                    return Fail(error: APIError.httpError(statusCode: httpResponse.statusCode, message: "")).eraseToAnyPublisher()
+                }
+                return Just(data).setFailureType(to: APIError.self).eraseToAnyPublisher()
+            }
+            .decode(type: [Album].self, decoder: JSONDecoder())
+            .mapError { APIError.decodingError($0) }
+            .receive(on: DispatchQueue.main)
+            .eraseToAnyPublisher()
+    }
+
+    /// An album and the tracks on it, in the order they run.
+    func getAlbumDetails(browseId: String) -> AnyPublisher<AlbumDetails, APIError> {
+        var allowed = CharacterSet.urlPathAllowed
+        allowed.remove(charactersIn: "/?#")
+        guard let encoded = browseId.addingPercentEncoding(withAllowedCharacters: allowed),
+              let url = URL(string: "\(baseURL)/album/\(encoded)") else {
+            return Fail(error: APIError.invalidURL).eraseToAnyPublisher()
+        }
+
+        var request = URLRequest(url: url)
+        addAuthHeader(to: &request)
+        return dataTaskWithRetry(for: request)
+            .mapError { APIError.networkError($0) }
+            .flatMap { data, response -> AnyPublisher<Data, APIError> in
+                guard let httpResponse = response as? HTTPURLResponse else {
+                    return Fail(error: APIError.invalidResponse).eraseToAnyPublisher()
+                }
+                if httpResponse.statusCode != 200 {
+                    let body = String(data: data, encoding: .utf8) ?? ""
+                    print("❌ [APIService] album details HTTP \(httpResponse.statusCode): \(body.prefix(300))")
+                    return Fail(error: APIError.httpError(statusCode: httpResponse.statusCode, message: "")).eraseToAnyPublisher()
+                }
+                return Just(data).setFailureType(to: APIError.self).eraseToAnyPublisher()
+            }
+            .decode(type: AlbumDetails.self, decoder: JSONDecoder())
+            .mapError { APIError.decodingError($0) }
+            .receive(on: DispatchQueue.main)
+            .eraseToAnyPublisher()
+    }
+
     func getRadio(for videoId: String) -> AnyPublisher<[Track], APIError> {
         guard let url = URL(string: "\(baseURL)/radio/\(videoId)") else {
             return Fail(error: APIError.invalidURL).eraseToAnyPublisher()

@@ -33,15 +33,15 @@ final class TurntableSnapshotTests: XCTestCase {
     /// `ImageRenderer` is main-actor isolated, so this runs on the main
     /// actor — the render must happen where UIKit drawing is allowed.
     @MainActor
-    private func render<V: View>(_ view: V, width: CGFloat, height: CGFloat) throws -> Data {
+    private func render<V: View>(_ view: V, width: CGFloat, height: CGFloat, scale: CGFloat = 2) throws -> Data {
         // The artwork loads asynchronously through ImageCache, and the
         // offscreen renderer draws whatever is in the cache at the
         // moment it runs. So: render once to start the loads, let the
         // main queue drain, then render for real.
-        _ = makeImage(view, width: width, height: height)
-        RunLoop.current.run(until: Date().addingTimeInterval(0.8))
+        _ = makeImage(view, width: width, height: height, scale: scale)
+        RunLoop.current.run(until: Date().addingTimeInterval(1.5))
 
-        guard let image = makeImage(view, width: width, height: height) else {
+        guard let image = makeImage(view, width: width, height: height, scale: scale) else {
             XCTFail("ImageRenderer produced no image")
             throw NSError(domain: "TurntableSnapshot", code: 1)
         }
@@ -53,16 +53,17 @@ final class TurntableSnapshotTests: XCTestCase {
     }
 
     @MainActor
-    private func makeImage<V: View>(_ view: V, width: CGFloat, height: CGFloat) -> UIImage? {
+    private func makeImage<V: View>(_ view: V, width: CGFloat, height: CGFloat, scale: CGFloat) -> UIImage? {
         let renderer = ImageRenderer(content:
             view
                 .frame(width: width, height: height)
                 .environment(\.colorScheme, .dark)
         )
-        renderer.scale = 2
+        renderer.scale = scale
         return renderer.uiImage
     }
 
+    @discardableResult
     private func write(_ data: Data, named name: String) throws -> URL {
         let url = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent(name)
@@ -71,285 +72,418 @@ final class TurntableSnapshotTests: XCTestCase {
         return url
     }
 
-    // MARK: - Deck components
+    // MARK: - The whole Home
 
-    /// The whole deck, assembled with fixed inputs so the render is
+    /// The whole Home, assembled with fixed inputs so the render is
     /// deterministic. Mirrors TurntableHomeView's composition.
+    ///
+    /// `ImageRenderer` does not draw a ScrollView's contents, so the
+    /// tray and the shelves are rendered through their scroll-free
+    /// halves (`QueueDiscRow`, `CrateShelves`) — which is exactly what
+    /// the user sees before scrolling.
     @MainActor
     func testRenderFullDeck() throws {
-        let deck = VStack(spacing: 0) {
-            deckFascia
+        let home = VStack(spacing: 0) {
+            // The status bar's share of the screen.
+            Color.clear.frame(height: 59)
 
-            deckPlatter
-                .padding(.vertical, 10)
+            // Nothing pending, so no row of indicators: the deck
+            // starts at the top (revision 2026-11-20).
+            Color.clear.frame(height: 10)
 
-            deckQueue
-                .padding(.horizontal, 18)
+            deck(.playing)
+                .padding(.top, 2)
 
-            deckCrateVisible
-                .padding(.horizontal, 14)
+            NowPlayingCaption(title: "Feeling Good", artist: "Nina Simone")
                 .padding(.top, 12)
 
-            Spacer(minLength: 8)
-        }
-        .background(deckPlinth)
-        .frame(width: 402, height: 874)
+            deckQueue
+                .padding(.top, 8)
 
-        let data = try render(deck, width: 402, height: 874)
+            CrateShelves(
+                shelves: Self.shelves,
+                nowPlayingID: "shelf-0-1",
+                onPlay: { _ in },
+                onQueue: { _ in }
+            )
+            .padding(.top, 32)
+
+            Spacer(minLength: 0)
+        }
+        .frame(width: 402, height: 874)
+        .background(DeckRoomBackground(artworkURL: Self.makeArtworkFile(index: 2)))
+        .clipped()
+
+        let data = try render(home, width: 402, height: 874)
         let url = try write(data, named: "turntable-deck.png")
         XCTAssertGreaterThan(data.count, 10_000, "Deck render looks empty")
         XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
     }
 
-    /// The deck's parts stacked with no spacer between them, so a
-    /// render taller than the screen shows every part. If the crate or
-    /// the queue shelf is invisible here, it is invisible in the app
-    /// too.
-    ///
-    /// Note: `ImageRenderer` does not draw a ScrollView's contents, so
-    /// the crate's sleeves are missing from any render that uses the
-    /// scrolling `SleeveCrateView`. That is a limitation of the
-    /// renderer, not of the crate — `testRenderCrateGrid` renders the
-    /// grid itself.
+    // MARK: - The deck, state by state
+
+    /// The deck on its own, at three times scale, so the platter, the
+    /// arm and the lever can be judged at the pixel.
     @MainActor
-    func testRenderDeckParts() throws {
-        let deck = VStack(spacing: 0) {
-            deckFascia
+    func testRenderDeckPlaying() throws {
+        let data = try render(deckOnRoom(.playing), width: 402, height: 420, scale: 3)
+        try write(data, named: "turntable-deck-playing.png")
+        XCTAssertGreaterThan(data.count, 10_000)
+    }
 
-            deckPlatter
-                .padding(.vertical, 10)
+    /// Paused: the lever is up and the arm has lifted off the groove.
+    @MainActor
+    func testRenderDeckPaused() throws {
+        let data = try render(deckOnRoom(.paused), width: 402, height: 420)
+        try write(data, named: "turntable-deck-paused.png")
+        XCTAssertGreaterThan(data.count, 10_000)
+    }
 
+    /// Nothing loaded: the idle record, and the arm parked in its rest.
+    @MainActor
+    func testRenderDeckIdle() throws {
+        let data = try render(deckOnRoom(.idle), width: 402, height: 420)
+        try write(data, named: "turntable-deck-idle.png")
+        XCTAssertGreaterThan(data.count, 10_000)
+    }
+
+    /// Fetching a track: the lamp on the platter's edge is lit.
+    @MainActor
+    func testRenderDeckLoading() throws {
+        let data = try render(deckOnRoom(.loading), width: 402, height: 420)
+        try write(data, named: "turntable-deck-loading.png")
+        XCTAssertGreaterThan(data.count, 10_000)
+    }
+
+    /// The end of a side: the stylus is at the label.
+    @MainActor
+    func testRenderDeckAtEndOfTrack() throws {
+        let data = try render(deckOnRoom(.ending), width: 402, height: 420)
+        try write(data, named: "turntable-deck-ending.png")
+        XCTAssertGreaterThan(data.count, 10_000)
+    }
+
+    // MARK: - Tray and shelves
+
+    /// The tray of queued records.
+    @MainActor
+    func testRenderQueueTray() throws {
+        let tray = deckQueue
+            .padding(.vertical, 16)
+            .frame(width: 402)
+            .background(TurntableTokens.room)
+        let data = try render(tray, width: 402, height: 100, scale: 3)
+        try write(data, named: "turntable-queue.png")
+        XCTAssertGreaterThan(data.count, 10_000)
+    }
+
+    /// The line that names what is playing, over the tray.
+    @MainActor
+    func testRenderNowPlayingCaption() throws {
+        let view = VStack(spacing: 8) {
+            NowPlayingCaption(title: "Feeling Good", artist: "Nina Simone")
             deckQueue
-                .padding(.horizontal, 18)
-
-            deckCrateVisible
-                .padding(.horizontal, 14)
-                .padding(.top, 12)
         }
-        .background(deckPlinth)
-        .frame(width: 402, height: 900)
-
-        let data = try render(deck, width: 402, height: 900)
-        try write(data, named: "turntable-deck-parts.png")
+        .padding(.vertical, 14)
+        .frame(width: 402)
+        .background(TurntableTokens.room)
+        let data = try render(view, width: 402, height: 124, scale: 3)
+        try write(data, named: "turntable-now-playing.png")
         XCTAssertGreaterThan(data.count, 10_000)
     }
 
-    /// The platter alone, large, with real cover art, so the picture
-    /// disc can be judged at full size.
+    /// A sleeve held up for a closer look.
     @MainActor
-    func testRenderPlatterDetail() throws {
-        let platter = ZStack {
-            TurntableTokens.walnut.opacity(0.5)
-            PlatterView(
-                artworkURL: Self.makeArtworkFile(index: 0),
-                trackIdentity: "art-0",
-                isPlaying: true,
-                progress: 0.0,
-                reduceMotion: false,
-                progressAt: nil,
-                onTapPlatter: {},
-                onLongPress: {}
-            )
-            .frame(width: 320, height: 320)
+    func testRenderHeldSleeve() throws {
+        // The first shelf stands albums; the second one stands records.
+        let track = Self.shelves[1].tracks[0]
+        let card = HStack(spacing: 24) {
+            SleevePeekCard(track: track, stage: .looking)
+            SleevePeekCard(track: track, stage: .queued)
         }
-        let data = try render(platter, width: 360, height: 360)
-        try write(data, named: "turntable-platter.png")
+        .padding(30)
+        .background(TurntableTokens.room)
+        let data = try render(
+            card,
+            width: SleevePeekCard.size.width * 2 + 84,
+            height: SleevePeekCard.size.height + 60,
+            scale: 3
+        )
+        try write(data, named: "turntable-sleeve-held.png")
         XCTAssertGreaterThan(data.count, 10_000)
     }
 
-    /// The blank record — the fallback when a track has no artwork.
+    /// The keys along the front of the plinth, in each lamp state.
     @MainActor
-    func testRenderBlankPlatter() throws {
-        let platter = ZStack {
-            TurntableTokens.walnut.opacity(0.5)
-            PlatterView(
-                artworkURL: nil,
-                trackIdentity: "",
-                isPlaying: false,
-                progress: 0.0,
-                reduceMotion: false,
-                progressAt: nil,
-                onTapPlatter: {},
-                onLongPress: {}
-            )
-            .frame(width: 320, height: 320)
+    func testRenderDeckKeys() throws {
+        let view = VStack(spacing: 14) {
+            HStack(spacing: 30) {
+                DeckKeysView()
+                DeckKeysView(states: [.dig: .lit, .radio: .lit, .review: .lit])
+                DeckKeyButton(key: .setup) {}
+            }
         }
-        let data = try render(platter, width: 360, height: 360)
-        try write(data, named: "turntable-platter-blank.png")
+        .padding(18)
+        .frame(width: 402)
+        .deckPlinth(cornerRadius: 0)
+        let data = try render(view, width: 402, height: 130, scale: 3)
+        try write(data, named: "turntable-keys.png")
         XCTAssertGreaterThan(data.count, 10_000)
     }
 
-    /// The tonearm alone, large, so the pivot and headshell geometry
-    /// can be judged.
+    /// The tray mid-deal: records spinning on a wave, the channel lit.
     @MainActor
-    func testRenderTonearmDetail() throws {
-        let arm = ZStack {
-            Color.black
-            Image(TurntableTexture.vinylGrooves)
-                .resizable()
-                .aspectRatio(contentMode: .fill)
-                .frame(width: 276, height: 276)
-                .clipShape(Circle())
-                .opacity(0.55)
-            TonearmView(
-                progress: 0.35,
-                isScrubbing: false,
-                progressAt: nil,
-                onScrub: { _ in },
-                onScrubEnded: { _ in }
+    func testRenderTrayBeingDealt() throws {
+        let items = (0..<6).map { index in
+            QueueItem(
+                track: Self.makeTrack(id: "q-\(index)", title: "Q\(index)", artist: "Artist", artIndex: index + 1),
+                streamUrl: "https://example.com/\(index)",
+                source: .stream,
+                contentSource: .youtube
             )
-            .frame(width: 320, height: 320)
         }
-        let data = try render(arm, width: 340, height: 340)
-        try write(data, named: "turntable-tonearm.png")
+        let tray = VStack(spacing: 8) {
+            NowPlayingCaption(title: "Feeling Good", artist: "Nina Simone", notice: TurntableHomeModel.diggingNotice)
+            QueueDiscRow(items: items, currentIndex: 1, dealPhase: 0.4, onSelect: { _ in })
+                .padding(.horizontal, 22)
+                .frame(maxWidth: .infinity, minHeight: QueueTray.height, alignment: .leading)
+                .clipShape(Capsule())
+                .padding(.horizontal, QueueTray.margin)
+                .background(QueueTray(isLit: true))
+        }
+        .padding(.vertical, 14)
+        .frame(width: 402)
+        .background(TurntableTokens.room)
+        let data = try render(tray, width: 402, height: 124, scale: 3)
+        try write(data, named: "turntable-queue-dealing.png")
         XCTAssertGreaterThan(data.count, 10_000)
     }
 
-    /// The crate's grid on its own. `ImageRenderer` cannot draw scroll
-    /// content, so this renders the grid directly — which is exactly
-    /// what the user sees in the crate's first three rows.
+    /// The design system's parts on one sheet.
+    @MainActor
+    func testRenderDesignSystemSpecimen() throws {
+        let sheet = VStack(alignment: .leading, spacing: 22) {
+            Text("Library").font(DeckType.screenTitle).foregroundColor(TurntableTokens.cream)
+
+            HStack(spacing: 4) {
+                DeckChip(title: "Liked", count: 42, isSelected: true) {}
+                DeckChip(title: "Downloaded", count: 118, isSelected: false) {}
+                DeckChip(title: "Playlists", count: 6, isSelected: false) {}
+            }
+            .padding(4)
+            .deckPanel()
+
+            VStack(spacing: 0) {
+                DeckTrackRow(
+                    title: "Feeling Good", subtitle: "Nina Simone",
+                    artworkURL: Self.makeArtworkFile(index: 2), smallPrint: "2:54", isPlaying: true
+                )
+                DeckTrackRow(
+                    title: "Maria También", subtitle: "Khruangbin",
+                    artworkURL: Self.makeArtworkFile(index: 5), smallPrint: "3:09"
+                )
+                DeckLedge(title: "Recently played", count: 24).padding(.top, 6)
+            }
+
+            HStack(spacing: 12) {
+                DeckButton(title: "Play all", symbol: "play.fill", kind: .card) {}
+                DeckButton(title: "Shuffle", symbol: "shuffle") {}
+            }
+
+            HStack(spacing: 18) {
+                DeckMetalButton(symbol: "dice.fill", accent: DeckSignal.discover, state: .lit) {}
+                DeckMetalButton(symbol: "heart.fill", accent: DeckSignal.live) {}
+                DeckMetalButton(symbol: "arrow.down", accent: DeckSignal.power, state: .lit, size: 30) {}
+                Spacer()
+                HStack(spacing: 10) {
+                    DeckLamp(color: DeckSignal.live)
+                    DeckLamp(color: DeckSignal.discover)
+                    DeckLamp(color: DeckSignal.attention)
+                    DeckLamp(color: DeckSignal.power)
+                    DeckLamp(state: .idle)
+                }
+            }
+            .padding(14)
+            .deckPlinth(cornerRadius: CornerRadius.lg)
+
+            HStack(spacing: 10) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(TurntableTokens.aluminium.opacity(0.7))
+                Text("Find music").font(DeckType.body).foregroundColor(TurntableTokens.cream.opacity(0.4))
+                Spacer()
+            }
+            .padding(.horizontal, 18)
+            .frame(height: 46)
+            .deckWell(Capsule())
+        }
+        .padding(20)
+        .frame(width: 402, alignment: .leading)
+        .background(DeckRoom())
+        let data = try render(sheet, width: 402, height: 522, scale: 3)
+        try write(data, named: "deck-design-system.png")
+        XCTAssertGreaterThan(data.count, 10_000)
+    }
+
+    /// The Library's grid and list, drawn the Deck way.
+    @MainActor
+    func testRenderLibraryDeckStyle() throws {
+        func item(_ index: Int, _ title: String, _ artist: String) -> DownloadedTrackItem {
+            let track = Self.makeTrack(id: "lib-\(index)", title: title, artist: artist, artIndex: index)
+            return DownloadedTrackItem(
+                id: "lib-\(index)", videoId: "lib-\(index)", title: title, artist: artist, album: "",
+                durationSeconds: 174 + index * 23, fileSize: 4_200_000, fileSizeFormatted: "4.2 MB",
+                downloadedAt: Date(), localPath: "", thumbnailURL: track.artworkURL, track: track
+            )
+        }
+        let items = [
+            item(2, "Feeling Good", "Nina Simone"), item(5, "Maria También", "Khruangbin"),
+            item(7, "Blue in Green", "Miles Davis"), item(9, "Pink + White", "Frank Ocean")
+        ]
+        let sheet = VStack(alignment: .leading, spacing: 18) {
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 16) {
+                ForEach(Array(items.enumerated()), id: \.element.id) { index, track in
+                    GridTrackCell(
+                        track: track, isSelected: index == 3, isEditing: false, isPlaying: index == 0,
+                        memoryPreview: nil, mode: .downloaded, deck: true,
+                        onTap: {}, onPlay: {}, onPlayNext: {}, onAddToQueue: {}, onDelete: {}
+                    )
+                }
+            }
+            VStack(spacing: 0) {
+                ForEach(Array(items.prefix(3).enumerated()), id: \.element.id) { index, track in
+                    DeckTrackRow(
+                        title: track.title, subtitle: track.artist, artworkURL: track.thumbnailURL,
+                        smallPrint: DeckFormat.runtime(track.durationSeconds), isPlaying: index == 0
+                    )
+                    Rectangle().fill(TurntableTokens.cream.opacity(0.08)).frame(height: 0.5)
+                }
+            }
+        }
+        .padding(16)
+        .frame(width: 402, alignment: .leading)
+        .background(DeckRoom())
+        let data = try render(sheet, width: 402, height: 720, scale: 2)
+        try write(data, named: "library-deck.png")
+        XCTAssertGreaterThan(data.count, 10_000)
+    }
+
+    /// The mini player's record at three points in a side, and loading.
+    @MainActor
+    func testRenderMiniRecord() throws {
+        let row = HStack(spacing: 18) {
+            MiniRecord(artworkURL: Self.makeArtworkFile(index: 2), progress: 0.05)
+            MiniRecord(artworkURL: Self.makeArtworkFile(index: 5), progress: 0.5)
+            MiniRecord(artworkURL: Self.makeArtworkFile(index: 7), progress: 0.95)
+            MiniRecord(artworkURL: nil, isLoading: true)
+        }
+        .padding(16)
+        .deckPanel()
+        .padding(20)
+        .background(TurntableTokens.room)
+        let data = try render(row, width: 300, height: 110, scale: 3)
+        try write(data, named: "mini-record.png")
+        XCTAssertGreaterThan(data.count, 5_000)
+    }
+
+    /// The full player's seek dial and on-air strip.
+    @MainActor
+    func testRenderPlayerDial() throws {
+        let clock = PlaybackClock()
+        _ = clock.tick(currentSeconds: 78, totalSeconds: 217, effectiveDuration: 217)
+        let peaks: [Float] = (0..<400).map { index in
+            let x = Double(index)
+            let slow: Double = 0.3 * sin(x / 9)
+            let fast: Double = 0.25 * sin(x / 2.3)
+            return Float(0.35 + slow + fast)
+        }
+        let view = VStack(spacing: 16) {
+            DeckSeekDial(clock: clock, peaks: peaks) { _ in }
+            DeckSeekDial(clock: clock, peaks: nil) { _ in }
+            DeckOnAirStrip()
+        }
+        .padding(14)
+        .deckPanel(cornerRadius: 16)
+        .padding(16)
+        .background(DeckRoom())
+        let data = try render(view, width: 402, height: 300, scale: 3)
+        try write(data, named: "player-dial.png")
+        XCTAssertGreaterThan(data.count, 10_000)
+    }
+
+    /// The shelves on their own, at three times scale.
     @MainActor
     func testRenderCrateGrid() throws {
-        let crate = VStack(alignment: .leading, spacing: 8) {
-            CrateShelf(
-                sleeves: (0..<18).map {
-                    Self.makeTrack(id: "crate-\($0)", title: "Track \($0)", artist: "Artist", artIndex: $0)
-                },
-                onPlay: { _ in },
-                onQueue: { _ in }
-            )
-        }
-        .padding(.horizontal, 14)
-        .padding(.top, 12)
-        .background(deckPlinth)
-        .frame(width: 402, height: 260)
+        let shelves = CrateShelves(
+            shelves: Self.shelves,
+            nowPlayingID: "shelf-0-1",
+            onPlay: { _ in },
+            onQueue: { _ in }
+        )
+        .padding(.vertical, 18)
+        .frame(width: 402)
+        .background(TurntableTokens.room)
 
-        let data = try render(crate, width: 402, height: 260)
+        let data = try render(shelves, width: 402, height: 370, scale: 3)
         try write(data, named: "turntable-crate.png")
         XCTAssertGreaterThan(data.count, 10_000)
     }
 
+    /// The shelves before anything has loaded.
+    @MainActor
+    func testRenderEmptyShelves() throws {
+        let shelves = CrateShelves(shelves: [], onPlay: { _ in }, onQueue: { _ in })
+            .padding(.vertical, 18)
+            .frame(width: 402)
+            .background(TurntableTokens.room)
+        let data = try render(shelves, width: 402, height: 230)
+        try write(data, named: "turntable-crate-empty.png")
+        XCTAssertGreaterThan(data.count, 5_000)
+    }
+
     // MARK: - Pieces
 
+    private enum DeckState {
+        case playing, paused, idle, loading, ending
+    }
+
     @MainActor
-    private var deckPlinth: some View {
-        ZStack {
-            // The texture is pinned in an overlay so its natural size
-            // cannot leak into the deck's layout — that bug once made
-            // the whole deck 1024pt wide and pushed every control off
-            // screen.
-            Color.clear
-                .overlay(
-                    Image(TurntableTexture.walnut)
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                        .opacity(0.22)
+    private func deck(_ state: DeckState) -> some View {
+        let loaded = state != .idle
+        return TurntableDeckView(
+            artworkURL: loaded ? Self.makeArtworkFile(index: 2) : nil,
+            trackIdentity: loaded ? "deck-track" : "",
+            isLoaded: loaded,
+            isPlaying: state == .playing || state == .ending,
+            isLoading: state == .loading,
+            progress: state == .ending ? 1.0 : (state == .loading ? 0 : 0.42),
+            duration: 244,
+            reduceMotion: false,
+            keyStates: state == .loading ? [.dig: .working] : (state == .playing ? [.dig: .lit, .review: .lit] : [:])
+        )
+    }
+
+    @MainActor
+    private func deckOnRoom(_ state: DeckState) -> some View {
+        deck(state)
+            .frame(width: 402, height: 420)
+            .background(
+                DeckRoomBackground(
+                    artworkURL: state == .idle ? nil : Self.makeArtworkFile(index: 2)
                 )
-            LinearGradient(
-                colors: [Color.black.opacity(0.72), Color.black.opacity(0.45), Color.black.opacity(0.88)],
-                startPoint: .top, endPoint: .bottom
+                .frame(height: 874, alignment: .top)
+                .frame(height: 420, alignment: .top)
             )
-            RadialGradient(
-                colors: [TurntableTokens.keyLight.opacity(0.10), .clear],
-                center: UnitPoint(x: 0.18, y: 0.05),
-                startRadius: 0, endRadius: 420
-            )
-        }
+            .clipped()
     }
 
-    @MainActor
-    private var deckFascia: some View {
-        DeckFasciaView {
-            HStack(spacing: 6) {
-                ForEach(["hourglass", "dice.fill", "antenna.radiowaves.left.and.right", "music.note.list"], id: \.self) { icon in
-                    Image(systemName: icon)
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundColor(Theme.cyberCyan)
-                        .frame(width: 30, height: 30)
-                        .background(
-                            RoundedRectangle(cornerRadius: 6)
-                                .fill(Color.black.opacity(0.35))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 6)
-                                        .strokeBorder(Theme.cyberCyan.opacity(0.35), lineWidth: 1)
-                                )
-                        )
-                        .frame(width: 44, height: 44)
-                        .contentShape(Rectangle())
-                }
-                // The two actionable indicators, in the row, left of
-                // Settings.
-                Image(systemName: "wand.and.stars")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(Theme.cyberYellow)
-                    .frame(width: 30, height: 30)
-                    .background(
-                        RoundedRectangle(cornerRadius: 6)
-                            .fill(Color.black.opacity(0.35))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 6)
-                                    .strokeBorder(Theme.cyberYellow.opacity(0.35), lineWidth: 1)
-                            )
-                    )
-                    .frame(width: 44, height: 44)
-                    .contentShape(Rectangle())
-                Image(systemName: "gearshape.fill")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(TurntableTokens.aluminium)
-                    .frame(width: 30, height: 30)
-                    .background(
-                        RoundedRectangle(cornerRadius: 6)
-                            .fill(Color.black.opacity(0.35))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 6)
-                                    .strokeBorder(TurntableTokens.aluminium.opacity(0.35), lineWidth: 1)
-                            )
-                    )
-                    .frame(width: 44, height: 44)
-                    .contentShape(Rectangle())
-            }
-        }
-        .padding(.horizontal, 14)
-        .padding(.top, 12)
-    }
-
-    @MainActor
-    private var deckPlatter: some View {
-        ZStack {
-            PlatterView(
-                artworkURL: Self.makeArtworkFile(index: 2),
-                trackIdentity: "deck-track",
-                isPlaying: true,
-                progress: 0.42,
-                reduceMotion: false,
-                progressAt: nil,
-                onTapPlatter: {},
-                onLongPress: {}
-            )
-            .frame(width: 320, height: 320)
-
-            TonearmView(
-                progress: 0.42,
-                isScrubbing: false,
-                progressAt: nil,
-                onScrub: { _ in },
-                onScrubEnded: { _ in }
-            )
-            .frame(width: 320, height: 320)
-
-            CueLeverView(isPlaying: true, onToggle: {})
-                .offset(x: -132, y: -76)
-        }
-        .frame(maxWidth: .infinity)
-    }
-
-    /// The shelf of queued picture discs.
+    /// The tray of queued picture discs.
     @MainActor
     private var deckQueue: some View {
         QueueDiscRow(
             items: (0..<6).map { index in
                 QueueItem(
-                    track: Self.makeTrack(id: "q-\(index)", title: "Q\(index)", artist: "Artist", artIndex: index),
+                    track: Self.makeTrack(id: "q-\(index)", title: "Q\(index)", artist: "Artist", artIndex: index + 1),
                     streamUrl: "https://example.com/\(index)",
                     source: .stream,
                     contentSource: .youtube
@@ -358,20 +492,48 @@ final class TurntableSnapshotTests: XCTestCase {
             currentIndex: 1,
             onSelect: { _ in }
         )
+        .padding(.horizontal, 22)
+        .frame(maxWidth: .infinity, minHeight: QueueTray.height, alignment: .leading)
+        .clipShape(Capsule())
+        .padding(.horizontal, QueueTray.margin)
+        .background(QueueTray())
     }
 
-    /// The crate as the user sees it: the first three rows of the grid
-    /// (the scrolling crate itself cannot be drawn by the offscreen
-    /// renderer).
+    /// Three shelves: one artist standing albums, one artist standing
+    /// records, and the recently-played shelf.
     @MainActor
-    private var deckCrateVisible: some View {
-        CrateShelf(
-            sleeves: (0..<12).map {
-                Self.makeTrack(id: "crate-\($0)", title: "Track \($0)", artist: "Artist", artIndex: $0)
-            },
-            onPlay: { _ in },
-            onQueue: { _ in }
-        )
+    private static var shelves: [CrateShelfModel] {
+        let titles = ["Nina Simone", "Khruangbin", TurntableHomeModel.recentShelfTitle]
+        return titles.enumerated().map { shelfIndex, title in
+            if shelfIndex == 0 {
+                // The Selected Artists shelf stands albums, not records.
+                return CrateShelfModel(
+                    id: "shelf-\(shelfIndex)",
+                    title: title,
+                    albums: (0..<5).map { column in
+                        makeAlbum(
+                            id: "shelf-\(shelfIndex)-\(column)",
+                            title: ["Pastel Blues", "Nina Simone", "Silk & Smoke", "Baltimore", "Fodder on My Wings"][column],
+                            year: ["1965", "1967", "1968", "1972", "1974"][column],
+                            artist: title,
+                            artIndex: shelfIndex * 5 + column
+                        )
+                    }
+                )
+            }
+            return CrateShelfModel(
+                id: "shelf-\(shelfIndex)",
+                title: title,
+                tracks: (0..<(shelfIndex == 1 ? 4 : 5)).map { column in
+                    makeTrack(
+                        id: "shelf-\(shelfIndex)-\(column)",
+                        title: "Track \(column)",
+                        artist: title,
+                        artIndex: shelfIndex * 5 + column
+                    )
+                }
+            )
+        }
     }
 
     // MARK: - Helpers
@@ -392,38 +554,77 @@ final class TurntableSnapshotTests: XCTestCase {
              videoType: "MUSIC_VIDEO_TYPE_ATV")
     }
 
+    @MainActor
+    private static func makeAlbum(id: String, title: String, year: String, artist: String, artIndex: Int) -> Album {
+        var thumbnails: [Thumbnail] = []
+        if let url = makeArtworkFile(index: artIndex) {
+            thumbnails = [Thumbnail(url: url, width: 600, height: 600)]
+        }
+        return Album(browseId: "MPREb_test_\(id)",
+                     title: title,
+                     artists: [artist],
+                     year: year,
+                     type: "Album",
+                     trackCount: 10,
+                     thumbnails: thumbnails,
+                     thumbnailSmall: thumbnails.first,
+                     thumbnailLarge: thumbnails.first)
+    }
+
     /// Writes a deterministic cover image to the tmp directory and
     /// returns its file URL.
     ///
     /// `ImageCache` reads file:// URLs directly (URLSession cannot),
     /// which is what lets these renders show real artwork on the
-    /// record and in the crate.
+    /// record and on the shelves.
+    ///
+    /// The covers are deliberately varied — a two-colour ground, a
+    /// large off-centre shape, a band of "type" — because a flat
+    /// swatch says nothing about how a real sleeve will sit under the
+    /// grooves and the sheen.
     private static func makeArtworkFile(index: Int) -> URL? {
         let size = CGSize(width: 600, height: 600)
         let renderer = UIGraphicsImageRenderer(size: size)
+        let hue = CGFloat((index * 37) % 100) / 100.0
         let image = renderer.image { context in
             let cg = context.cgContext
-            UIColor(hue: CGFloat(index % 6) / 6.0,
-                   saturation: 0.62,
-                   brightness: 0.82,
-                   alpha: 1).setFill()
-            cg.fill(CGRect(origin: .zero, size: size))
-
-            UIColor.white.withAlphaComponent(0.16).setFill()
-            for band in 0..<7 {
-                cg.fill(CGRect(x: CGFloat(band) * 96 - 80, y: 0, width: 38, height: size.height))
+            let ground = [
+                UIColor(hue: hue, saturation: 0.58, brightness: 0.86, alpha: 1).cgColor,
+                UIColor(hue: (hue + 0.12).truncatingRemainder(dividingBy: 1),
+                        saturation: 0.72, brightness: 0.42, alpha: 1).cgColor
+            ] as CFArray
+            if let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: ground, locations: [0, 1]) {
+                cg.drawLinearGradient(
+                    gradient,
+                    start: .zero,
+                    end: CGPoint(x: size.width, y: size.height),
+                    options: []
+                )
             }
 
-            UIColor.black.withAlphaComponent(0.32).setFill()
-            cg.fillEllipse(in: CGRect(x: 130, y: 130, width: 340, height: 340))
+            UIColor(hue: (hue + 0.5).truncatingRemainder(dividingBy: 1),
+                    saturation: 0.55, brightness: 0.95, alpha: 0.9).setFill()
+            switch index % 3 {
+            case 0:
+                cg.fillEllipse(in: CGRect(x: 250, y: 60, width: 420, height: 420))
+            case 1:
+                cg.fill(CGRect(x: 70, y: 70, width: 240, height: 360))
+            default:
+                cg.move(to: CGPoint(x: 80, y: 520))
+                cg.addLine(to: CGPoint(x: 330, y: 90))
+                cg.addLine(to: CGPoint(x: 560, y: 520))
+                cg.closePath()
+                cg.fillPath()
+            }
 
-            UIColor.white.withAlphaComponent(0.92).setFill()
-            cg.fillEllipse(in: CGRect(x: 285, y: 285, width: 30, height: 30))
+            UIColor.black.withAlphaComponent(0.78).setFill()
+            cg.fill(CGRect(x: 50, y: 470, width: 300, height: 34))
+            cg.fill(CGRect(x: 50, y: 520, width: 180, height: 18))
         }
 
         guard let data = image.pngData() else { return nil }
         let url = URL(fileURLWithPath: NSTemporaryDirectory())
-            .appendingPathComponent("turntable-art-\(index).png")
+            .appendingPathComponent("turntable-cover-\(index).png")
         do {
             try data.write(to: url)
         } catch {

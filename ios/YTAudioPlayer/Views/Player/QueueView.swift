@@ -18,6 +18,11 @@ struct QueueView: View {
     @ObservedObject private var queueStore: QueueStore
     @Environment(\.dismiss) private var dismiss
     @State private var showClearConfirmation = false
+    // 2026-11-21: the queue sheet on the Deck design system
+    // (docs/design/deck-design-system.md): Deck drawing with the
+    // Turntable Home flag on, the old drawing with it off.
+    @ObservedObject private var featureFlags = FeatureFlags.shared
+    private var deck: Bool { featureFlags.turntableHome }
 
     init() {
         // Subscribe to the store that lives on PlayerState.
@@ -29,18 +34,18 @@ struct QueueView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Theme.cyberBackground.ignoresSafeArea()
+                if deck {
+                    DeckRoom()
+                } else {
+                    Theme.cyberBackground.ignoresSafeArea()
+                }
 
                 List {
                     // Now Playing Section
-                    Section(header:
-                        Text("NOW PLAYING")
-                            .font(.system(size: 11, weight: .bold, design: .monospaced))
-                            .foregroundColor(.cyberDim)
-                    ) {
+                    Section(header: nowPlayingHeader) {
                         if let currentItem = playerState.currentItem {
                             QueueItemRow(item: currentItem, isPlaying: true)
-                                .listRowBackground(Color.cyberSurface)
+                                .listRowBackground(deck ? Color.clear : Color.cyberSurface)
                         }
                     }
 
@@ -59,35 +64,40 @@ struct QueueView: View {
                         }
                     }()
 
-                    Section(header:
-                        HStack {
-                            Text("UP NEXT")
-                                .font(.system(size: 11, weight: .bold, design: .monospaced))
-                                .foregroundColor(.cyberDim)
-                            Spacer()
-                            if playerState.isShuffled {
-                                Label("Shuffled", systemImage: "shuffle")
-                                    .font(.caption)
-                                    .foregroundColor(.cyberCyan)
-                            }
-                        }
-                    ) {
+                    Section(header: upNextHeader(count: upcoming.count)) {
                         if upcoming.isEmpty {
-                            VStack(spacing: 16) {
-                                Image(systemName: "music.note.list")
-                                    .font(.system(size: 40))
-                                    .foregroundColor(.cyberDim.opacity(0.5))
-                                Text("Queue is empty")
-                                    .foregroundColor(.cyberDim)
-                                    .font(.system(size: 14, design: .monospaced))
-                                Text("Play a track or browse your library to get started")
-                                    .foregroundColor(Theme.cyberTextSecondary)
-                                    .font(.system(size: 12, design: .monospaced))
-                                    .multilineTextAlignment(.center)
+                            Group {
+                            if deck {
+                                VStack(spacing: 6) {
+                                    Text("Nothing up next")
+                                        .font(DeckType.title)
+                                        .foregroundColor(TurntableTokens.cream)
+                                    Text("Play something, or press Dig on the deck.")
+                                        .font(DeckType.subtitle)
+                                        .foregroundColor(TurntableTokens.cream.opacity(0.55))
+                                        .multilineTextAlignment(.center)
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 30)
+                                .listRowSeparator(.hidden)
+                            } else {
+                                VStack(spacing: 16) {
+                                    Image(systemName: "music.note.list")
+                                        .font(.system(size: 40))
+                                        .foregroundColor(.cyberDim.opacity(0.5))
+                                    Text("Queue is empty")
+                                        .foregroundColor(.cyberDim)
+                                        .font(.system(size: 14, design: .monospaced))
+                                    Text("Play a track or browse your library to get started")
+                                        .foregroundColor(Theme.cyberTextSecondary)
+                                        .font(.system(size: 12, design: .monospaced))
+                                        .multilineTextAlignment(.center)
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 32)
                             }
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 32)
-                            .listRowBackground(Color.cyberSurface)
+                            }
+                            .listRowBackground(deck ? Color.clear : Color.cyberSurface)
                         } else {
                             ForEach(Array(upcoming.enumerated()), id: \.element.id) { index, item in
                                 QueueItemRow(
@@ -99,7 +109,7 @@ struct QueueView: View {
                                         playerState.playQueue(at: actualIndex)
                                     }
                                 )
-                                .listRowBackground(Color.cyberSurface)
+                                .listRowBackground(deck ? Color.clear : Color.cyberSurface)
                                 .contextMenu {
                                     Button {
                                         ShareHelper.shareTrack(
@@ -189,7 +199,7 @@ struct QueueView: View {
                         }
                     }
                 }
-                .listStyle(.insetGrouped)
+                .modifier(QueueListStyle(deck: deck))
                 .animation(.spring(response: 0.35, dampingFraction: 0.8), value: queueStore.items.count)
                 .onAppear {
                     UITableView.appearance().backgroundColor = .clear
@@ -200,6 +210,12 @@ struct QueueView: View {
             }
             .navigationTitle("Queue")
             .navigationBarTitleDisplayMode(.inline)
+            // Deck: the sheet's own header replaces the system bar.
+            .toolbar(deck ? .hidden : .visible, for: .navigationBar)
+            .safeAreaInset(edge: .top, spacing: 0) {
+                if deck { deckHeader }
+            }
+            .environment(\.deckStyle, deck)
             .preferredColorScheme(.dark)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
@@ -233,22 +249,124 @@ struct QueueView: View {
             }
         }
     }
+
+    // MARK: - Deck parts
+
+    /// Deck: the sheet's head is the edge of a walnut board — the
+    /// name in print, Clear and Done as keys.
+    private var deckHeader: some View {
+        HStack(spacing: 10) {
+            Text("Queue")
+                .font(DeckType.screenTitle)
+                .foregroundColor(TurntableTokens.cream)
+            if playerState.isShuffled {
+                HStack(spacing: 5) {
+                    DeckLamp(color: DeckSignal.power, state: .lit, size: 4.5)
+                    Text("SHUFFLED")
+                        .font(DeckType.engraved)
+                        .tracking(DeckType.engravedTracking)
+                        .foregroundColor(TurntableTokens.cream.opacity(0.6))
+                }
+                .padding(.leading, 4)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Shuffled")
+            }
+            Spacer(minLength: 8)
+            DeckButton(title: "Clear") {
+                HapticManager.light()
+                showClearConfirmation = true
+            }
+            .disabled(queueStore.items.isEmpty)
+            .opacity(queueStore.items.isEmpty ? 0.4 : 1)
+            DeckButton(title: "Done", kind: .card) {
+                dismiss()
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 18)
+        .padding(.bottom, 14)
+        .deckPlinth(cornerRadius: 0)
+    }
+
+    @ViewBuilder
+    private var nowPlayingHeader: some View {
+        if deck {
+            DeckLedge(title: "Now playing")
+                .padding(.top, 10)
+                .padding(.bottom, 4)
+                .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+        } else {
+            Text("NOW PLAYING")
+                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                .foregroundColor(.cyberDim)
+        }
+    }
+
+    @ViewBuilder
+    private func upNextHeader(count: Int) -> some View {
+        if deck {
+            DeckLedge(title: "Up next", count: count)
+                .padding(.top, 14)
+                .padding(.bottom, 4)
+                .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+        } else {
+            HStack {
+                Text("UP NEXT")
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .foregroundColor(.cyberDim)
+                Spacer()
+                if playerState.isShuffled {
+                    Label("Shuffled", systemImage: "shuffle")
+                        .font(.caption)
+                        .foregroundColor(.cyberCyan)
+                }
+            }
+        }
+    }
 }
 
-// MARK: - Queue Item Row
+/// The queue's list: plain rows on the wall (Deck) or the system's
+/// grouped cards (legacy).
+private struct QueueListStyle: ViewModifier {
+    let deck: Bool
+
+    func body(content: Content) -> some View {
+        if deck {
+            content
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .listRowSeparatorTint(TurntableTokens.cream.opacity(0.08))
+        } else {
+            content.listStyle(.insetGrouped)
+        }
+    }
+}
+
 struct QueueItemRow: View {
     let item: QueueItem
     let isPlaying: Bool
     var onTap: (() -> Void)? = nil
+    @Environment(\.deckStyle) private var deck
 
     var body: some View {
-        // S15: delegate to the unified TrackRow. Previously
-        // QueueItemRow had its own 50pt artwork + 2-line text
-        // + CyberPlayingBars accessory implementation, with
-        // `Color.cyberCyan.opacity(0.08)` highlight that disagreed
-        // with History/Library/RecentlyPlayed on the exact tint
-        // and the title weight. Now all four row implementations
-        // share TrackRow's `Theme.cyberCyan` highlight.
+        if deck {
+            DeckTrackRow(
+                title: item.track.title,
+                subtitle: item.track.displayArtist,
+                artworkURL: item.track.artworkURL,
+                smallPrint: DeckFormat.runtime(item.track.durationSeconds),
+                isPlaying: isPlaying
+            )
+            .onTapGesture { onTap?() }
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityValue(isPlaying ? "Now playing" : "")
+        } else {
+            legacyRow
+        }
+    }
+
+    private var legacyRow: some View {
         TrackRow(
             title: item.track.title,
             subtitle: item.track.displayArtist,

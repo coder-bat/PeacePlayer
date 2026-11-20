@@ -57,6 +57,17 @@ struct FullPlayer: View {
     @Binding var isPresented: Bool
 
     private func dismiss() {
+        if deck && !reduceMotion {
+            // The case shuts first; then the player is gone and the
+            // same deck is standing there on Home.
+            withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) {
+                caseOpen = false
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.26) {
+                withAnimation(.easeOut(duration: 0.16)) { isPresented = false }
+            }
+            return
+        }
         withAnimation(reduceMotion ? .none : .spring(response: 0.45, dampingFraction: 0.85)) {
             isPresented = false
         }
@@ -70,6 +81,18 @@ struct FullPlayer: View {
     @State private var showShareSheet = false
     @State private var showSongMemory = false
     @State private var showOrbitalMenu = false
+    // 2026-11-21: the Deck full player (docs/design/deck-design-system.md
+    // and DeckPlayerParts.swift). Not a restyle: a different screen —
+    // the record's sleeve above an amplifier's front panel — shown when
+    // the Turntable Home flag is on. The old player is untouched and is
+    // what the flag-off app shows.
+    @ObservedObject private var featureFlags = FeatureFlags.shared
+    private var deck: Bool { featureFlags.turntableHome }
+    /// The drawer of lesser-used controls is pulled out.
+    @State private var showDeckDrawer = false
+    /// The case under the deck is open (Deck player).
+    @State private var caseOpen = false
+    @ObservedObject private var explorer = AntiAlgorithmEngine.shared
     @State private var dominantColor: Color = .clear
     @State private var colorExtractionTask: Task<Void, Never>?
     @State private var dragOffset: CGFloat = 0
@@ -132,23 +155,38 @@ struct FullPlayer: View {
             let isLandscape = geo.size.width > geo.size.height
 
             ZStack {
-                // Background
-                Color.black.ignoresSafeArea()
+                if deck {
+                    // The same room the turntable stands in, lit by
+                    // the same record.
+                    DeckRoomBackground(artworkURL: playerState.currentItem?.track.artworkURL)
+                        .animation(.easeInOut(duration: 0.9), value: playerState.currentItem?.track.artworkURL)
+                        .ignoresSafeArea()
+                } else {
+                    // Background
+                    Color.black.ignoresSafeArea()
 
-                // Dominant color wash (animated cross-dissolve on track change)
-                dominantColor
-                    .opacity(0.25)
-                    .ignoresSafeArea()
-                    .animation(reduceMotion ? .none : .easeInOut(duration: 0.35), value: dominantColor)
+                    // Dominant color wash (animated cross-dissolve on track change)
+                    dominantColor
+                        .opacity(0.25)
+                        .ignoresSafeArea()
+                        .animation(reduceMotion ? .none : .easeInOut(duration: 0.35), value: dominantColor)
 
-                // Optional blur background from artwork
-                ArtworkBackground(url: playerState.currentItem?.track.artworkURL)
+                    // Optional blur background from artwork
+                    ArtworkBackground(url: playerState.currentItem?.track.artworkURL)
+                }
 
-                // Main content — portrait or landscape
                 if isLandscape {
                     landscapeContent(geo: geo)
+                } else if deck {
+                    deckCaseContent
                 } else {
                     portraitContent
+                }
+
+                if deck && showDeckDrawer && !isLandscape {
+                    deckDrawer
+                        .transition(.opacity)
+                        .zIndex(5)
                 }
 
                 // First-run gesture coach marks
@@ -256,9 +294,18 @@ struct FullPlayer: View {
             .sheet(isPresented: $showChords) {
                 ChordsView()
             }
-            .offset(y: dragOffset)
+            // Deck: a pull down shuts the case; the deck itself does
+            // not move, because it is the deck on Home.
+            .offset(y: deck ? 0 : dragOffset)
+            .environment(\.deckStyle, deck)
+            .animation(reduceMotion ? nil : DeckMotion.settle, value: showDeckDrawer)
             .onAppear {
                 extractDominantColor()
+                if deck {
+                    withAnimation(reduceMotion ? nil : .spring(response: 0.5, dampingFraction: 0.78)) {
+                        caseOpen = true
+                    }
+                }
                 if !hasSeenGestureHints {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
                         showGestureHints = true
@@ -516,6 +563,581 @@ struct FullPlayer: View {
     }
     
     // MARK: - Top Bar
+    // MARK: - Deck player
+
+    /// The Deck full player: THE SAME DECK AS HOME, with its case open.
+    ///
+    /// The deck stands exactly where it stands on Home — same size,
+    /// same place, same record, same arm — so opening the player moves
+    /// nothing. What opens is the case under it: a lid of controls
+    /// hinged on the deck's front edge swings down toward you, the way
+    /// a portable record player's does.
+    ///
+    ///   the deck      as on Home; tap the record to shut the case
+    ///   the case      title · seek dial · transport · switches
+    ///   the drawer    screen (deck / video / scope), volume, the rest
+    private var deckCaseContent: some View {
+        GeometryReader { geo in
+            // The case needs this much; on a short phone the deck
+            // gives way.
+            // The case runs to the bottom of the SCREEN, under the home
+            // indicator, so the walnut fills what is left below the
+            // deck; its controls stop at the safe area.
+            let inset = geo.safeAreaInsets.bottom
+            let screenHeight = geo.size.height + inset
+            let widthScale = min(1, (geo.size.width - 16) / TurntableDeckView.size.width)
+            let heightScale = (screenHeight - 12 - DeckCaseLayout.minimumHeight - 8 - DeckCaseLayout.bottomGap)
+                / TurntableDeckView.size.height
+            let scale = max(0.5, min(widthScale, heightScale))
+            let caseHeight = max(
+                DeckCaseLayout.minimumHeight,
+                screenHeight - 12 - TurntableDeckView.size.height * scale - 8 - DeckCaseLayout.bottomGap
+            )
+            // 0 open … 1 shut. A pull down shuts it by hand.
+            let pull = min(1, max(0, dragOffset / 260))
+            let shut = caseOpen ? pull : 1
+
+            VStack(spacing: 0) {
+                // The same 12pt Home leaves above its deck.
+                Color.clear.frame(height: 10)
+
+                deckStage
+                    .scaleEffect(scale)
+                    .frame(
+                        width: TurntableDeckView.size.width * scale,
+                        height: TurntableDeckView.size.height * scale
+                    )
+                    .padding(.top, 2)
+                    .zIndex(1)
+
+                deckCase(height: caseHeight, bottomInset: inset)
+                    .padding(.horizontal, 10)
+                    .padding(.top, 8)
+                    .rotation3DEffect(
+                        .degrees(-86 * shut),
+                        axis: (x: 1, y: 0, z: 0),
+                        anchor: .top,
+                        perspective: 0.55
+                    )
+                    .opacity(1 - 0.9 * shut * shut)
+
+                Spacer(minLength: 0)
+            }
+            .frame(width: geo.size.width, height: screenHeight, alignment: .top)
+        }
+        .task(id: currentTrack?.videoId) {
+            waveformPeaks = nil
+            guard let videoId = currentTrack?.videoId else { return }
+            let peaks = await WaveformService.shared.waveform(for: videoId)
+            withAnimation(reduceMotion ? .none : .easeIn(duration: 0.3)) {
+                waveformPeaks = peaks
+            }
+        }
+    }
+
+    /// The deck — or, when the drawer's selector says so, the music
+    /// video or the visualiser on a screen set into the plinth.
+    private var deckStage: some View {
+        let duration = playerState.effectiveDuration > 0 ? playerState.effectiveDuration : playbackClock.duration
+        return ZStack {
+            TurntableDeckView(
+                artworkURL: playerState.currentItem?.track.artworkURL,
+                trackIdentity: playerState.currentItem?.track.videoId ?? "",
+                isLoaded: playerState.currentItem != nil,
+                isPlaying: playerState.isTransportRunning,
+                isLoading: playerState.playbackState.isLoading && !playerState.isTransportRunning,
+                progress: playbackClock.progress,
+                duration: duration,
+                reduceMotion: reduceMotion,
+                progressAt: { date in
+                    playerState.isTransportRunning
+                        ? playbackClock.projectedProgress(at: date)
+                        : playbackClock.progress
+                },
+                // Tapping the record opened the case; tapping it again
+                // shuts it.
+                onTapPlatter: { dismiss() },
+                onLongPress: {
+                    HapticManager.medium()
+                    showOrbitalMenu = true
+                },
+                onScrubEnded: { value in playerState.seek(to: value) },
+                onToggle: {
+                    HapticManager.medium()
+                    playerState.togglePlayPause()
+                },
+                keyStates: TurntableHomeModel.keyStates(
+                    isDigging: explorer.isLoading,
+                    dugTrackIDs: explorer.isExploring ? explorer.explorationQueue.map(\.videoId) : [],
+                    nowPlayingID: playerState.currentItem?.track.videoId,
+                    isRadioPlaying: playerState.contentType == .liveRadio && playerState.currentItem != nil,
+                    hasPendingReview: SmartLibraryManager.shared.pendingCandidates != nil
+                        || SmartLibraryManager.shared.pendingCleanup != nil
+                ),
+                // The keys belong to Home: shut the case and let Home
+                // do what the key does.
+                onKey: { key in
+                    dismiss()
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        NotificationCenter.default.post(name: .deckKeyPressed, object: key.rawValue)
+                    }
+                }
+            )
+
+            if artworkMode != .poster {
+                deckScreen
+                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
+            }
+        }
+        .animation(reduceMotion ? nil : DeckMotion.settle, value: artworkMode)
+    }
+
+    /// A screen the size of the plinth: the video, or the visualiser.
+    private var deckScreen: some View {
+        let shape = RoundedRectangle(cornerRadius: 30, style: .continuous)
+        return ZStack {
+            Color.black
+            if artworkMode == .video {
+                PlayerVideoView(player: playerState.player)
+            } else {
+                NeuralFreqVisualizer(engine: AudioVisualizerEngine.shared, style: .neural)
+            }
+        }
+        .frame(width: TurntableDeckView.size.width - 20, height: TurntableDeckView.size.height - 20)
+        .clipShape(shape)
+        .overlay(shape.strokeBorder(.black.opacity(0.8), lineWidth: 3))
+        .overlay(alignment: .topTrailing) {
+            DeckButton(title: "Deck", symbol: "opticaldisc") {
+                HapticManager.selectionChanged()
+                artworkMode = .poster
+            }
+            .padding(12)
+        }
+        .padding(10)
+        .deckPlinth(cornerRadius: 30)
+        .onLongPressGesture(minimumDuration: 0.6) {
+            HapticManager.medium()
+            showOrbitalMenu = true
+        }
+    }
+
+    /// The case: a walnut lid with the controls set into it, hinged
+    /// on the deck's front edge.
+    private func deckCase(height: CGFloat, bottomInset: CGFloat) -> some View {
+        let roomy = DeckCaseLayout.isRoomy(height: height, bottomInset: bottomInset)
+        return VStack(spacing: 0) {
+            deckLabel
+                .padding(.horizontal, 4)
+
+            Spacer(minLength: 8)
+
+            // The instrument panel takes whatever height is left, and
+            // spreads its three rows through it.
+            deckAmplifier(roomy: roomy)
+                .frame(maxHeight: .infinity)
+                .layoutPriority(1)
+
+            Spacer(minLength: 8)
+
+            // On a tall screen there is room for the volume here; on a
+            // short one it stays in the drawer.
+            if roomy {
+                deckVolume
+                Spacer(minLength: 8)
+            }
+
+            // Pulled in from the sides on a rounded-corner phone so the
+            // row clears the screen's corner radius.
+            deckBottomRow
+                .padding(.horizontal, bottomInset > 0 ? 14 : 0)
+        }
+        .padding(.horizontal, 10)
+        .padding(.top, 12)
+        .padding(.bottom, DeckCaseLayout.footPadding(bottomInset: bottomInset))
+        .frame(height: height)
+        .deckPlinth(cornerRadius: 24)
+        // The hinges, on the edge it swings from.
+        .overlay(alignment: .top) {
+            HStack {
+                deckHinge
+                Spacer()
+                deckHinge
+            }
+            .padding(.horizontal, 46)
+            .offset(y: -4)
+            .allowsHitTesting(false)
+        }
+    }
+
+    private var deckHinge: some View {
+        RoundedRectangle(cornerRadius: 2)
+            .fill(
+                LinearGradient(
+                    colors: [TurntableTokens.brass, TurntableTokens.brass.opacity(0.55)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            )
+            .frame(width: 30, height: 8)
+            .overlay(RoundedRectangle(cornerRadius: 2).strokeBorder(.black.opacity(0.45), lineWidth: 0.6))
+            .shadow(color: .black.opacity(0.5), radius: 1.5, y: 1)
+            .accessibilityHidden(true)
+    }
+
+    private func deckScreenChip(_ title: String, _ mode: ArtworkMode) -> some View {
+        DeckChip(title: title, isSelected: artworkMode == mode) {
+            HapticManager.selectionChanged()
+            showDeckDrawer = false
+            artworkMode = mode
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    /// What is playing, in print, and the like button.
+    private var deckLabel: some View {
+        HStack(alignment: .center, spacing: 8) {
+            DeckMetalButton(symbol: "chevron.down", size: 28, action: dismiss)
+                .accessibilityLabel("Dismiss player")
+
+            VStack(alignment: .leading, spacing: 1) {
+                Button {
+                    withAnimation(reduceMotion ? .none : DeckMotion.move) {
+                        isTrackInfoExpanded.toggle()
+                    }
+                } label: {
+                    Text(currentTrack?.title ?? "Nothing playing")
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundColor(TurntableTokens.cream)
+                        .lineLimit(isTrackInfoExpanded ? 3 : 1)
+                        .multilineTextAlignment(.leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.plain)
+                .disabled(currentTrack == nil)
+
+                HStack(spacing: 8) {
+                    if playerState.contentType == .liveRadio {
+                        HStack(spacing: 5) {
+                            DeckLamp(color: DeckSignal.live, state: .lit, size: 5)
+                            Text("LIVE")
+                                .font(DeckType.engraved)
+                                .tracking(DeckType.engravedTracking)
+                                .foregroundColor(DeckSignal.live)
+                        }
+                    }
+                    Text(deckSubtitle)
+                        .font(.system(size: 13.5))
+                        .foregroundColor(TurntableTokens.cream.opacity(0.6))
+                        .lineLimit(1)
+                }
+
+            }
+
+            if playerState.contentType == .track {
+                DeckMetalButton(
+                    symbol: currentTrackIsLiked ? "heart.fill" : "heart",
+                    accent: DeckSignal.live,
+                    state: currentTrackIsLiked ? .lit : .idle,
+                    size: 32,
+                    action: toggleCurrentTrackLike
+                )
+                .accessibilityLabel(currentTrackIsLiked ? "Unlike" : "Like")
+            }
+        }
+    }
+
+    /// The line under the title: the artist, or where in a book you are.
+    private var deckSubtitle: String {
+        if playerState.contentType == .audiobook, !playerState.currentChapters.isEmpty {
+            return "Chapter \(playerState.currentChapterIndex + 1) of \(playerState.currentChapters.count)"
+        }
+        return currentTrack?.displayArtist ?? ""
+    }
+
+    /// The controls in the case: dial, transport, switches.
+    private func deckAmplifier(roomy: Bool) -> some View {
+        VStack(spacing: 0) {
+            if playerState.contentType == .liveRadio {
+                DeckOnAirStrip()
+            } else {
+                DeckSeekDial(clock: playbackClock, peaks: waveformPeaks) { [weak playerState] progress in
+                    playerState?.seek(to: progress)
+                }
+            }
+
+            Spacer(minLength: 6)
+
+            deckTransport(roomy: roomy)
+
+            Spacer(minLength: 6)
+
+            Rectangle()
+                .fill(Color.white.opacity(0.06))
+                .frame(height: 1)
+
+            deckSwitches
+                .padding(.top, 4)
+        }
+        .padding(.horizontal, 12)
+        .padding(.top, 12)
+        .padding(.bottom, 6)
+        .deckPanel(cornerRadius: 16)
+    }
+
+    private func deckTransport(roomy: Bool) -> some View {
+        let loading = playerState.playbackState.isLoading
+        let playing = playerState.playbackState.isPlaying
+        return HStack(spacing: 30) {
+            deckSkip(forward: false)
+
+            DeckMetalButton(
+                symbol: playing ? "pause.fill" : "play.fill",
+                accent: loading ? DeckSignal.power : DeckSignal.live,
+                state: loading ? .working : (playing ? .lit : .idle),
+                size: roomy ? 64 : 54
+            ) {
+                HapticManager.medium()
+                playerState.togglePlayPause()
+            }
+            .accessibilityLabel(
+                playing
+                    ? "Pause \(playerState.currentItem?.track.title ?? "")"
+                    : "Play \(playerState.currentItem?.track.title ?? "")"
+            )
+            .accessibilityValue(loading ? "Loading" : "")
+            .accessibilityIdentifier("player.playPause")
+
+            deckSkip(forward: true)
+        }
+        .frame(height: roomy ? 74 : 64)
+    }
+
+    /// The button either side of play: a track skip for music, fifteen
+    /// seconds for a podcast, a chapter for a book, nothing for radio.
+    @ViewBuilder
+    private func deckSkip(forward: Bool) -> some View {
+        switch playerState.contentType {
+        case .liveRadio:
+            Color.clear.frame(width: 52, height: 52)
+        case .podcastEpisode:
+            DeckMetalButton(symbol: forward ? "goforward.15" : "gobackward.15", size: 38) {
+                HapticManager.light()
+                if forward { playerState.skipForward(15) } else { playerState.skipBackward(15) }
+            }
+            .accessibilityLabel(forward ? "Forward 15 seconds" : "Back 15 seconds")
+        case .audiobook:
+            let atEnd = forward
+                ? (playerState.currentChapterIndex >= playerState.currentChapters.count - 1 || playerState.currentChapters.isEmpty)
+                : playerState.currentChapterIndex <= 0
+            DeckMetalButton(symbol: forward ? "forward.end.fill" : "backward.end.fill", size: 38) {
+                HapticManager.light()
+                if forward { playerState.skipToNextChapter() } else { playerState.skipToPreviousChapter() }
+            }
+            .disabled(atEnd)
+            .opacity(atEnd ? 0.35 : 1)
+            .accessibilityLabel(forward ? "Next chapter" : "Previous chapter")
+        case .track:
+            let enabled = forward ? playerState.hasNextTrack : playerState.hasPreviousTrack
+            DeckMetalButton(symbol: forward ? "forward.fill" : "backward.fill", size: 38) {
+                HapticManager.medium()
+                if forward { playerState.nextTrack(userSkipped: true) } else { playerState.previousTrack() }
+            }
+            .disabled(!enabled)
+            .opacity(enabled ? 1 : 0.35)
+            .accessibilityLabel(forward ? "Next track" : "Previous track")
+        }
+    }
+
+    /// Four switches, each with its lamp: lit means on.
+    private var deckSwitches: some View {
+        HStack(spacing: 0) {
+            DeckMetalButton(
+                symbol: "shuffle", accent: DeckSignal.power,
+                state: playerState.isShuffled ? .lit : .idle, size: 30
+            ) {
+                HapticManager.light()
+                playerState.toggleShuffle()
+            }
+            .accessibilityLabel("Shuffle")
+            .accessibilityValue(playerState.isShuffled ? "On" : "Off")
+            .frame(maxWidth: .infinity)
+
+            DeckMetalButton(
+                symbol: playerState.repeatMode.iconName, accent: DeckSignal.power,
+                state: playerState.repeatMode != .none ? .lit : .idle, size: 30
+            ) {
+                HapticManager.light()
+                playerState.toggleRepeat()
+            }
+            .accessibilityLabel("Repeat")
+            .accessibilityValue(playerState.repeatMode == .none ? "Off" : "On")
+            .frame(maxWidth: .infinity)
+
+            if playerState.contentType == .podcastEpisode || playerState.contentType == .audiobook {
+                DeckButton(title: playbackSpeedText) { cyclePlaybackSpeed() }
+                    .accessibilityLabel("Playback speed \(playbackSpeedText)")
+                    .frame(maxWidth: .infinity)
+            }
+
+            DeckMetalButton(symbol: "list.bullet", size: 30) {
+                HapticManager.light()
+                showQueue = true
+            }
+            .accessibilityLabel("Queue")
+            .accessibilityIdentifier("player.queue")
+            .scaleEffect(queuePulseAmount)
+            .animation(.spring(response: 0.32, dampingFraction: 0.55), value: queuePulseAmount)
+            .onReceive(NotificationCenter.default.publisher(for: .trackAddedToQueue)) { _ in
+                queuePulseAmount = 1.18
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
+                    queuePulseAmount = 1.0
+                }
+            }
+            .frame(maxWidth: .infinity)
+
+            DeckMetalButton(
+                symbol: "moon.fill", accent: DeckSignal.attention,
+                state: SleepTimer.shared.isActive ? .lit : .idle, size: 30
+            ) {
+                HapticManager.light()
+                showSleepTimer = true
+            }
+            .accessibilityLabel("Sleep timer")
+            .accessibilityValue(SleepTimer.shared.isActive ? "On" : "Off")
+            .frame(maxWidth: .infinity)
+        }
+    }
+
+    /// Volume: the system's own slider, lying in a well.
+    private var deckVolume: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "speaker.fill")
+                .font(.system(size: 12))
+                .foregroundColor(TurntableTokens.aluminium.opacity(0.6))
+                .accessibilityHidden(true)
+            SystemVolumeView()
+                .frame(height: 22)
+                .tint(TurntableTokens.cream)
+            Image(systemName: "speaker.wave.3.fill")
+                .font(.system(size: 12))
+                .foregroundColor(TurntableTokens.aluminium.opacity(0.6))
+                .accessibilityHidden(true)
+        }
+        .padding(.horizontal, 18)
+        .frame(height: 44)
+        .deckWell(Capsule())
+    }
+
+    /// AirPlay, and the key that pulls out the drawer.
+    private var deckBottomRow: some View {
+        HStack(spacing: 10) {
+            ZStack {
+                DeckMetalCap(symbol: "airplayaudio", size: 30)
+                AirPlayRoutePickerView()
+            }
+            .frame(width: 44, height: 44)
+            .accessibilityLabel("AirPlay")
+
+            if playerState.contentType == .track {
+                DeckButton(title: "Lyrics", symbol: "text.quote", fillsWidth: true) {
+                    HapticManager.light()
+                    showLyrics = true
+                }
+            }
+
+            DeckButton(title: "More", symbol: "ellipsis", fillsWidth: true) {
+                HapticManager.light()
+                showDeckDrawer = true
+            }
+            .accessibilityIdentifier("player.more")
+        }
+    }
+
+    /// The drawer: what is used less often, pulled out from under the
+    /// amplifier. One tap on a key does its thing and shuts the drawer.
+    private var deckDrawer: some View {
+        let hapticsAvailable = CHHapticEngine.capabilitiesForHardware().supportsHaptics
+        return ZStack(alignment: .bottom) {
+            Color.black.opacity(0.55)
+                .ignoresSafeArea()
+                .onTapGesture { showDeckDrawer = false }
+                .accessibilityLabel("Close")
+                .accessibilityAddTraits(.isButton)
+
+            VStack(alignment: .leading, spacing: 14) {
+                HStack {
+                    Text("More")
+                        .font(DeckType.screenTitle)
+                        .foregroundColor(TurntableTokens.cream)
+                    Spacer()
+                    DeckButton(title: "Done", kind: .card) { showDeckDrawer = false }
+                }
+
+                // What the deck's place shows: the deck, the music
+                // video, or the visualiser.
+                HStack(spacing: 0) {
+                    deckScreenChip("Deck", .poster)
+                    deckScreenChip("Video", .video)
+                    deckScreenChip("Scope", .visualizer)
+                }
+                .padding(3)
+                .deckPanel(cornerRadius: CornerRadius.smd)
+
+                // (On a tall screen the volume is on the case itself;
+                // a second copy here does no harm and keeps the drawer
+                // the same on every phone.)
+                deckVolume
+
+                LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible())], spacing: 10) {
+                    deckDrawerKey("Chords", "guitars") { showChords = true }
+                    deckDrawerKey(
+                        "Memory",
+                        songMemoryManager.hasMemory(for: playerState.currentItem?.track) ? "sparkles.rectangle.stack.fill" : "square.and.pencil"
+                    ) { showSongMemory = true }
+                    deckDrawerKey("Audio", "waveform") { showAudioSettings = true }
+                    deckDrawerKey("Share", "square.and.arrow.up") { showShareSheet = true }
+                    deckDrawerKey("Bury capsule", "hourglass") { showTimeCapsule = true }
+                    deckDrawerKey("Time vault", "tray.full") { showTimeCapsuleVault = true }
+                    if hapticsAvailable {
+                        deckDrawerKey(
+                            hapticEngine.isActive ? "Haptics on" : "Haptics",
+                            hapticEngine.isActive ? "waveform.path.ecg.rectangle.fill" : "waveform.path.ecg.rectangle",
+                            closes: false
+                        ) {
+                            if hapticEngine.isActive {
+                                hapticEngine.stop()
+                            } else if hapticEngine.isReducedByPreference {
+                                showDeckDrawer = false
+                                hapticReduceToast = true
+                            } else {
+                                hapticEngine.start()
+                            }
+                        }
+                    }
+                    deckDrawerKey("Gestures", "questionmark.circle") { showGestureCoach = true }
+                }
+            }
+            .padding(18)
+            .padding(.bottom, 14)
+            .deckPlinth(cornerRadius: 26)
+            .padding(.horizontal, 8)
+            .transition(.move(edge: .bottom))
+        }
+    }
+
+    private func deckDrawerKey(
+        _ title: String,
+        _ symbol: String,
+        closes: Bool = true,
+        action: @escaping () -> Void
+    ) -> some View {
+        DeckButton(title: title, symbol: symbol, fillsWidth: true) {
+            HapticManager.light()
+            if closes { showDeckDrawer = false }
+            action()
+        }
+    }
+
     private var topBar: some View {
         ZStack {
             // Centered capsule handle (visual drag indicator)
@@ -1462,6 +2084,30 @@ private struct ProgressSection: View {
 }
 
 // MARK: - Scroll Offset PreferenceKey
+/// The sizes the Deck player's case is laid out to.
+enum DeckCaseLayout {
+    /// The least the case needs: title, dial, transport, switches and
+    /// the bottom row at their smallest. Below this the deck shrinks.
+    static let minimumHeight: CGFloat = 318
+    /// Walnut left showing under the case at the foot of the screen.
+    static let bottomGap: CGFloat = 6
+    /// From this much usable height the case also carries the volume
+    /// and a larger transport.
+    static let roomyHeight: CGFloat = 392
+
+    /// Whether the case has room for the volume and larger transport.
+    /// The home-indicator inset is walnut, not room for controls.
+    static func isRoomy(height: CGFloat, bottomInset: CGFloat) -> Bool {
+        height - footPadding(bottomInset: bottomInset) >= roomyHeight - 10
+    }
+
+    /// Clear space under the bottom row: the full home-indicator inset
+    /// on a rounded-corner phone, so the row sits inside the curve.
+    static func footPadding(bottomInset: CGFloat) -> CGFloat {
+        bottomInset > 0 ? bottomInset + 2 : 12
+    }
+}
+
 private struct FullPlayerScrollOffsetKey: PreferenceKey {
     static var defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {

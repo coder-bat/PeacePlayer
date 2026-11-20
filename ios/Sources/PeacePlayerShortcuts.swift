@@ -221,7 +221,7 @@ struct LikeCurrentTrackIntent: AppIntent, ForegroundContinuableIntent {
         ) {
             ShortcutPlaybackController.shared.execute(.likeCurrentTrack)
         }
-        return .result(dialog: alreadyLiked ? "Already liked in Peace Player." : "Liked this song in Peace Player.")
+        return .result(dialog: IntentDialog(alreadyLiked ? "Already liked in Peace Player." : "Liked this song in Peace Player."))
     }
 }
 

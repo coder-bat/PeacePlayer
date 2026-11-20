@@ -9,6 +9,24 @@ import Foundation
 import Combine
 import CoreData
 
+/// 2026-11-20: a snapshot of the last session's playback state.
+///
+/// Written on every track change, on every throttled progress update and
+/// on every background transition; read once at cold launch to restore
+/// the queue, the current track and the playhead position.
+struct PlaybackSnapshot: Codable, Equatable {
+    /// `videoId` of the track that was current.
+    var trackId: String
+    /// Index of that track within the saved queue.
+    var queueIndex: Int
+    /// Playhead position as a 0...1 fraction of the track duration.
+    var progress: Double
+    /// Whether the app was actually playing when the snapshot was taken.
+    var wasPlaying: Bool
+    /// When the snapshot was written.
+    var savedAt: Date
+}
+
 /// Manages persistent user data including recently played, stats, and playback progress
 class DataManager: ObservableObject {
     static let shared = DataManager()
@@ -42,6 +60,11 @@ class DataManager: ObservableObject {
         // the matching comment on the @Published var.
         static let lastPlayedTrackId = "lastPlayedTrackId"
         static let lastPlaybackProgress = "lastPlaybackProgress"
+        // 2026-11-20: the launch-restore snapshot ("what was playing
+        // when the app last ran"). Stored as ONE json blob so the
+        // track id and the position can never disagree — the old
+        // lastPlayedTrackId / lastPlaybackProgress pair could.
+        static let playbackSnapshot = "playbackSnapshot.v1"
     }
     
     private init() {
@@ -254,6 +277,30 @@ class DataManager: ObservableObject {
     func clearLastPlaybackState() {
         defaults.removeObject(forKey: Keys.lastPlayedTrackId)
         defaults.removeObject(forKey: Keys.lastPlaybackProgress)
+    }
+    
+    // MARK: - Playback Snapshot (2026-11-20)
+    
+    /// Persists "what was playing when the app last ran" so the next
+    /// cold launch can restore the queue, the current track and the
+    /// playhead position.
+    ///
+    /// One atomic write of one blob — a partial write can never leave
+    /// the track id and the position out of sync.
+    func savePlaybackSnapshot(_ snapshot: PlaybackSnapshot) {
+        guard let data = try? encoder.encode(snapshot) else { return }
+        defaults.set(data, forKey: Keys.playbackSnapshot)
+    }
+    
+    func loadPlaybackSnapshot() -> PlaybackSnapshot? {
+        guard let data = defaults.data(forKey: Keys.playbackSnapshot),
+              let decoded = try? decoder.decode(PlaybackSnapshot.self, from: data)
+        else { return nil }
+        return decoded
+    }
+    
+    func clearPlaybackSnapshot() {
+        defaults.removeObject(forKey: Keys.playbackSnapshot)
     }
     
     // MARK: - Reset All

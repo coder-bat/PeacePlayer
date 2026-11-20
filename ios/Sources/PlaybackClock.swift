@@ -94,6 +94,24 @@ final class PlaybackClock: ObservableObject {
         return elapsed
     }
 
+    /// Seed the playhead position for a restored session.
+    ///
+    /// 2026-11-20: the launch restore leaves the player paused at the
+    /// position the user left off at. There is no live AVPlayer yet, so
+    /// `tick()` can't be used to publish the position — this seeds the
+    /// clock directly so the scrubber and the time labels show the
+    /// restored position immediately instead of snapping back to 0:00.
+    func setRestoredPosition(currentTime: TimeInterval, progress: Double, expectedDuration: TimeInterval) {
+        if expectedDuration > 0 {
+            self.expectedDuration = expectedDuration
+            self.duration = expectedDuration
+        }
+        self.currentTime = currentTime
+        self.progress = max(0, min(1, progress))
+        lastUpdateTime = Date()
+        lastUpdateDate = lastUpdateTime
+    }
+
     /// Set the expected duration from track metadata (typically from
     /// `Track.durationSeconds`).
     func setExpectedDuration(_ value: Double) {

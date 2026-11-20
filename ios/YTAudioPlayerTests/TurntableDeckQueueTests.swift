@@ -14,7 +14,7 @@
 //  shelf.
 //
 //  These tests pin the wiring at the level that can be checked
-//  offline: the deck's data source follows the store, and the crate
+//  offline: the deck's data source follows the store, and the tray
 //  shows what is coming up.
 //
 
@@ -108,24 +108,23 @@ final class TurntableDeckQueueTests: XCTestCase {
         XCTAssertEqual(upcoming, ["Later"])
     }
 
-    /// The crate is topped up from the queue, so a track that is
-    /// playing elsewhere also shows up in the crate's rows.
-    func testCrateIsToppedUpFromTheQueue() {
-        let items = [
-            makeItem("c-0", title: "Crate Zero"),
-            makeItem("c-1", title: "Crate One")
-        ]
+    /// The tray follows the record that is playing. Playback that
+    /// starts deep in a long queue (a playlist opened at its
+    /// thirtieth track) must still put that record in the tray.
+    func testTheTrayFollowsPlaybackStartedDeepInTheQueue() {
+        let store = PlayerState.shared.queueStore
+        store.replace(with: (0..<40).map { makeItem("deep-\($0)", title: "Deep \($0)") })
+        store.setCurrentIndex(30)
+        drainMainQueue()
 
-        let crate = TurntableHomeModel.crateContents(
-            suggestions: [:],
-            queue: items,
-            recent: [],
-            limit: CrateGrid.columnCount * CrateGrid.visibleRows
+        let window = QueueShelf.window(
+            count: PlayerState.shared.queue.count,
+            currentIndex: PlayerState.shared.currentIndex
         )
+        let titles = PlayerState.shared.queue[window].map(\.track.title)
 
-        let titles = crate.map(\.title)
-        XCTAssertTrue(titles.contains("Crate Zero"))
-        XCTAssertTrue(titles.contains("Crate One"))
+        XCTAssertTrue(titles.contains("Deep 30"), "The playing record is not in the tray")
+        XCTAssertTrue(titles.contains("Deep 31"), "The next record is not in the tray")
     }
 
     /// Changing the queue must publish, or the deck never re-renders.

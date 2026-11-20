@@ -305,7 +305,11 @@ struct HomeView: View {
         TurntableHomeView(
             viewModel: viewModel,
             favoriteArtists: favoriteArtists,
-            playerState: playerState
+            playerState: playerState,
+            // 2026-11-20: Radio and Settings are keys on the deck.
+            onNavigate: { destination in
+                path.append(destination)
+            }
         )
         .ignoresSafeArea(edges: .bottom)
     }
@@ -1056,6 +1060,7 @@ class HomeViewModel: ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] artists in
                 self?.fetchSuggestionsForFavoriteArtists(artists)
+                self?.fetchAlbumSuggestions(for: artists)
             }
             .store(in: &cancellables)
     }
@@ -1317,6 +1322,128 @@ class HomeViewModel: ObservableObject {
                     }
                 })
                 .store(in: &suggestionCancellables)
+        }
+    }
+
+    // MARK: - Albums
+
+    /// The albums suggested for each favourite artist.
+    ///
+    /// The turntable's artist shelves stand albums, not songs: the
+    /// card on the ledge is a record sleeve with a cover and a year,
+    /// and touching it plays the album. The song suggestions above
+    /// still feed the old Home screen's "For you" block.
+    @Published var albumSuggestions: [String: [Album]] = [:]
+
+    /// The album's own fetches and the stream URLs they need.
+    private var albumCancellables = Set<AnyCancellable>()
+
+    /// How many albums one artist's shelf holds.
+    static let albumsPerArtist = 5
+
+    /// Asks the backend for each favourite artist's albums.
+    ///
+    /// One request per artist, the same shape as the song suggestions
+    /// above. A failure for one artist leaves that artist's shelf
+    /// empty and does not disturb the others.
+    func fetchAlbumSuggestions(for artists: [String]) {
+        albumCancellables.removeAll()
+        albumSuggestions.removeAll()
+
+        for artist in artists {
+            APIService.shared.searchAlbums(query: artist, limit: Self.albumsPerArtist)
+                .sink(receiveCompletion: { _ in },
+                      receiveValue: { [weak self] albums in
+                    guard let self = self, !albums.isEmpty else { return }
+                    DispatchQueue.main.async {
+                        self.albumSuggestions[artist] = albums
+                    }
+                })
+                .store(in: &albumCancellables)
+        }
+    }
+
+    /// Plays an album: its tracks, in order, with the first one playing.
+    @MainActor
+    func playAlbum(_ album: Album) {
+        loadAlbum(album) { [weak self] items in
+            guard let self = self, !items.isEmpty else { return }
+            let player = PlayerState.shared
+            player.queueStore.replace(with: items)
+            player.playQueue(at: 0)
+            HapticManager.medium()
+        }
+    }
+
+    /// Adds an album to the end of the queue, leaving what is playing
+    /// alone.
+    @MainActor
+    func queueAlbum(_ album: Album) {
+        loadAlbum(album) { [weak self] items in
+            guard let self = self, !items.isEmpty else { return }
+            for item in items {
+                PlayerState.shared.addToQueue(item)
+            }
+            HapticManager.success()
+        }
+    }
+
+    /// Fetches an album's tracks and turns them into queue items.
+    ///
+    /// A stream URL is resolved per track; the album's order is kept
+    /// no matter which URL arrives first.
+    @MainActor
+    private func loadAlbum(_ album: Album, then: @escaping ([QueueItem]) -> Void) {
+        APIService.shared.getAlbumDetails(browseId: album.browseId)
+            .sink(receiveCompletion: { completion in
+                if case .failure(let error) = completion {
+                    print("❌ [HomeView] album \(album.browseId) failed: \(error.localizedDescription)")
+                    ErrorHandler.shared.handleAPIError(error)
+                }
+            }, receiveValue: { [weak self] details in
+                guard let self = self, !details.tracks.isEmpty else { return }
+                self.resolveQueueItems(for: details.tracks, then: then)
+            })
+            .store(in: &albumCancellables)
+    }
+
+    /// Resolves a stream URL for each track, keeping the album's order.
+    @MainActor
+    private func resolveQueueItems(for tracks: [Track], then: @escaping ([QueueItem]) -> Void) {
+        let group = DispatchGroup()
+        var items: [QueueItem] = []
+
+        for track in tracks.prefix(30) {
+            group.enter()
+            StreamURLCache.shared.getStreamUrl(videoId: track.videoId)
+                .receive(on: DispatchQueue.main)
+                .sink(receiveCompletion: { _ in
+                    group.leave()
+                }, receiveValue: { streamInfo in
+                    items.append(
+                        QueueItem(
+                            track: track,
+                            streamUrl: streamInfo.streamUrl,
+                            source: .stream
+                        )
+                    )
+                })
+                // Stored on the view model, not in a local set: a
+                // local set would be released the moment this method
+                // returns and the fetches would be cancelled with it.
+                .store(in: &albumCancellables)
+        }
+
+        group.notify(queue: .main) { [weak self] in
+            // The URLs arrived in whatever order they came back in;
+            // the album's order is the one the user expects.
+            let byVideoId = Dictionary(
+                items.map { ($0.track.videoId, $0) },
+                uniquingKeysWith: { first, _ in first }
+            )
+            let ordered = tracks.prefix(30).compactMap { byVideoId[$0.videoId] }
+            guard !ordered.isEmpty else { return }
+            then(ordered)
         }
     }
 }

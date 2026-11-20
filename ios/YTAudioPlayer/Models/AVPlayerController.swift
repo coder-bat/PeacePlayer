@@ -425,6 +425,11 @@ final class AVPlayerController {
             // S17-H follow-up: clear the loading-state timeout
             // — the player reached ready before the 15s safety net.
             playerState?.loadingTimeoutWorkItem?.cancel()
+            // 2026-11-20: if this session was restored from the last
+            // launch, jump to the saved position now that the player is
+            // actually ready (seeking before readyToPlay fights the
+            // buffering state).
+            playerState?.applyPendingResumePosition()
             // Defer showing .playing until audio is actually ready.
             if playerState?.playbackState == .loading {
                 playerState?.playbackState = .playing

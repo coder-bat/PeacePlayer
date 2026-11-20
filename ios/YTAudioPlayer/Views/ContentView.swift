@@ -26,16 +26,19 @@ struct ContentView: View {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @State private var selectedTab = 0
     @State private var showFullPlayer = false
-    @State private var showRestorePrompt = false
     // S18 (P0-5): Time Capsule vault sheet, posted by the
     // notification response handler and the deep link router.
     // Lives at the root (not behind the FullPlayer) so a cold
     // launch from a notification banner can present it.
     @State private var showTimeCapsuleVault = false
-    // S13: prevent the restore prompt from re-appearing in the same
-    // session after dismissal. Cleared when the app cold-launches
-    // (UserDefaults is process-scoped via AppStorage).
-    @AppStorage("queueRestorePromptShown") private var restorePromptShownThisSession = false
+    // 2026-11-20: the "queueRestorePromptShown" @AppStorage flag is
+    // GONE. It was UserDefaults-backed despite its "ThisSession"
+    // name, so it latched `true` on the first launch that had a
+    // saved queue and every later launch skipped the restore
+    // entirely — the app came back with nothing playing. The restore
+    // now runs on every launch (see `QueueRestorer.restoreLastSession`)
+    // and restores the queue + current track PAUSED, so there is
+    // nothing to prompt about.
     @Namespace private var playerNamespace
 
     var body: some View {
@@ -133,23 +136,21 @@ struct ContentView: View {
                 .zIndex(2)
             }
 
-            // Queue restore overlay
-            if showRestorePrompt {
-                Color.black.opacity(0.5)
-                    .ignoresSafeArea()
-
-                QueueRestorePrompt {
-                    showRestorePrompt = false
-                }
-            }
-
             // Full player overlay — slides up over everything including the tab bar
             if showFullPlayer {
                 FullPlayer(isPresented: $showFullPlayer)
-                    .transition(.asymmetric(
-                        insertion: .move(edge: .bottom),
-                        removal: .move(edge: .bottom)
-                    ))
+                    // 2026-11-22: the Deck player does not slide up. It
+                    // IS the deck on Home, with a case of controls that
+                    // opens under it — so it appears in place and does
+                    // its own opening. The old player still slides.
+                    .transition(
+                        FeatureFlags.shared.turntableHome
+                            ? AnyTransition.opacity.animation(.easeOut(duration: 0.14))
+                            : AnyTransition.asymmetric(
+                                insertion: .move(edge: .bottom),
+                                removal: .move(edge: .bottom)
+                            )
+                    )
                     .zIndex(1)
             }
 
@@ -251,6 +252,20 @@ struct ContentView: View {
         // sheets from ContentView — HomeView's NavigationStack pushes
         // these destinations directly. Swipe-from-edge back gesture
         // works automatically.
+        // 2026-11-22: `PlayerState.showFullPlayer` is how views that do
+        // not own this screen's state ask for the player — the record
+        // on the Turntable Home, a played playlist, a shortcut. Nothing
+        // was listening for it, so those requests did nothing. It is a
+        // request, not a state: it is cleared as soon as it is acted
+        // on, so the next request is a change again.
+        .onChange(of: playerState.showFullPlayer) { _, requested in
+            guard requested else { return }
+            playerState.showFullPlayer = false
+            guard playerState.isNowPlaying, !showFullPlayer else { return }
+            withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
+                showFullPlayer = true
+            }
+        }
         .onChange(of: playerState.showQueue) { _, shouldShow in
             if shouldShow && !showFullPlayer {
                 withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
@@ -263,22 +278,17 @@ struct ContentView: View {
             setupAppearance()
             PlaybackQueueManager.shared.startObservingPlayerStateIfNeeded(playerState: playerState)
 
-            // S13: silent auto-restore for single-track queues. The
-            // user's last session left a 1-track queue — resume it
-            // immediately without the modal prompt. For 2+ tracks
-            // we still ask, since auto-playback of multi-track
-            // queues can be jarring.
-            let savedCount = PlaybackQueueManager.shared.loadQueue().count
-            if savedCount == 1, !restorePromptShownThisSession {
-                QueueRestorer.shared.restoreAndResume()
-                    .sink(receiveCompletion: { _ in }, receiveValue: { _ in })
-                    .store(in: &QueueRestorer.shared.cancellables)
-                restorePromptShownThisSession = true
-            } else if QueueRestorer.shared.shouldShowRestorePrompt(),
-                      !restorePromptShownThisSession {
-                showRestorePrompt = true
-                restorePromptShownThisSession = true
-            }
+            // 2026-11-20: restore the previous session — the queue, the
+            // current track and the playhead position — paused, without
+            // fetching any stream URLs. The URL for the track the user
+            // presses play on is resolved on demand.
+            //
+            // This used to be gated behind a "Resume Playback?" prompt
+            // for multi-track queues and a silent auto-resume for
+            // single-track queues, behind a UserDefaults flag that
+            // latched on the first launch. The net effect was that the
+            // restore stopped happening at all after the first run.
+            QueueRestorer.shared.restoreLastSession()
         }
     }
 
@@ -488,47 +498,67 @@ struct BottomBar: View {
                 isCollapsed = false
             }
         } label: {
-            ZStack {
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                Theme.cyberSurface,
-                                Theme.cyberCyan.opacity(0.18)
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
+            if FeatureFlags.shared.turntableHome {
+                // Deck: the collapsed player is one metal button; its
+                // ring is lit while something plays.
+                ZStack {
+                    DeckMetalCap(
+                        symbol: isPlaying ? "pause.fill" : "play.fill",
+                        accent: DeckSignal.live,
+                        size: 36,
+                        isOn: isPlaying
+                    )
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 10, weight: .heavy))
+                        .foregroundColor(TurntableTokens.cream.opacity(0.6))
+                        .offset(x: -27)
+                        .opacity(chevronCueOpacity)
+                }
+                .frame(width: 44, height: 44)
+            } else {
+                ZStack {
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    Theme.cyberSurface,
+                                    Theme.cyberCyan.opacity(0.18)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
                         )
-                    )
-                    .frame(width: 44, height: 44)
-                Circle()
-                    .stroke(
-                        LinearGradient(
-                            colors: [.cyberCyan, .cyberMagenta],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ),
-                        lineWidth: 1.2
-                    )
-                    .frame(width: 44, height: 44)
-                Image(systemName: isPlaying ? "pause.fill" : "play.fill")
-                    .font(.system(size: 16, weight: .bold))
-                    .foregroundColor(.cyberCyan)
-                    .offset(x: isPlaying ? 0 : 1)
+                        .frame(width: 44, height: 44)
+                    Circle()
+                        .stroke(
+                            LinearGradient(
+                                colors: [.cyberCyan, .cyberMagenta],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            lineWidth: 1.2
+                        )
+                        .frame(width: 44, height: 44)
+                    Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundColor(.cyberCyan)
+                        .offset(x: isPlaying ? 0 : 1)
 
-                // S13: chevron hint — appears to the left of the
-                // collapsed icon after the user collapses the mini
-                // player, hinting that they can swipe/tap to expand.
-                // Auto-fades after a few seconds.
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 11, weight: .heavy))
-                    .foregroundColor(.cyberCyan.opacity(0.7))
-                    .offset(x: -22)
-                    .opacity(chevronCueOpacity)
+                    // S13: chevron hint — appears to the left of the
+                    // collapsed icon after the user collapses the mini
+                    // player, hinting that they can swipe/tap to expand.
+                    // Auto-fades after a few seconds.
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 11, weight: .heavy))
+                        .foregroundColor(.cyberCyan.opacity(0.7))
+                        .offset(x: -22)
+                        .opacity(chevronCueOpacity)
+                }
+                .frame(width: 44, height: 44)
             }
-            .frame(width: 44, height: 44)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(DeckPressStyle())
+        .accessibilityLabel("Show player")
         .frame(height: 60)  // match the row height so the icon is centered vertically
         // S13: schedule the chevron hint animation. Shows for ~3s after
         // first collapse, then fades out permanently.
@@ -551,6 +581,10 @@ struct CyberpunkTabBar: View {
 
     // S15: respect accessibilityReduceTransparency
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    // 2026-11-21: the tab bar on the Deck design system
+    // (docs/design/deck-design-system.md): Deck drawing with the
+    // Turntable Home flag on, the old drawing with it off.
+    @ObservedObject private var featureFlags = FeatureFlags.shared
 
     private struct TabDef {
         let icon: String
@@ -587,10 +621,15 @@ struct CyberpunkTabBar: View {
                 CyberpunkTabItem(
                     icon: tab.icon,
                     label: tab.label,
-                    isSelected: selectedTab == tab.tag
+                    isSelected: selectedTab == tab.tag,
+                    deck: featureFlags.turntableHome
                 ) {
                     guard selectedTab != tab.tag else { return }
-                    HapticManager.light()
+                    if featureFlags.turntableHome {
+                        HapticManager.selectionChanged()
+                    } else {
+                        HapticManager.light()
+                    }
                     withAnimation(.spring(response: 0.28, dampingFraction: 0.72)) {
                         selectedTab = tab.tag
                     }
@@ -608,38 +647,66 @@ struct CyberpunkTabBar: View {
         // at 12pt. Mini player + tab pill still share
         // the same 60pt height (see BottomBar).
         .frame(width: 180, height: 60)  // fixed-size floating pill (S7d: 56→60 to match mini player)
-        .background(
-            ZStack {
-                // S15: respect accessibilityReduceTransparency.
-                // The previous code stacked an `.ultraThinMaterial`
-                // blur on top of a `cyberSurface.opacity(0.78)` tint
-                // — the tint was opaque, defeating the user's
-                // reduce-transparency preference. When the setting
-                // is on we drop the blur and let the tint be the
-                // single (opaque) surface; otherwise we keep the
-                // blur.
+        .background {
+            if featureFlags.turntableHome {
+                // Deck: the same anodised unit as the mini player
+                // beside it — the two read as one piece of hardware.
                 Capsule()
-                    .fill(reduceTransparency ? AnyShapeStyle(Theme.cyberSurface) : AnyShapeStyle(.ultraThinMaterial))
-                // Dark cyberpunk tint
-                Capsule()
-                    .fill(Color.cyberSurface.opacity(0.78))
-                // Subtle cyan glow inside the capsule
-                Capsule()
-                    .stroke(
+                    .fill(
                         LinearGradient(
-                            colors: [Color.cyberCyan.opacity(0.6), Color.cyberMagenta.opacity(0.4)],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        ),
-                        lineWidth: 1
+                            colors: [Color(white: 0.16), TurntableTokens.anodised],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
                     )
+                    .overlay(
+                        Capsule().strokeBorder(
+                            LinearGradient(
+                                colors: [.white.opacity(0.28), .white.opacity(0.03), .black.opacity(0.6)],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            ),
+                            lineWidth: 1
+                        )
+                    )
+                    .shadow(color: .black.opacity(0.5), radius: 5, y: 3)
+            } else {
+                legacyBackground
             }
-            .shadow(color: .black.opacity(0.5), radius: 12, x: 0, y: 4)
-            .shadow(color: Color.cyberCyan.opacity(0.15), radius: 16, x: 0, y: 0)
-        )
+        }
         .padding(.bottom, 6)  // breathing room above home indicator
         // The bar is centered horizontally by the parent ZStack
         // (no Spacer needed — see the call site in body).
+    }
+
+    private var legacyBackground: some View {
+        ZStack {
+            // S15: respect accessibilityReduceTransparency.
+            // The previous code stacked an `.ultraThinMaterial`
+            // blur on top of a `cyberSurface.opacity(0.78)` tint
+            // — the tint was opaque, defeating the user's
+            // reduce-transparency preference. When the setting
+            // is on we drop the blur and let the tint be the
+            // single (opaque) surface; otherwise we keep the
+            // blur.
+            Capsule()
+                .fill(reduceTransparency ? AnyShapeStyle(Theme.cyberSurface) : AnyShapeStyle(.ultraThinMaterial))
+            // Dark cyberpunk tint
+            Capsule()
+                .fill(Color.cyberSurface.opacity(0.78))
+            // Subtle cyan glow inside the capsule
+            Capsule()
+                .stroke(
+                    LinearGradient(
+                        colors: [Color.cyberCyan.opacity(0.6), Color.cyberMagenta.opacity(0.4)],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    ),
+                    lineWidth: 1
+                )
+        }
+        .shadow(color: .black.opacity(0.5), radius: 12, x: 0, y: 4)
+        .shadow(color: Color.cyberCyan.opacity(0.15), radius: 16, x: 0, y: 0)
     }
 }
 
@@ -649,10 +716,35 @@ struct CyberpunkTabItem: View {
     let icon: String
     let label: String
     let isSelected: Bool
+    var deck: Bool = false
     let action: () -> Void
+
+    /// Deck: one position of a selector. The symbol is engraved — it
+    /// brightens when chosen but does not glow; the lamp under it is
+    /// what says "you are here".
+    private var deckLabel: some View {
+        VStack(spacing: 5) {
+            Image(systemName: icon)
+                .font(.system(size: 19, weight: .semibold))
+                .foregroundColor(isSelected ? TurntableTokens.cream : TurntableTokens.aluminium.opacity(0.55))
+                .frame(height: 26)
+            DeckLamp(color: DeckSignal.live, state: isSelected ? .lit : .idle, size: 4.5)
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 48)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color.white.opacity(isSelected ? 0.07 : 0))
+                .padding(.horizontal, 5)
+        )
+        .contentShape(Rectangle())
+    }
 
     var body: some View {
         Button(action: action) {
+            if deck {
+                deckLabel
+            } else {
             VStack(spacing: 3) {
                 ZStack {
                     // Active selection pill
@@ -699,9 +791,12 @@ struct CyberpunkTabItem: View {
             .frame(maxWidth: .infinity)
             .padding(.vertical, 4)
             .contentShape(Rectangle())
+            }
         }
         .buttonStyle(.plain)
         .accessibilityLabel(Text(label))  // VoiceOver still gets the name
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .accessibilityIdentifier("tab.\(label.lowercased())")
         .animation(.spring(response: 0.28, dampingFraction: 0.72), value: isSelected)
     }
 }

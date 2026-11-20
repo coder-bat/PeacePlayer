@@ -49,6 +49,17 @@ enum TurntableTokens {
     /// gradient over the vinyl texture.
     static let grooveShadow = Color.white.opacity(0.055)
 
+    /// The room behind the deck: a warm near-black, so the walnut
+    /// plinth is the brightest surface on screen, not the wall.
+    static let room = Color(red: 0.047, green: 0.039, blue: 0.035)
+
+    /// Anodised black: the strobe band on the platter's edge, the
+    /// cartridge body, the recess the cue lever travels in.
+    static let anodised = Color(red: 0.078, green: 0.078, blue: 0.086)
+
+    /// Brass: the card holders on the front edge of each shelf.
+    static let brass = Color(red: 0.741, green: 0.604, blue: 0.357)
+
     // MARK: - Lighting
 
     /// Warm key light from the upper left, matching the generated

@@ -57,7 +57,118 @@ struct MiniPlayer: View {
     // natural image size (often 300x300) which made the ZStack
     // balloon past 60pt. We now clamp the ZStack to .frame(height:
     // 56) so the artwork scales down to fit the row.
+    // 2026-11-21: the mini player on the Deck design system
+    // (docs/design/deck-design-system.md). Deck drawing with the
+    // Turntable Home flag on, the old drawing with it off.
+    @ObservedObject private var featureFlags = FeatureFlags.shared
+
+    @ViewBuilder
     private var compactBody: some View {
+        if featureFlags.turntableHome {
+            deckCompactBody
+        } else {
+            legacyCompactBody
+        }
+    }
+
+    /// How far through the track the player is, 0...1.
+    private var progress: Double {
+        guard playerState.contentType != .liveRadio, clock.duration > 0 else { return 0 }
+        return min(1, max(0, clock.currentTime / clock.duration))
+    }
+
+    /// Deck: a small anodised unit. The record that is playing lies
+    /// at its left with a ring round it that fills as the side plays;
+    /// the title is print; play/pause and next are metal buttons. No
+    /// video and no blurred artwork behind the text — the record is
+    /// the picture.
+    private var deckCompactBody: some View {
+        HStack(spacing: 0) {
+            Button {
+                HapticManager.medium()
+                onExpand()
+            } label: {
+                HStack(spacing: 7) {
+                    MiniRecord(
+                        artworkURL: playerState.currentItem?.track.artworkURL,
+                        progress: progress,
+                        isLoading: playerState.playbackState.isLoading && !playerState.isTransportRunning
+                    )
+
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(playerState.currentItem?.track.title ?? "")
+                            .font(.system(size: 12.5, weight: .semibold))
+                            .foregroundColor(TurntableTokens.cream)
+                        Text(
+                            playerState.contentType == .liveRadio
+                                ? "LIVE"
+                                : (playerState.currentItem?.track.displayArtist ?? "")
+                        )
+                        .font(.system(size: 10.5))
+                        .foregroundColor(
+                            playerState.contentType == .liveRadio
+                                ? DeckSignal.live
+                                : TurntableTokens.cream.opacity(0.55)
+                        )
+                    }
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Now playing: \(playerState.currentItem?.track.title ?? "")")
+            .accessibilityHint("Opens the player")
+
+            DeckMetalButton(
+                symbol: playerState.isTransportRunning ? "pause.fill" : "play.fill",
+                accent: DeckSignal.live,
+                state: playerState.isTransportRunning ? .lit : .idle,
+                size: 30
+            ) {
+                HapticManager.light()
+                playerState.togglePlayPause()
+            }
+            .accessibilityLabel(playerState.isTransportRunning ? "Pause" : "Play")
+
+            if playerState.hasNextTrack {
+                DeckMetalButton(symbol: "forward.fill", size: 24) {
+                    HapticManager.light()
+                    playerState.nextTrack(userSkipped: true)
+                }
+                .accessibilityLabel("Next track")
+                .padding(.leading, -12)
+            }
+        }
+        .padding(.leading, 8)
+        .padding(.trailing, 0)
+        .frame(height: 60)
+        .background(
+            Capsule()
+                .fill(
+                    LinearGradient(
+                        colors: [Color(white: 0.16), TurntableTokens.anodised],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .overlay(
+                    Capsule().strokeBorder(
+                        LinearGradient(
+                            colors: [.white.opacity(0.28), .white.opacity(0.03), .black.opacity(0.6)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        ),
+                        lineWidth: 1
+                    )
+                )
+                .shadow(color: .black.opacity(0.5), radius: 5, y: 3)
+        )
+        .clipShape(Capsule())
+    }
+
+    private var legacyCompactBody: some View {
         // 2026-06-28 (S7g): clamp to the bottom bar's exact row
         // height (60pt). Without this the CachedAsyncImage's
         // intrinsic content size + the .blur + .opacity modifiers
@@ -414,6 +525,55 @@ struct MiniPlayer: View {
 }
 
 // MARK: - Animated Artwork
+/// The mini player's record: the playing track's art on black vinyl,
+/// inside a ring that fills cyan as the side plays and pulses amber
+/// while the track is being fetched.
+struct MiniRecord: View {
+    let artworkURL: URL?
+    /// 0...1.
+    var progress: Double = 0
+    var isLoading: Bool = false
+
+    static let diameter: CGFloat = 38
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .stroke(Color.white.opacity(0.08), lineWidth: 2)
+            Circle()
+                .trim(from: 0, to: isLoading ? 1 : progress)
+                .stroke(
+                    isLoading ? DeckSignal.power.opacity(0.7) : DeckSignal.live,
+                    style: StrokeStyle(lineWidth: 2, lineCap: .round)
+                )
+                .rotationEffect(.degrees(-90))
+                .shadow(color: (isLoading ? DeckSignal.power : DeckSignal.live).opacity(0.6), radius: 2.5)
+                .animation(.linear(duration: 0.4), value: progress)
+
+            Circle()
+                .fill(TurntableTokens.vinyl)
+                .padding(3.5)
+            CachedAsyncImage(url: artworkURL) { image in
+                image.resizable().aspectRatio(contentMode: .fill)
+            } placeholder: {
+                TurntableTokens.walnut
+            }
+            .frame(width: Self.diameter - 12, height: Self.diameter - 12)
+            .clipShape(Circle())
+            .colorMultiply(Color(white: 0.9))
+            Circle()
+                .strokeBorder(.black.opacity(0.3), lineWidth: 0.8)
+                .padding(9)
+            Circle()
+                .fill(TurntableTokens.room)
+                .frame(width: 5, height: 5)
+                .overlay(Circle().strokeBorder(.white.opacity(0.25), lineWidth: 0.5))
+        }
+        .frame(width: Self.diameter, height: Self.diameter)
+        .accessibilityHidden(true)
+    }
+}
+
 struct ArtworkView: View {
     let artworkURL: URL?
     let isPlaying: Bool
