@@ -176,6 +176,7 @@
 		C4E90D1C5EFDCB0B327E7039 /* WalkDJAppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 538A97384F4577D3971EDB4D /* WalkDJAppDelegate.swift */; };
 		C71ADE32436127542FB5DE27 /* ControlWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = AAA8836C2156BEB221C08A67 /* ControlWidget.swift */; };
 		C7F23D1098E9931FF1481EFE /* TurntableGeometryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 387ADE9CBE816B371F316706 /* TurntableGeometryTests.swift */; };
+		C8432C2B8A708B5048935008 /* TurntableWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0C01DE578C742A0911D355B /* TurntableWidget.swift */; };
 		C8BBF5B384454033D256EAA0 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 6EEB0E0B1BCCEC02E21A234F /* LaunchScreen.storyboard */; };
 		C92FE14BF45EA3BFC8A2DCDD /* CDPlaylist.swift in Sources */ = {isa = PBXBuildFile; fileRef = AAF86CA6FC3C6EAD53ACA11F /* CDPlaylist.swift */; };
 		CACFA81048924F3A32D52F5D /* QRCodeGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92383E8A72B74896B1FE7BAC /* QRCodeGenerator.swift */; };
@@ -215,6 +216,7 @@
 		F7F914ADEDA9B056BD464810 /* VinylNowPlayingWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD9959F79652511ACEDC3BB1 /* VinylNowPlayingWidget.swift */; };
 		F9BB4CD51A3E1CC3C6C97227 /* TimeCapsuleRevealView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D33505D848F52ECC770A4E76 /* TimeCapsuleRevealView.swift */; };
 		FB2B8D22E9B82A68EE42889E /* TurntableSnapshotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B76C8D0AB363A480871DC1E /* TurntableSnapshotTests.swift */; };
+		FC0B3F34A462BBAF780BC151 /* DeckWidgetKit.swift in Sources */ = {isa = PBXBuildFile; fileRef = A278247217D7BDD4CAED6C6D /* DeckWidgetKit.swift */; };
 		FCC18AB0C67C1A57062B9ADD /* PlaylistDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38ADEC1060AD8D53A3241FFA /* PlaylistDetailView.swift */; };
 		FDB9DC04823CF79D053C24CD /* RecentlyPlayedView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6AF72E449870436F01005365 /* RecentlyPlayedView.swift */; };
 		FE20D1427E1923BBBC635EBE /* UserProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC99859E9AAC4EE4E09A3320 /* UserProfile.swift */; };
@@ -392,6 +394,7 @@
 		9E3A88A80AAC57024D2E8EDC /* Podcast.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Podcast.swift; sourceTree = "<group>"; };
 		A034B260A80AFAE29827DB83 /* PlaylistManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaylistManager.swift; sourceTree = "<group>"; };
 		A1BB7F73D1E588377A24E24E /* LandingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LandingView.swift; sourceTree = "<group>"; };
+		A278247217D7BDD4CAED6C6D /* DeckWidgetKit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeckWidgetKit.swift; sourceTree = "<group>"; };
 		A308A4408650D872CCCD07E3 /* SongMemoryManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SongMemoryManager.swift; sourceTree = "<group>"; };
 		A37526EDA834716F90042776 /* DeckKit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeckKit.swift; sourceTree = "<group>"; };
 		A712241C4A648E0B24D1E794 /* YTAudioPlayer.xcdatamodel */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcdatamodel; path = YTAudioPlayer.xcdatamodel; sourceTree = "<group>"; };
@@ -454,6 +457,7 @@
 		DD294748DED4ED3AD0D85677 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		DDBEFAC6083380091688C4A7 /* PlaybackQueueManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackQueueManager.swift; sourceTree = "<group>"; };
 		DDE8FA3A56259867BA57BCF7 /* TurntableDeckQueueTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurntableDeckQueueTests.swift; sourceTree = "<group>"; };
+		E0C01DE578C742A0911D355B /* TurntableWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurntableWidget.swift; sourceTree = "<group>"; };
 		E11855B2FBA83953239DBFCC /* FeatureFlags.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeatureFlags.swift; sourceTree = "<group>"; };
 		E573FA0E404DC92944C06F18 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		E5A04DBDA0BBC9882EB5B650 /* DeepLinkIndex.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeepLinkIndex.swift; sourceTree = "<group>"; };
@@ -689,6 +693,7 @@
 			isa = PBXGroup;
 			children = (
 				AAA8836C2156BEB221C08A67 /* ControlWidget.swift */,
+				A278247217D7BDD4CAED6C6D /* DeckWidgetKit.swift */,
 				DD294748DED4ED3AD0D85677 /* Info.plist */,
 				6CAA199DFC071428915082C9 /* LibraryWidgets.swift */,
 				CCA4035534F1C659AA5290B2 /* NowPlayingFullWidget.swift */,
@@ -698,6 +703,7 @@
 				0F15FD3F181894856FF634D2 /* PeacePlayerWidgetBundle.swift */,
 				56AF7CCCA582C56C371F11A0 /* PeacePlayerWidgetIntents.swift */,
 				56CE1E3E13C142FD71EAE1CE /* ResumeWidget.swift */,
+				E0C01DE578C742A0911D355B /* TurntableWidget.swift */,
 				BD9959F79652511ACEDC3BB1 /* VinylNowPlayingWidget.swift */,
 				92F678B243A3E9D1A9E2BBA5 /* VinylRecordView.swift */,
 				6A5BA9202ABE322C59404BE0 /* WidgetTheme.swift */,
@@ -1000,6 +1006,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				C71ADE32436127542FB5DE27 /* ControlWidget.swift in Sources */,
+				FC0B3F34A462BBAF780BC151 /* DeckWidgetKit.swift in Sources */,
 				221BFC7A742EBC84E62CB20A /* LibraryWidgets.swift in Sources */,
 				20A2EFB069D8DFF2B8A824EE /* NowPlayingActivityAttributes.swift in Sources */,
 				14461908F534167F8F408F53 /* NowPlayingFullWidget.swift in Sources */,
@@ -1011,6 +1018,7 @@
 				8C08C9411CD3B0C2D046272F /* SharedArtworkCache.swift in Sources */,
 				033C39DE88E172C4DE24BC68 /* SharedCyberColors.swift in Sources */,
 				B2E798633D3FE21CFA1B4EA7 /* SharedNowPlayingState.swift in Sources */,
+				C8432C2B8A708B5048935008 /* TurntableWidget.swift in Sources */,
 				F7F914ADEDA9B056BD464810 /* VinylNowPlayingWidget.swift in Sources */,
 				BD24C8098FF19F0E7F6B87D5 /* VinylRecordView.swift in Sources */,
 				400280C613F6E73E4B338CC8 /* WidgetTheme.swift in Sources */,

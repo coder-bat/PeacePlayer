@@ -16,6 +16,8 @@ struct PeacePlayerWidgetBundle: WidgetBundle {
             NowPlayingFullWidget()
             // S12: vinyl-record-styled medium widget
             VinylNowPlayingWidget()
+            // 2x2 turntable: plinth, platter, record, tonearm
+            TurntableWidget()
         }
         ResumeWidget()
         ShuffleFavoritesWidget()

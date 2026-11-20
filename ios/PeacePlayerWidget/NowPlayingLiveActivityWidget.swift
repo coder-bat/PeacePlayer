@@ -23,6 +23,7 @@
 import SwiftUI
 import WidgetKit
 import ActivityKit
+import UIKit
 
 @available(iOS 16.1, *)
 struct NowPlayingLiveActivityWidget: Widget {
@@ -37,12 +38,14 @@ struct NowPlayingLiveActivityWidget: Widget {
             // cyberBackground token so the live activity's
             // background matches the rest of the app's chrome
             // (was a fork from CV-6's audit).
-            .activityBackgroundTint(WidgetTheme.cyberBackground)
-            .activitySystemActionForegroundColor(.white)
+            // Deck: the lock screen card is the walnut plinth.
+            .activityBackgroundTint(DeckWidget.walnut.opacity(0.96))
+            .activitySystemActionForegroundColor(DeckWidget.cream)
+            .widgetURL(URL(string: "peaceplayer://player"))
         } dynamicIsland: { context in
             return DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
-                    islandArtwork(context: context)
+                    islandRecord(context: context, size: 52)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
                     islandPlayPause(context: context)
@@ -51,13 +54,23 @@ struct NowPlayingLiveActivityWidget: Widget {
                     islandProgressBar(context: context)
                 }
             } compactLeading: {
-                islandArtwork(context: context, size: 18)
+                islandRecord(context: context, size: 22)
             } compactTrailing: {
-                islandPlayPause(context: context, compact: true)
+                DeckWidgetLamp(isLit: context.state.isPlaying, size: 8)
             } minimal: {
-                islandArtwork(context: context, size: 18)
+                islandRecord(context: context, size: 22)
             }
+            .widgetURL(URL(string: "peaceplayer://player"))
         }
+    }
+
+    @ViewBuilder
+    private func islandRecord(
+        context: ActivityViewContext<NowPlayingActivityAttributes>,
+        size: CGFloat
+    ) -> some View {
+        recordView(artworkURLString: context.attributes.artworkURLString,
+                   size: size, isPlaying: context.state.isPlaying)
     }
 
     @ViewBuilder
@@ -83,11 +96,12 @@ struct NowPlayingLiveActivityWidget: Widget {
         VStack(alignment: .leading, spacing: 2) {
             Text(context.attributes.trackTitle)
                 .font(.caption.bold())
-                .foregroundColor(.white)
+                .foregroundColor(DeckWidget.cream)
                 .lineLimit(1)
-            Text(context.attributes.trackArtist)
-                .font(.caption2)
-                .foregroundColor(.white.opacity(0.6))
+            Text(context.attributes.trackArtist.uppercased())
+                .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                .tracking(0.8)
+                .foregroundColor(DeckWidget.brass)
                 .lineLimit(1)
             progressBar(state: context.state)
                 .padding(.top, 2)
@@ -101,29 +115,44 @@ private struct NowPlayingLockScreenView: View {
     let attributes: NowPlayingActivityAttributes
     let state: NowPlayingActivityAttributes.ContentState
 
+    private var progress: Double {
+        state.duration > 0 ? min(max(state.currentTime / state.duration, 0), 1) : 0
+    }
+
     var body: some View {
         HStack(spacing: 14) {
-            artworkView(artworkURLString: attributes.artworkURLString, size: 56)
-            VStack(alignment: .leading, spacing: 4) {
+            // The deck in miniature: record with the arm resting on it.
+            ZStack {
+                recordView(artworkURLString: attributes.artworkURLString,
+                           size: 70, isPlaying: state.isPlaying)
+                DeckWidgetTonearm(
+                    pose: state.isPlaying ? .playing : .lifted,
+                    progress: progress,
+                    size: 78
+                )
+            }
+            .frame(width: 78, height: 78)
+
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    DeckWidgetLamp(isLit: state.isPlaying, size: 6)
+                    Text(state.isPlaying ? "PLAYING" : "PAUSED")
+                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                        .tracking(1.2)
+                        .foregroundColor(DeckWidget.brass)
+                }
                 Text(attributes.trackTitle)
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundColor(.white)
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundColor(DeckWidget.cream)
                     .lineLimit(1)
                 Text(attributes.trackArtist)
-                    .font(.system(size: 12, design: .default))
-                    .foregroundColor(.white.opacity(0.65))
+                    .font(.system(size: 12))
+                    .foregroundColor(DeckWidget.cream.opacity(0.65))
                     .lineLimit(1)
-                if let album = attributes.trackAlbum, !album.isEmpty {
-                    Text(album)
-                        .font(.system(size: 10))
-                        .foregroundColor(.white.opacity(0.4))
-                        .lineLimit(1)
-                }
                 progressBar(state: state)
-                    .padding(.top, 4)
+                    .padding(.top, 5)
             }
-            Spacer(minLength: 8)
-            playPauseIndicator(isPlaying: state.isPlaying)
+            Spacer(minLength: 0)
         }
         .padding(14)
     }
@@ -166,6 +195,14 @@ private func artworkView(artworkURLString: String?, size: CGFloat) -> some View 
     .clipShape(RoundedRectangle(cornerRadius: size * 0.18))
 }
 
+private func recordView(artworkURLString: String?, size: CGFloat, isPlaying: Bool) -> some View {
+    var image: UIImage?
+    if let s = artworkURLString, let url = URL(string: s) {
+        image = SharedArtworkCache.read(for: url)
+    }
+    return DeckWidgetRecord(artwork: image, size: size, angle: isPlaying ? 30 : 20)
+}
+
 private func placeholderArtwork(size: CGFloat) -> some View {
     ZStack {
         Rectangle()
@@ -179,9 +216,10 @@ private func placeholderArtwork(size: CGFloat) -> some View {
 private func playPauseIndicator(isPlaying: Bool, compact: Bool = false) -> some View {
     Image(systemName: isPlaying ? "pause.fill" : "play.fill")
         .font(.system(size: compact ? 14 : 18, weight: .bold))
-        .foregroundColor(WidgetTheme.cyberCyan)
+        .foregroundColor(DeckWidget.cream)
         .frame(width: compact ? 24 : 32, height: compact ? 24 : 32)
-        .background(WidgetTheme.cyberCyan.opacity(0.15))
+        .background(DeckWidget.anodised)
+        .overlay(Circle().strokeBorder(DeckWidget.aluminium.opacity(0.5), lineWidth: 0.75))
         .clipShape(Circle())
 }
 
@@ -192,10 +230,15 @@ private func progressBar(state: NowPlayingActivityAttributes.ContentState) -> so
     return GeometryReader { geo in
         ZStack(alignment: .leading) {
             Capsule()
-                .fill(WidgetTheme.cyberCyan.opacity(0.15))
+                .fill(Color.black.opacity(0.4))
             Capsule()
-                .fill(WidgetTheme.cyberCyan)
+                .fill(DeckWidget.aluminium)
                 .frame(width: geo.size.width * progress)
+            Circle()
+                .fill(DeckWidget.amberLamp)
+                .frame(width: 6, height: 6)
+                .shadow(color: DeckWidget.amberLamp.opacity(0.8), radius: 2)
+                .offset(x: max(0, geo.size.width * progress - 3))
         }
     }
     .frame(height: 3)

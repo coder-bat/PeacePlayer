@@ -175,6 +175,12 @@ struct YTAudioPlayerApp: App {
             resumePlayback()
         case "shuffle-favorites":
             shuffleFavorites()
+        case "player":
+            // peaceplayer://player — the Turntable widget and Live
+            // Activity open the full player on the current record.
+            if PlayerState.shared.currentItem != nil {
+                PlayerState.shared.showFullPlayer = true
+            }
         case "queue":
             PlayerState.shared.showQueue = true
         case "playlist":
