@@ -2,7 +2,8 @@
 
 Status: 2026-11-21. The Turntable Home, the Library and Search tabs, the
 queue sheet, the mini player, the tab bar and the full player (portrait)
-are built on it. Everything else is still in the old style.
+are built on it, as are Playlist detail, Downloads and History.
+Everything else is still in the old style.
 
 Code: `ios/YTAudioPlayer/DesignSystem/DeckKit.swift` (components),
 `TurntableTokens.swift` (materials), `Theme.swift` (signal colours,
@@ -173,7 +174,22 @@ each one proves a part the next ones reuse:
    drawer. (A first version, a sleeve with the record sliding out,
    was replaced the same week.) Not yet moved: landscape, and every
    sheet the player opens.
-5. **Playlist detail, Liked songs, History.** Reuse of 1.
+5. **Playlist detail, Liked songs, History.** **Done 2026-11-21.**
+   Reuse of 1. `PlaylistDetailView` has a sleeve, the name in print, a
+   cream Play card and a Shuffle key, a "Tracks" ledge, and rows that
+   are `DeckTrackRow` (amber lamp while loading or downloading, brass
+   sparkle for a memory); its rename sheet has a well for the name.
+   Liked songs needed no work: under the flag it is Library's Liked
+   mode, and `LikedSongsContent` is only reached from the legacy Home.
+   History is a sheet of the Downloads screen, so the two moved
+   together (`DownloadQueueView`, `HistoryView`): readouts on
+   anodised panels with lamps (amber working, yellow for failures),
+   a ledge per queue state, a progress well that fills amber. The
+   Share item in the playlist menu did nothing and was left out.
+   `RecentlyPlayedView` is unreferenced dead code; delete it at step
+   10. Not yet moved: the rename sheet is a flat board, not a walnut
+   plinth, and History's per-row options still use a system
+   confirmation dialog.
 6. **Radio** (stations, podcasts, audiobooks). Adds a tuner dial for
    genres.
 7. **Settings.** Rows with levers for toggles; needs the lever

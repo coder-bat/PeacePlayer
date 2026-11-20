@@ -86,7 +86,13 @@ struct PlaylistDetailView: View {
         return max(0, min(1, opacity))
     }
 
-    var body: some View {
+    // Deck design system (docs/design/deck-design-system.md §8 step 5).
+    // Drawn on the Deck when the turntable flag is on; the old drawing
+    // stays as `legacyContent` until the flag retires.
+    @ObservedObject private var featureFlags = FeatureFlags.shared
+    private var deck: Bool { featureFlags.turntableHome }
+
+    private var legacyContent: some View {
         NavigationStack {
             ZStack(alignment: .top) {
                 // Cyberpunk background
@@ -277,6 +283,17 @@ struct PlaylistDetailView: View {
                 )
             }
         }
+    }
+
+    var body: some View {
+        Group {
+            if deck {
+                deckContent
+            } else {
+                legacyContent
+            }
+        }
+        .environment(\.deckStyle, deck)
         .preferredColorScheme(.dark)
         .alert("Delete Playlist?", isPresented: $showDeleteConfirmation) {
             Button("Cancel", role: .cancel) {}
@@ -310,6 +327,249 @@ struct PlaylistDetailView: View {
         }
     }
 
+    // MARK: - Deck
+
+    private var isEditable: Bool {
+        !isSpecialPlaylist && !(currentPlaylist?.isSmart ?? true)
+    }
+
+    private var deckContent: some View {
+        NavigationStack {
+            ZStack(alignment: .top) {
+                DeckRoom()
+
+                ScrollView(showsIndicators: false) {
+                    GeometryReader { proxy in
+                        Color.clear
+                            .preference(key: ScrollOffsetPreferenceKey.self, value: proxy.frame(in: .named("scroll")).minY)
+                    }
+                    .frame(height: 0)
+
+                    VStack(spacing: 0) {
+                        deckHeader
+                            .padding(.top, 60)
+                        deckTrackSection
+                        // The tab bar floats: leave room under the last row.
+                        Color.clear.frame(height: 104)
+                    }
+                }
+                .coordinateSpace(name: "scroll")
+                .onPreferenceChange(ScrollOffsetPreferenceKey.self) { value in
+                    scrollOffset = -value
+                }
+                .refreshable {
+                    playlistManager.refreshSmartPlaylists()
+                    try? await Task.sleep(nanoseconds: 500_000_000)
+                }
+
+                deckTopBar
+            }
+        }
+    }
+
+    /// The sleeve, the name in print, the count in small print, and the
+    /// screen's one main action on a cream card.
+    private var deckHeader: some View {
+        let shown = currentPlaylist ?? playlist
+        return VStack(spacing: 18) {
+            deckCoverArt(shown)
+                .frame(width: 200, height: 200)
+                .scaleEffect(max(0.85, min(1, 1 - scrollOffset / 1000)))
+
+            VStack(spacing: 6) {
+                Text(shown.name)
+                    .font(DeckType.screenTitle)
+                    .foregroundColor(TurntableTokens.cream)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+
+                if let description = shown.description, !description.isEmpty {
+                    Text(description)
+                        .font(DeckType.subtitle)
+                        .foregroundColor(TurntableTokens.cream.opacity(0.55))
+                        .multilineTextAlignment(.center)
+                        .lineLimit(2)
+                }
+
+                HStack(spacing: 8) {
+                    if shown.isSmart {
+                        DeckLabelCard(text: "Smart")
+                    }
+                    if tracks.count > 0 {
+                        Text(DeckFormat.tracks(tracks.count).uppercased())
+                            .font(DeckType.smallPrint)
+                            .foregroundColor(TurntableTokens.brass)
+                    }
+                }
+                .padding(.top, 2)
+            }
+
+            HStack(spacing: 12) {
+                DeckButton(title: "Play", symbol: "play.fill", kind: .card, fillsWidth: true) {
+                    HapticManager.medium()
+                    playPlaylist(shuffle: false)
+                }
+                .accessibilityLabel("Play \(shown.name)")
+
+                DeckButton(title: "Shuffle", symbol: "shuffle", fillsWidth: true) {
+                    HapticManager.medium()
+                    playPlaylist(shuffle: true)
+                }
+                .accessibilityLabel("Shuffle \(shown.name)")
+            }
+            .padding(.top, 4)
+        }
+        .padding(.horizontal, 20)
+        .padding(.bottom, 28)
+        .opacity(headerOpacity)
+    }
+
+    @ViewBuilder
+    private func deckCoverArt(_ shown: Playlist) -> some View {
+        if let thumbnailURL = shown.thumbnailURL, let url = URL(string: thumbnailURL) {
+            CachedAsyncImage(url: url) { image in
+                image.resizable().aspectRatio(contentMode: .fill)
+            } placeholder: {
+                TurntableTokens.walnut
+            }
+            .frame(width: 200, height: 200)
+            .deckCover(cornerRadius: 3)
+        } else {
+            // No artwork: a walnut block with the playlist's symbol on
+            // a metal boss — the same thing the playlist grid shows.
+            ZStack {
+                DeckMetalCap(symbol: shown.smartCriteria?.type.icon ?? "music.note", size: 72)
+            }
+            .frame(width: 200, height: 200)
+            .deckPlinth(cornerRadius: CornerRadius.mdd)
+        }
+    }
+
+    @ViewBuilder
+    private var deckTrackSection: some View {
+        if tracks.isEmpty {
+            VStack(spacing: 0) {
+                VStack(spacing: 8) {
+                    Text("No tracks yet")
+                        .font(DeckType.title)
+                        .foregroundColor(TurntableTokens.cream)
+                    Text("Add tracks from Search or your Library.")
+                        .font(DeckType.subtitle)
+                        .foregroundColor(TurntableTokens.cream.opacity(0.55))
+                        .multilineTextAlignment(.center)
+                }
+                .padding(.horizontal, 40)
+                .padding(.vertical, 24)
+
+                DeckLedge(title: "Tracks", count: 0)
+                    .padding(.horizontal, 16)
+            }
+        } else {
+            VStack(spacing: 0) {
+                DeckLedge(title: "Tracks", count: tracks.count)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 10)
+
+                if isEditable {
+                    HStack {
+                        Spacer()
+                        DeckButton(title: isEditing ? "Done" : "Edit", symbol: isEditing ? "checkmark" : "arrow.up.arrow.down") {
+                            HapticManager.light()
+                            withAnimation(DeckMotion.move) { isEditing.toggle() }
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                }
+
+                if isEditing && isEditable {
+                    reorderableTrackList
+                } else {
+                    LazyVStack(spacing: 0) {
+                        ForEach(Array(tracks.enumerated()), id: \.element.id) { index, track in
+                            trackRowContent(track: track, index: index)
+                        }
+                    }
+                    .task(id: tracks.map(\.videoId)) {
+                        StreamURLCache.shared.prefetchBatch(videoIds: tracks.prefix(5).map(\.videoId))
+                    }
+                    .padding(.horizontal, 16)
+                }
+            }
+        }
+    }
+
+    /// Two metal buttons on the wall, and the name engraved between
+    /// them once the header has scrolled away. No bar.
+    private var deckTopBar: some View {
+        HStack(spacing: 8) {
+            if showsDismissButton {
+                DeckMetalButton(symbol: "chevron.down", size: 30) {
+                    dismiss()
+                }
+                .accessibilityLabel("Close")
+                .accessibilityHint("Returns to the previous screen")
+            } else {
+                Color.clear.frame(width: 44, height: 44)
+            }
+
+            Spacer()
+
+            Text((currentPlaylist?.name ?? playlist.name).uppercased())
+                .font(DeckType.engraved)
+                .tracking(DeckType.engravedTracking)
+                .foregroundColor(TurntableTokens.cream)
+                .lineLimit(1)
+                .opacity(navTitleOpacity)
+                .accessibilityHidden(navTitleOpacity < 0.5)
+
+            Spacer()
+
+            if !isSpecialPlaylist {
+                Menu {
+                    if isEditable {
+                        Button {
+                            isEditing.toggle()
+                        } label: {
+                            Label(isEditing ? "Done" : "Edit", systemImage: isEditing ? "checkmark" : "pencil")
+                        }
+
+                        Button {
+                            newName = currentPlaylist?.name ?? ""
+                            showRenameSheet = true
+                        } label: {
+                            Label("Rename", systemImage: "text.cursor")
+                        }
+                    }
+
+                    if !(currentPlaylist?.isSmart ?? true) {
+                        Divider()
+
+                        Button(role: .destructive) {
+                            showDeleteConfirmation = true
+                        } label: {
+                            Label("Delete Playlist", systemImage: "trash")
+                        }
+                    }
+                } label: {
+                    DeckMetalCap(symbol: "ellipsis", size: 30)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .accessibilityLabel("Playlist actions")
+            } else {
+                Color.clear.frame(width: 44, height: 44)
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.top, 4)
+        .padding(.bottom, 4)
+        .background(
+            TurntableTokens.room
+                .opacity(navTitleOpacity)
+                .ignoresSafeArea(edges: .top)
+        )
+    }
+
     // MARK: - Reorderable Track List
 
     @ViewBuilder
@@ -333,7 +593,7 @@ struct PlaylistDetailView: View {
         }
         .listStyle(.plain)
         .environment(\.editMode, .constant(.active))
-        .frame(height: max(CGFloat(tracks.count) * 76, 1))
+        .frame(height: max(CGFloat(tracks.count) * (deck ? 68 : 76), 1))
 
         if #available(iOS 16.0, *) {
             trackList
@@ -351,6 +611,7 @@ struct PlaylistDetailView: View {
             index: index + 1,
             isPlaying: playerState.currentItem?.track.videoId == track.videoId,
             isEditing: isEditing,
+            deck: deck,
             isLoading: loadingTrackId == track.videoId,
             downloadTask: downloadManager.taskForTrack(track),
             isDownloaded: downloadManager.taskForTrack(track)?.status == .completed,
@@ -721,6 +982,7 @@ struct CyberpunkTrackRow: View {
     let index: Int
     let isPlaying: Bool
     let isEditing: Bool
+    var deck: Bool = false
     let isLoading: Bool
     let downloadTask: DownloadTask?
     let isDownloaded: Bool
@@ -735,7 +997,55 @@ struct CyberpunkTrackRow: View {
 
     @State private var isPressed = false
 
-    var body: some View {
+    @ViewBuilder
+    private var face: some View {
+        if deck { deckFace } else { legacyFace }
+    }
+
+    /// Deck: sleeve, print, small print. The whole row plays; while
+    /// editing it does not, so a drag never starts a record.
+    private var deckFace: some View {
+        Button {
+            if !isEditing { onPlay() }
+        } label: {
+            DeckTrackRow(
+                title: track.title,
+                subtitle: track.isExplicit ? "\(track.displayArtist) · E" : track.displayArtist,
+                artworkURL: track.artworkURL,
+                smallPrint: DeckFormat.runtime(track.durationSeconds),
+                isPlaying: isPlaying
+            ) {
+                deckAccessory
+            }
+        }
+        .buttonStyle(.plain)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(TurntableTokens.cream.opacity(0.08))
+                .frame(height: 1)
+        }
+    }
+
+    @ViewBuilder
+    private var deckAccessory: some View {
+        if isLoading || (downloadTask?.status.isActive ?? false) {
+            // Amber, pulsing: the deck is busy with this one.
+            DeckLamp(color: DeckSignal.power, state: .working)
+        } else if isDownloaded {
+            Image(systemName: "arrow.down")
+                .font(.system(size: 9, weight: .heavy))
+                .foregroundColor(TurntableTokens.aluminium.opacity(0.7))
+                .accessibilityLabel("Downloaded")
+        }
+        if hasMemory {
+            Image(systemName: "sparkles")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundColor(TurntableTokens.brass)
+                .accessibilityLabel("Has a memory")
+        }
+    }
+
+    private var legacyFace: some View {
         HStack(spacing: 12) {
             // Index or Playing Indicator
             ZStack {
@@ -840,6 +1150,10 @@ struct CyberpunkTrackRow: View {
             RoundedRectangle(cornerRadius: 12)
                 .stroke(isPlaying ? Theme.cyberCyan.opacity(0.4) : Theme.cyberCyan.opacity(0.1), lineWidth: 1)
         )
+    }
+
+    var body: some View {
+        face
         .contentShape(Rectangle())
         .scaleEffect(isPressed ? 0.98 : 1)
         .animation(.easeInOut(duration: 0.1), value: isPressed)
@@ -937,13 +1251,13 @@ struct CyberpunkTrackRow: View {
             Button(action: onDownload) {
                 Label("Download", systemImage: "arrow.down")
             }
-            .tint(Theme.cyberCyan)
+            .tint(deck ? TurntableTokens.aluminium : Theme.cyberCyan)
         }
         .swipeActions(edge: .leading, allowsFullSwipe: false) {
             Button(action: onPlayNext) {
                 Label("Next", systemImage: "text.badge.plus")
             }
-            .tint(Theme.cyberMagenta)
+            .tint(deck ? TurntableTokens.brass : Theme.cyberMagenta)
         }
         .accessibilityElement(children: .combine)
     }
@@ -995,7 +1309,57 @@ struct RenamePlaylistSheet: View {
         _name = State(initialValue: currentName)
     }
 
+    @ObservedObject private var featureFlags = FeatureFlags.shared
+    @FocusState private var nameFocused: Bool
+
     var body: some View {
+        if featureFlags.turntableHome {
+            deckBody
+        } else {
+            legacyBody
+        }
+    }
+
+    /// Deck: a walnut board rising from the bottom. The name is typed
+    /// into a well that lights while it has focus.
+    private var deckBody: some View {
+        ZStack {
+            DeckRoom()
+            VStack(alignment: .leading, spacing: 18) {
+                Text("Rename")
+                    .font(DeckType.screenTitle)
+                    .foregroundColor(TurntableTokens.cream)
+
+                TextField("", text: $name, prompt: Text("Playlist name").foregroundColor(TurntableTokens.cream.opacity(0.4)))
+                    .font(DeckType.body)
+                    .foregroundColor(TurntableTokens.cream)
+                    .tint(DeckSignal.live)
+                    .focused($nameFocused)
+                    .submitLabel(.done)
+                    .padding(.horizontal, 18)
+                    .frame(height: 48)
+                    .deckWell(Capsule(), lit: nameFocused ? DeckSignal.live : nil)
+
+                HStack(spacing: 12) {
+                    DeckButton(title: "Cancel", fillsWidth: true) { dismiss() }
+                    DeckButton(title: "Save", kind: .card, fillsWidth: true) {
+                        onRename(name)
+                        dismiss()
+                    }
+                    .opacity(name.isEmpty ? 0.45 : 1)
+                    .disabled(name.isEmpty)
+                }
+                Spacer()
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 28)
+        }
+        .onAppear { nameFocused = true }
+        .presentationDetents([.height(260)])
+        .preferredColorScheme(.dark)
+    }
+
+    private var legacyBody: some View {
         NavigationStack {
             ZStack {
                 Theme.cyberBackground

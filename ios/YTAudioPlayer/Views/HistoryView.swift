@@ -17,7 +17,182 @@ struct HistoryView: View {
     @State private var memoryTrack: Track?
     @State private var showClearConfirmation = false
 
+    // Deck design system (docs/design/deck-design-system.md §8). Drawn
+    // on the Deck when the turntable flag is on; the old drawing stays
+    // as `legacyContent` until the flag retires.
+    @ObservedObject private var featureFlags = FeatureFlags.shared
+    private var deck: Bool { featureFlags.turntableHome }
+
     var body: some View {
+        Group {
+            if deck { deckContent } else { legacyContent }
+        }
+        .environment(\.deckStyle, deck)
+        .confirmationDialog(
+            "Clear History?",
+            isPresented: $showClearConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Clear All History", role: .destructive) {
+                HapticManager.medium()
+                // CV-1: clearHistoryWithUndo captures the items
+                // on the main context (before the batch delete
+                // fires on the background context) and
+                // registers a real undo. The toast now shows a
+                // working Undo button.
+                viewModel.clearHistoryWithUndo()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This will remove all tracks from your play history. This cannot be undone.")
+        }
+        .onAppear {
+            viewModel.loadHistory()
+        }
+        .sheet(item: $memoryTrack) { track in
+            SongMemorySheet(track: track)
+        }
+        .preferredColorScheme(.dark)
+    }
+
+    // MARK: - Deck
+
+    /// Deck: the title on the wall with Play (the one card) and
+    /// Shuffle, two readouts, then a ledge and the rows hanging under
+    /// it. A List, because the rows swipe.
+    private var deckContent: some View {
+        ZStack {
+            DeckRoom()
+            if viewModel.historyItems.isEmpty {
+                deckEmpty
+            } else {
+                deckList
+            }
+        }
+    }
+
+    private var deckEmpty: some View {
+        VStack(spacing: 0) {
+            Spacer(minLength: 24)
+            VStack(spacing: 8) {
+                Text("Nothing played yet")
+                    .font(DeckType.title)
+                    .foregroundColor(TurntableTokens.cream)
+                Text("Songs you play will stand here.")
+                    .font(DeckType.subtitle)
+                    .foregroundColor(TurntableTokens.cream.opacity(0.55))
+                    .multilineTextAlignment(.center)
+            }
+            .padding(.horizontal, 40)
+            .padding(.bottom, 18)
+
+            DeckLedge(title: "History", count: 0)
+                .padding(.horizontal, 16)
+
+            DeckButton(title: "Find something to play", symbol: "magnifyingglass", kind: .card) {
+                HapticManager.light()
+                NotificationCenter.default.post(name: .openSearch, object: nil)
+            }
+            .padding(.top, 30)
+            Spacer(minLength: 24)
+            Spacer(minLength: 104)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var deckList: some View {
+        List {
+            VStack(alignment: .leading, spacing: 18) {
+                HStack(alignment: .firstTextBaseline) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("History")
+                            .font(DeckType.screenTitle)
+                            .foregroundColor(TurntableTokens.cream)
+                            .accessibilityAddTraits(.isHeader)
+                        Text("Recently played")
+                            .font(DeckType.subtitle)
+                            .foregroundColor(TurntableTokens.cream.opacity(0.55))
+                    }
+                    Spacer()
+                    DeckButton(title: "Clear", symbol: "xmark") {
+                        showClearConfirmation = true
+                    }
+                }
+
+                HStack(spacing: 12) {
+                    DeckButton(title: "Play", symbol: "play.fill", kind: .card, fillsWidth: true) {
+                        HapticManager.medium()
+                        viewModel.playHistory(shuffle: false)
+                    }
+                    DeckButton(title: "Shuffle", symbol: "shuffle", fillsWidth: true) {
+                        HapticManager.medium()
+                        viewModel.playHistory(shuffle: true)
+                    }
+                }
+
+                HStack(spacing: 12) {
+                    StatCard(value: viewModel.totalPlaysFormatted, label: "Total Plays", icon: "play.fill")
+                    StatCard(value: viewModel.listeningTimeFormatted, label: "Listening Time", icon: "clock.fill")
+                }
+
+                DeckLedge(title: "Recently played", count: viewModel.historyItems.count)
+                    .padding(.bottom, 4)
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 20)
+            .listRowInsets(EdgeInsets())
+            .listRowSeparator(.hidden)
+            .listRowBackground(Color.clear)
+
+            ForEach(viewModel.historyItems) { item in
+                historyRow(item)
+                    .padding(.horizontal, 16)
+                    .listRowInsets(EdgeInsets())
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+            }
+
+            // The tab bar floats: leave room under the last row.
+            Color.clear
+                .frame(height: 104)
+                .listRowInsets(EdgeInsets())
+                .listRowSeparator(.hidden)
+                .listRowBackground(Color.clear)
+        }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .task(id: viewModel.historyItems.prefix(5).map(\.track.videoId)) {
+            StreamURLCache.shared.prefetchBatch(videoIds: viewModel.historyItems.prefix(5).map(\.track.videoId))
+        }
+        .refreshable {
+            viewModel.loadHistory()
+        }
+    }
+
+    private func historyRow(_ item: HistoryItem) -> some View {
+        HistoryRow(
+            item: item,
+            memoryPreview: songMemoryManager.memory(for: item.track)?.previewText,
+            onTap: { playTrack(item) },
+            onEditMemory: { memoryTrack = item.track },
+            onDelete: {
+                // CV-1: deleteHistoryItemWithUndo captures the item,
+                // registers a real undo that re-creates the
+                // CDPlayHistory row, then deletes.
+                viewModel.deleteHistoryItemWithUndo(item)
+            },
+            onPlayNext: {
+                HapticManager.light()
+                viewModel.addToQueueNext(item)
+            },
+            onAddToQueue: {
+                HapticManager.light()
+                viewModel.addToQueue(item)
+            }
+        )
+    }
+
+    private var legacyContent: some View {
         NavigationStack {
             ZStack {
                 Color.cyberBackground
@@ -46,32 +221,7 @@ struct HistoryView: View {
                     }
                 }
             }
-            .confirmationDialog(
-                "Clear History?",
-                isPresented: $showClearConfirmation,
-                titleVisibility: .visible
-            ) {
-                Button("Clear All History", role: .destructive) {
-                    HapticManager.medium()
-                    // CV-1: clearHistoryWithUndo captures the items
-                    // on the main context (before the batch delete
-                    // fires on the background context) and
-                    // registers a real undo. The toast now shows a
-                    // working Undo button.
-                    viewModel.clearHistoryWithUndo()
-                }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("This will remove all tracks from your play history. This cannot be undone.")
-            }
-            .onAppear {
-                viewModel.loadHistory()
-            }
-            .sheet(item: $memoryTrack) { track in
-                SongMemorySheet(track: track)
-            }
         }
-        .preferredColorScheme(.dark)
     }
 
     // MARK: - Empty State
@@ -284,8 +434,52 @@ struct HistoryRow: View {
     let onAddToQueue: () -> Void
 
     @State private var showingOptions = false
+    @Environment(\.deckStyle) private var deck
 
-    var body: some View {
+    /// Deck: the shared track row. Tapping the row plays it; the
+    /// metal button at the end opens the same options sheet.
+    private var deckFace: some View {
+        DeckTrackRow(
+            title: item.title,
+            subtitle: "\(item.artist) · \(item.playedAtFormatted)",
+            artworkURL: item.artworkURL
+        ) {
+            if memoryPreview != nil {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(TurntableTokens.brass)
+                    .accessibilityLabel("Has a memory")
+            }
+            if item.progress > 0 && item.progress < 0.95 {
+                // How far through it was left: a brass ring, not a lamp.
+                ZStack {
+                    Circle().stroke(TurntableTokens.cream.opacity(0.15), lineWidth: 2)
+                    Circle()
+                        .trim(from: 0, to: CGFloat(item.progress))
+                        .stroke(TurntableTokens.brass, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                        .rotationEffect(.degrees(-90))
+                }
+                .frame(width: 18, height: 18)
+                .accessibilityLabel("Stopped \(Int(item.progress * 100)) percent through")
+            }
+            DeckMetalButton(symbol: "ellipsis", size: 26) {
+                showingOptions = true
+            }
+            .accessibilityLabel("More options")
+        }
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(TurntableTokens.cream.opacity(0.08)).frame(height: 1)
+        }
+        .onTapGesture(perform: onTap)
+        .accessibilityAddTraits(.isButton)
+    }
+
+    @ViewBuilder
+    private var face: some View {
+        if deck { deckFace } else { legacyFace }
+    }
+
+    private var legacyFace: some View {
         Button(action: onTap) {
             HStack(spacing: 12) {
                 // Thumbnail
@@ -362,6 +556,10 @@ struct HistoryRow: View {
             .background(Color.cyberBackground)
         }
         .buttonStyle(.plain)
+    }
+
+    var body: some View {
+        face
         .confirmationDialog("", isPresented: $showingOptions, titleVisibility: .hidden) {
             Button(memoryPreview == nil ? "Add Memory" : "Edit Memory") {
                 HapticManager.light()
@@ -451,7 +649,7 @@ struct HistoryRow: View {
             Button(action: onPlayNext) {
                 Label("Next", systemImage: "text.badge.plus")
             }
-            .tint(Theme.cyberMagenta)
+            .tint(deck ? TurntableTokens.brass : Theme.cyberMagenta)
         }
         .accessibilityElement(children: .combine)
     }
@@ -464,7 +662,30 @@ struct StatCard: View {
     let label: String
     let icon: String
 
+    @Environment(\.deckStyle) private var deck
+
     var body: some View {
+        if deck { deckBody } else { legacyBody }
+    }
+
+    /// Deck: a readout on an anodised panel.
+    private var deckBody: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(value)
+                .font(.system(size: 22, weight: .bold, design: .monospaced))
+                .foregroundColor(TurntableTokens.cream)
+            Text(label.uppercased())
+                .font(DeckType.engraved)
+                .tracking(DeckType.engravedTracking)
+                .foregroundColor(TurntableTokens.aluminium.opacity(0.7))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .deckPanel()
+        .accessibilityElement(children: .combine)
+    }
+
+    private var legacyBody: some View {
         VStack(spacing: 8) {
             HStack {
                 Image(systemName: icon)

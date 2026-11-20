@@ -368,6 +368,89 @@ final class TurntableSnapshotTests: XCTestCase {
         XCTAssertGreaterThan(data.count, 10_000)
     }
 
+    /// A playlist's track rows (playing, downloaded, loading, with a
+    /// memory) and the rename board.
+    @MainActor
+    func testRenderPlaylistDetailDeckStyle() throws {
+        let flag = FeatureFlags.shared.turntableHome
+        FeatureFlags.shared.turntableHome = true
+        defer { FeatureFlags.shared.turntableHome = flag }
+
+        func row(_ index: Int, _ title: String, _ artist: String,
+                 playing: Bool = false, loading: Bool = false,
+                 downloaded: Bool = false, memory: Bool = false) -> some View {
+            CyberpunkTrackRow(
+                track: Self.makeTrack(id: "pl-\(index)", title: title, artist: artist, artIndex: index),
+                index: index + 1, isPlaying: playing, isEditing: false, deck: true,
+                isLoading: loading, downloadTask: nil, isDownloaded: downloaded, hasMemory: memory,
+                onPlay: {}, onDownload: {}, onAddToQueue: {}, onPlayNext: {},
+                onAddToPlaylist: {}, onEditMemory: {}, onDelete: {}
+            )
+        }
+        let sheet = VStack(spacing: 0) {
+            DeckLedge(title: "Tracks", count: 4).padding(.bottom, 10)
+            row(2, "Feeling Good", "Nina Simone", playing: true)
+            row(5, "Maria También", "Khruangbin", downloaded: true)
+            row(7, "Blue in Green", "Miles Davis", loading: true)
+            row(9, "Pink + White", "Frank Ocean", memory: true)
+            RenamePlaylistSheet(currentName: "Late night drives", onRename: { _ in })
+                .frame(height: 260)
+                .padding(.top, 30)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 20)
+        .frame(width: 402)
+        .background(DeckRoom())
+        let data = try render(sheet, width: 402, height: 640, scale: 2)
+        try write(data, named: "playlist-detail-deck.png")
+        XCTAssertGreaterThan(data.count, 10_000)
+    }
+
+    /// The Downloads screen's parts and History's readouts.
+    @MainActor
+    func testRenderDownloadsDeckStyle() throws {
+        let flag = FeatureFlags.shared.turntableHome
+        FeatureFlags.shared.turntableHome = true
+        defer { FeatureFlags.shared.turntableHome = flag }
+
+        var active = DownloadTask(track: Self.makeTrack(id: "dl-1", title: "Feeling Good", artist: "Nina Simone", artIndex: 2))
+        active.progress = 0.62
+        active.status = .downloading
+        var done = DownloadTask(track: Self.makeTrack(id: "dl-2", title: "Maria También", artist: "Khruangbin", artIndex: 5))
+        done.status = .completed
+        done.completionTime = Date().addingTimeInterval(-600)
+        var failed = DownloadTask(track: Self.makeTrack(id: "dl-3", title: "Blue in Green", artist: "Miles Davis", artIndex: 7))
+        failed.status = .failed("Network")
+        failed.completionTime = Date().addingTimeInterval(-3_600)
+
+        let sheet = VStack(alignment: .leading, spacing: 18) {
+            Text("Downloads").font(DeckType.screenTitle).foregroundColor(TurntableTokens.cream)
+            HStack(spacing: 12) {
+                StatBadge(icon: "arrow.down.circle.fill", value: "1", label: "Active", lamp: .working, lampColor: DeckSignal.power)
+                StatBadge(icon: "internaldrive.fill", value: "24", label: "Saved", lamp: .idle, lampColor: DeckSignal.power)
+                StatBadge(icon: "xmark.circle.fill", value: "1", label: "Failed", lamp: .lit, lampColor: DeckSignal.attention)
+            }
+            HStack(spacing: 12) {
+                StatCard(value: "312", label: "Total Plays", icon: "play.fill")
+                StatCard(value: "18h 40m", label: "Listening Time", icon: "clock.fill")
+            }
+            SectionHeader(title: "Downloading", icon: "arrow.down.circle", count: 1)
+            ActiveDownloadCard(task: active)
+            SectionHeader(title: "Completed", icon: "checkmark.circle", count: 2)
+            CompletedDownloadCard(task: done)
+            CompletedDownloadCard(task: failed)
+            SectionHeader(title: "Downloaded files", icon: "internaldrive", count: 0)
+            EmptyStateCard(icon: "internaldrive", title: "No Saved Downloads", subtitle: "Downloaded tracks appear here")
+        }
+        .environment(\.deckStyle, true)
+        .padding(16)
+        .frame(width: 402, alignment: .leading)
+        .background(DeckRoom())
+        let data = try render(sheet, width: 402, height: 900, scale: 2)
+        try write(data, named: "downloads-deck.png")
+        XCTAssertGreaterThan(data.count, 10_000)
+    }
+
     /// The mini player's record at three points in a side, and loading.
     @MainActor
     func testRenderMiniRecord() throws {
