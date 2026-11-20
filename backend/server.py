@@ -529,6 +529,25 @@ class PlaylistDetailsResponse(BaseModel):
     tracks: List[TrackResponse]
 
 
+class AlbumResponse(BaseModel):
+    """An album in the "Selected Artists" shelf (2026-11-20)."""
+    browseId: str
+    title: str
+    artists: List[str]
+    year: str
+    type: str
+    trackCount: int
+    thumbnails: List[ThumbnailResponse]
+    # v1.8.5 / S18-SMALL-LARGE-THUMBNAILS: see TrackResponse.
+    thumbnailSmall: Optional[ThumbnailResponse] = None
+    thumbnailLarge: Optional[ThumbnailResponse] = None
+
+
+class AlbumDetailsResponse(AlbumResponse):
+    """An album plus its tracks, in album order."""
+    tracks: List[TrackResponse]
+
+
 class StreamResponse(BaseModel):
     streamUrl: str
     mimeType: str
@@ -1035,6 +1054,42 @@ async def get_playlist(playlist_id: str, request: Request, limit: int = Query(de
     except Exception as e:
         logger.error(f"get_playlist failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to get playlist: {str(e)}")
+
+
+# Album search endpoint (the "Selected Artists" shelf suggests albums)
+@app.post("/search/albums", response_model=List[AlbumResponse])
+@limiter.limit("15/minute")
+async def search_albums(query: SearchQuery, request: Request, user: dict = Depends(require_session_user),):
+    """Search YouTube Music for albums."""
+    try:
+        client = get_client()
+        async with ytmusic_lock:
+            results = await asyncio.to_thread(client.search_albums, query.query, query.limit)
+        return results
+    except Exception as e:
+        logger.error(f"search_albums failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Album search failed: {str(e)}")
+
+
+# Get album details endpoint
+@app.get("/album/{browse_id}", response_model=AlbumDetailsResponse)
+@limiter.limit("20/minute")
+async def get_album(browse_id: str, request: Request, user: dict = Depends(require_session_user),):
+    """Get full album details including tracks."""
+    try:
+        client = get_client()
+        async with ytmusic_lock:
+            album = await asyncio.to_thread(client.get_album_details, browse_id)
+
+        if not album:
+            raise HTTPException(status_code=404, detail="Album not found")
+
+        return album
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"get_album failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to get album: {str(e)}")
 
 
 # Stream endpoint

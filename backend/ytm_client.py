@@ -10,6 +10,7 @@ from typing import List, Dict, Optional
 import os
 import logging
 import time
+import unicodedata
 import yt_dlp
 from runtime_config import settings
 
@@ -74,6 +75,195 @@ def _select_thumbnails(thumbnails: list) -> dict:
         large = formatted[-1]
 
     return {"small": small, "large": large}
+
+
+# ---------------------------------------------------------------------------
+# ALBUM SEARCH / ALBUM DETAILS (2026-11-20)
+#
+# The iOS "Selected Artists" shelf suggests albums instead of songs, so
+# the backend needs album search + album details.
+#
+# ytmusicapi shapes (verified live, guest mode):
+#   search(filter="albums") items:
+#     {"category", "resultType", "title", "type", "duration", "year",
+#      "artists", "browseId", "isExplicit", "thumbnails"}
+#     - type is "Album" | "Single" | "EP"
+#     - year is a string ("1997") and may be missing
+#     - artists[0] is a TYPE LABEL with id=None ({"name": "Album"}),
+#       the real artists follow with their channel id
+#     - NO trackCount in search results
+#   get_album(browseId) returns:
+#     {"title", "type", "thumbnails", "description", "artists", "year",
+#      "trackCount", "duration", "audioPlaylistId", "tracks": [...]}
+#     - track "thumbnails" is usually None -> fall back to the album art
+# ---------------------------------------------------------------------------
+
+# Display order for album types: Album first, then EP, then Single.
+_ALBUM_TYPE_ORDER = {"Album": 0, "EP": 1, "Single": 2}
+
+# The pseudo-artist rows ytmusicapi puts in front of the real artists.
+_ALBUM_TYPE_LABELS = {"album", "ep", "single"}
+
+
+def _normalize_artist_name(name: str) -> str:
+    """Lower-case a name and strip diacritics + whitespace.
+
+    "Beyonce" / "Beyoncé" / " beyoncé " must all compare equal so the
+    tribute-album filter works for names with accents.
+    """
+    if not name:
+        return ""
+    decomposed = unicodedata.normalize("NFKD", str(name))
+    without_marks = "".join(c for c in decomposed if not unicodedata.combining(c))
+    return "".join(without_marks.split()).lower()
+
+
+def _album_artist_names(raw_artists) -> List[str]:
+    """Artist names of an album, with the type label removed.
+
+    ytmusicapi returns [{"name": "Album", "id": None}, {"name": "Radiohead",
+    "id": "UC..."}] - the first entry is a type label, not an artist.
+    """
+    entries = [
+        a for a in (raw_artists or [])
+        if isinstance(a, dict) and a.get("name")
+    ]
+    has_real_id = any(a.get("id") for a in entries)
+
+    names = []
+    for entry in entries:
+        if entry.get("id") is None:
+            label = str(entry.get("name", "")).strip().lower()
+            if has_real_id or label in _ALBUM_TYPE_LABELS:
+                # Type label row - drop it.
+                continue
+        names.append(str(entry.get("name")))
+    return names
+
+
+def _normalize_thumbnails(thumbnails) -> List[Dict]:
+    """ytmusicapi thumbnails -> the {url, width, height} shape, ascending."""
+    if not thumbnails:
+        return []
+    normalized = []
+    for thumb in thumbnails:
+        if not isinstance(thumb, dict) or "url" not in thumb:
+            continue
+        normalized.append({
+            "url": thumb["url"],
+            "width": thumb.get("width", 0) or 0,
+            "height": thumb.get("height", 0) or 0,
+        })
+    normalized.sort(key=lambda t: t["width"])
+    return normalized
+
+
+def _map_album_search_item(item) -> Optional[Dict]:
+    """Map one raw ytmusicapi album-search item to the API shape."""
+    if not isinstance(item, dict):
+        return None
+
+    browse_id = item.get("browseId")
+    if not browse_id:
+        # Nothing we can link to - skip instead of failing the request.
+        return None
+
+    thumbnails = _normalize_thumbnails(item.get("thumbnails"))
+    picks = _select_thumbnails(thumbnails)
+
+    return {
+        "browseId": browse_id,
+        "title": item.get("title") or "Unknown Album",
+        "artists": _album_artist_names(item.get("artists")),
+        "year": str(item.get("year") or ""),
+        "type": item.get("type") or "Album",
+        # Search results carry no track count.
+        "trackCount": 0,
+        "thumbnails": thumbnails,
+        "thumbnailSmall": picks["small"],
+        "thumbnailLarge": picks["large"],
+    }
+
+
+def _filter_and_sort_albums(albums: List[Dict], query: str, limit: int) -> List[Dict]:
+    """Drop tribute/cover albums and order the result for the shelf.
+
+    YouTube Music mixes tribute and cover albums by OTHER artists into
+    the results ("Guitar Tribute To Radiohead" by "Echoed Catalyst").
+    Those are removed when at least one album is credited to the artist
+    we searched for. If nothing matches, the unfiltered results are kept
+    so the shelf is never empty for an artist whose name is spelled
+    differently.
+    """
+    normalized_query = _normalize_artist_name(query)
+
+    matched = []
+    for album in albums:
+        artist_names = album.get("artists") or []
+        if normalized_query and any(
+            _normalize_artist_name(name) == normalized_query for name in artist_names
+        ):
+            matched.append(album)
+
+    kept = matched if matched else list(albums)
+    # Stable sort: within a type the search order is preserved.
+    kept.sort(key=lambda a: _ALBUM_TYPE_ORDER.get(a.get("type"), 3))
+    if limit and limit > 0:
+        kept = kept[:limit]
+    return kept
+
+
+def _map_album_details(data, browse_id: str) -> Dict:
+    """Map a raw ytmusicapi album payload to the album-details shape."""
+    album_thumbnails = _normalize_thumbnails(data.get("thumbnails"))
+    album_picks = _select_thumbnails(album_thumbnails)
+    album_title = data.get("title") or "Unknown Album"
+
+    tracks = []
+    for track in data.get("tracks") or []:
+        if not isinstance(track, dict):
+            continue
+        video_id = track.get("videoId")
+        if not video_id:
+            continue
+
+        track_thumbnails = _normalize_thumbnails(track.get("thumbnails"))
+        if not track_thumbnails:
+            # Album tracks normally have no artwork of their own -
+            # fall back to the album art.
+            track_thumbnails = album_thumbnails
+        track_picks = _select_thumbnails(track_thumbnails)
+
+        tracks.append({
+            "videoId": video_id,
+            "title": track.get("title") or "Unknown Title",
+            "artists": [
+                str(a.get("name"))
+                for a in (track.get("artists") or [])
+                if isinstance(a, dict) and a.get("name")
+            ],
+            "album": album_title,
+            "durationSeconds": track.get("duration_seconds") or 0,
+            "thumbnails": track_thumbnails,
+            "thumbnailSmall": track_picks["small"],
+            "thumbnailLarge": track_picks["large"],
+            "isExplicit": track.get("isExplicit") or False,
+            "videoType": "MUSIC_VIDEO_TYPE_ATV",
+        })
+
+    return {
+        "browseId": browse_id,
+        "title": album_title,
+        "artists": _album_artist_names(data.get("artists")),
+        "year": str(data.get("year") or ""),
+        "type": data.get("type") or "Album",
+        "trackCount": data.get("trackCount") or len(tracks),
+        "thumbnails": album_thumbnails,
+        "thumbnailSmall": album_picks["small"],
+        "thumbnailLarge": album_picks["large"],
+        # Track order is the order ytmusicapi returns (trackNumber order).
+        "tracks": tracks,
+    }
 
 
 class YTMusicClient:
@@ -357,7 +547,70 @@ class YTMusicClient:
             import traceback
             traceback.print_exc()
             return None
-    
+
+    def search_albums(self, query: str, limit: int = 20) -> List[Dict]:
+        """
+        Search for albums on YouTube Music.
+        Works in both authenticated and guest mode.
+
+        Tribute/cover albums by other artists are filtered out when the
+        artist matches the query; albums are ordered Album, EP, Single.
+
+        Args:
+            query: Search string (usually the artist name)
+            limit: Maximum albums to return
+
+        Returns:
+            List of album dictionaries with metadata
+        """
+        try:
+            logger.info(f"Searching albums for: '{query}'")
+            # Ask for extra candidates: YouTube Music mixes tribute and
+            # cover albums by other artists into the results and those
+            # are dropped below, so a raw page of `limit` would come back
+            # short.
+            raw_limit = min(max(int(limit or 1), 1) * 3, 50)
+            results = self.yt.search(query, filter="albums", limit=raw_limit) or []
+            logger.info(f"Raw album search returned {len(results)} results")
+
+            albums = []
+            for item in results:
+                mapped = _map_album_search_item(item)
+                if mapped:
+                    albums.append(mapped)
+
+            albums = _filter_and_sort_albums(albums, query, limit)
+
+            logger.info(f"Album search for '{query}' returned {len(albums)} albums")
+            return albums
+
+        except Exception as e:
+            logger.error(f"Album search failed: {e}")
+            return []
+
+    def get_album_details(self, browse_id: str) -> Optional[Dict]:
+        """
+        Get full album details including tracks.
+
+        Args:
+            browse_id: Album browse ID (MPREb_...)
+
+        Returns:
+            Album dictionary with tracks, or None when not found
+        """
+        try:
+            album_data = self.yt.get_album(browse_id)
+
+            if not album_data:
+                logger.warning(f"Album not found: {browse_id}")
+                return None
+
+            return _map_album_details(album_data, browse_id)
+
+        except Exception as e:
+            logger.error(f"Failed to get album {browse_id}: {e}")
+            return None
+
     def get_stream_url(self, video_id: str) -> Optional[Dict]:
         """
         Get direct audio stream URLs for a video.
