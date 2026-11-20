@@ -22,7 +22,135 @@ struct AddToPlaylistSheet: View {
         playlistManager.recentlyModifiedPlaylists(limit: 3)
     }
     
+    // Deck design system (docs/design/deck-design-system.md §8). Drawn
+    // on the Deck when the turntable flag is on; the old drawing stays
+    // as `legacyBody` until the flag retires.
+    @ObservedObject private var featureFlags = FeatureFlags.shared
+    @FocusState private var nameFocused: Bool
+    private var deck: Bool { featureFlags.turntableHome }
+
     var body: some View {
+        if deck { deckBody } else { legacyBody }
+    }
+
+    /// Deck: a walnut board with the name and Done, the track being
+    /// added on the wall, then the playlists as rows on ledges. A lamp
+    /// is lit on every playlist the track is already in.
+    private var deckBody: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                Text("Add to playlist")
+                    .font(DeckType.screenTitle)
+                    .foregroundColor(TurntableTokens.cream)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                Spacer(minLength: 8)
+                DeckButton(title: "Done", kind: .card) { dismiss() }
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 18)
+            .padding(.bottom, 14)
+            .deckPlinth(cornerRadius: 0)
+
+            ScrollView {
+                VStack(spacing: 0) {
+                    DeckTrackRow(
+                        title: track.title,
+                        subtitle: track.displayArtist,
+                        artworkURL: track.artworkURL,
+                        smallPrint: DeckFormat.runtime(track.durationSeconds)
+                    )
+                    .padding(.horizontal, 16)
+                    .padding(.top, 12)
+
+                    deckNewPlaylist
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 16)
+
+                    if !isCreatingNew {
+                        if userPlaylists.isEmpty {
+                            VStack(spacing: 8) {
+                                Text("No playlists yet")
+                                    .font(DeckType.title)
+                                    .foregroundColor(TurntableTokens.cream)
+                                Text("Make one to put this song in.")
+                                    .font(DeckType.subtitle)
+                                    .foregroundColor(TurntableTokens.cream.opacity(0.55))
+                            }
+                            .padding(.vertical, 24)
+                        } else {
+                            if !recentlyModified.isEmpty {
+                                deckSection("Recently modified", recentlyModified)
+                            }
+                            deckSection("All playlists", userPlaylists)
+                        }
+                    }
+                    Color.clear.frame(height: 40)
+                }
+            }
+        }
+        .background(DeckRoom())
+        .environment(\.deckStyle, true)
+        .preferredColorScheme(.dark)
+    }
+
+    @ViewBuilder
+    private var deckNewPlaylist: some View {
+        if isCreatingNew {
+            VStack(spacing: 12) {
+                TextField("", text: $newPlaylistName, prompt: Text("Playlist name").foregroundColor(TurntableTokens.cream.opacity(0.4)))
+                    .font(DeckType.body)
+                    .foregroundColor(TurntableTokens.cream)
+                    .tint(DeckSignal.live)
+                    .focused($nameFocused)
+                    .submitLabel(.done)
+                    .autocorrectionDisabled()
+                    .onSubmit { createPlaylist() }
+                    .padding(.horizontal, 18)
+                    .frame(height: 48)
+                    .deckWell(Capsule(), lit: nameFocused ? DeckSignal.live : nil)
+
+                HStack(spacing: 12) {
+                    DeckButton(title: "Cancel", fillsWidth: true) {
+                        isCreatingNew = false
+                        newPlaylistName = ""
+                    }
+                    DeckButton(title: "Create", kind: .card, fillsWidth: true) {
+                        createPlaylist()
+                    }
+                    .opacity(newPlaylistName.isEmpty ? 0.45 : 1)
+                    .disabled(newPlaylistName.isEmpty)
+                }
+            }
+            .onAppear { nameFocused = true }
+        } else {
+            DeckButton(title: "New playlist", symbol: "plus", fillsWidth: true) {
+                HapticManager.light()
+                isCreatingNew = true
+            }
+        }
+    }
+
+    private func deckSection(_ title: String, _ playlists: [Playlist]) -> some View {
+        VStack(spacing: 0) {
+            DeckLedge(title: title, count: playlists.count)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 6)
+            ForEach(playlists) { playlist in
+                PlaylistRow(
+                    playlist: playlist,
+                    track: track,
+                    isAdded: playlistManager.isTrackInPlaylist(track.videoId, playlistId: playlist.id)
+                ) {
+                    toggleTrackInPlaylist(playlist.id)
+                }
+                .padding(.horizontal, 16)
+            }
+            Color.clear.frame(height: 14)
+        }
+    }
+
+    private var legacyBody: some View {
         NavigationStack {
             ZStack {
                 Theme.cyberBackground.ignoresSafeArea()
@@ -192,8 +320,57 @@ struct PlaylistRow: View {
     let track: Track
     let isAdded: Bool
     let onTap: () -> Void
-    
+
+    @Environment(\.deckStyle) private var deck
+
     var body: some View {
+        if deck { deckBody } else { legacyBody }
+    }
+
+    /// Deck: a small walnut block with the playlist's symbol, the name
+    /// in print, the count in small print, and a lamp that is lit when
+    /// the track is already in it (cyan: "this one").
+    private var deckBody: some View {
+        Button(action: onTap) {
+            HStack(spacing: 12) {
+                Image(systemName: "music.note.list")
+                    .font(.system(size: 15, weight: .regular))
+                    .foregroundColor(TurntableTokens.aluminium.opacity(0.7))
+                    .frame(width: 46, height: 46)
+                    .deckPlinth(cornerRadius: 3)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(playlist.name)
+                        .font(DeckType.title)
+                        .foregroundColor(TurntableTokens.cream)
+                    Text(DeckFormat.tracks(playlist.trackCount))
+                        .font(DeckType.subtitle)
+                        .foregroundColor(TurntableTokens.cream.opacity(0.55))
+                }
+                .lineLimit(1)
+
+                Spacer(minLength: 8)
+
+                if isAdded {
+                    Text("ADDED")
+                        .font(DeckType.smallPrint)
+                        .foregroundColor(TurntableTokens.brass)
+                }
+                DeckLamp(color: DeckSignal.live, state: isAdded ? .lit : .idle, size: 6)
+            }
+            .frame(minHeight: 58)
+            .contentShape(Rectangle())
+            .overlay(alignment: .bottom) {
+                Rectangle().fill(TurntableTokens.cream.opacity(0.08)).frame(height: 1)
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(playlist.name)
+        .accessibilityValue(isAdded ? "Added" : "Not added")
+        .accessibilityHint(isAdded ? "Removes the song from this playlist" : "Adds the song to this playlist")
+    }
+
+    private var legacyBody: some View {
         Button(action: onTap) {
             HStack {
                 // Playlist artwork placeholder

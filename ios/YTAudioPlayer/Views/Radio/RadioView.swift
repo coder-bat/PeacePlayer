@@ -28,6 +28,27 @@ struct RadioView: View {
     // NavigationStack here.
     @Environment(\.dismiss) private var dismiss
 
+    // Deck design system (docs/design/deck-design-system.md §8 step 6).
+    // Drawn on the Deck when the turntable flag is on; each old drawing
+    // stays as a `legacy…` twin until the flag retires.
+    @ObservedObject private var featureFlags = FeatureFlags.shared
+    @FocusState private var searchFocused: Bool
+    private var deck: Bool { featureFlags.turntableHome }
+
+    /// What the edge of a scrolling shelf fades into.
+    private var wall: Color { deck ? TurntableTokens.room : Theme.cyberBackground }
+
+    /// Something is loading: the deck's amber lamp, or the old spinner.
+    @ViewBuilder
+    private var busy: some View {
+        if deck {
+            DeckLamp(color: DeckSignal.power, state: .working, size: 8)
+                .accessibilityLabel("Loading")
+        } else {
+            ProgressView().tint(Theme.cyberCyan)
+        }
+    }
+
     private func dismissKeyboard() {
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
@@ -48,7 +69,11 @@ struct RadioView: View {
         // custom chrome. The back chevron is now in the custom
         // header (headerSection).
         ZStack {
-            Theme.cyberBackground.ignoresSafeArea()
+            if deck {
+                DeckRoom()
+            } else {
+                Theme.cyberBackground.ignoresSafeArea()
+            }
 
             VStack(spacing: 0) {
                 headerSection
@@ -73,26 +98,15 @@ struct RadioView: View {
             }
             .overlay(alignment: .top) {
                 if let error = viewModel.errorMessage {
-                    HStack(spacing: 8) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundColor(.white)
-                        Text(error)
-                            .font(.system(size: 12, weight: .medium, design: .monospaced))
-                            .foregroundColor(.white)
-                    }
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 10)
-                    .background(
-                        Capsule()
-                            .fill(Theme.cyberMagenta.opacity(0.9))
-                    )
-                    .padding(.top, 8)
+                    errorBanner(error)
+                        .padding(.top, 8)
                     .transition(.move(edge: .top).combined(with: .opacity))
                     .animation(.spring(response: 0.3), value: viewModel.errorMessage)
                 }
             }
         }
         .toolbar(.hidden, for: .navigationBar)
+        .environment(\.deckStyle, deck)
         .task {
             viewModel.loadTopStations()
             viewModel.loadTopPodcasts()
@@ -127,7 +141,38 @@ struct RadioView: View {
 
     // MARK: - Header
 
+    @ViewBuilder
     var headerSection: some View {
+        if deck { deckHeaderSection } else { legacyHeaderSection }
+    }
+
+    /// Deck: a metal back button, the name in print, what is inside it
+    /// as plain secondary text.
+    private var deckHeaderSection: some View {
+        HStack(spacing: 4) {
+            DeckMetalButton(symbol: "chevron.left", size: 30) {
+                HapticManager.light()
+                dismiss()
+            }
+            .accessibilityLabel("Back")
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Radio")
+                    .font(DeckType.screenTitle)
+                    .foregroundColor(TurntableTokens.cream)
+                    .accessibilityAddTraits(.isHeader)
+                Text("Stations, podcasts, books, song radio")
+                    .font(DeckType.subtitle)
+                    .foregroundColor(TurntableTokens.cream.opacity(0.55))
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 12)
+        .padding(.top, 8)
+        .padding(.bottom, 8)
+    }
+
+    private var legacyHeaderSection: some View {
         HStack(spacing: 12) {
             // S18 / v1.6.1: custom back chevron. Replaces the
             // system back button that came with the system nav
@@ -161,7 +206,35 @@ struct RadioView: View {
 
     // MARK: - Section Picker
 
+    @ViewBuilder
     var sectionPicker: some View {
+        if deck { deckSectionPicker } else { legacySectionPicker }
+    }
+
+    /// Deck: a selector. Chips in an anodised panel, the lamp lit on
+    /// the chosen one.
+    private var deckSectionPicker: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 2) {
+                ForEach(RadioSection.allCases, id: \.self) { section in
+                    DeckChip(title: section.rawValue, isSelected: viewModel.selectedSection == section) {
+                        withAnimation(DeckMotion.move) {
+                            viewModel.selectedSection = section
+                            viewModel.searchText = ""
+                        }
+                        HapticManager.selectionChanged()
+                    }
+                    .accessibilityLabel("\(section.rawValue) section")
+                }
+            }
+            .padding(5)
+        }
+        .deckPanel()
+        .padding(.horizontal, 16)
+        .padding(.bottom, 12)
+    }
+
+    private var legacySectionPicker: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
                 ForEach(RadioSection.allCases, id: \.self) { section in
@@ -197,7 +270,53 @@ struct RadioView: View {
 
     // MARK: - Search Bar
 
+    @ViewBuilder
     var searchBar: some View {
+        if deck { deckSearchBar } else { legacySearchBar }
+    }
+
+    /// Deck: the text lies in a well, lit while it has focus.
+    private var deckSearchBar: some View {
+        HStack(spacing: 10) {
+            if viewModel.isSearching {
+                DeckLamp(color: DeckSignal.power, state: .working, size: 6)
+                    .frame(width: 18)
+            } else {
+                Image(systemName: "magnifyingglass")
+                    .foregroundColor(TurntableTokens.aluminium.opacity(0.7))
+                    .frame(width: 18)
+            }
+            TextField("", text: $viewModel.searchText,
+                      prompt: Text(searchPlaceholder).foregroundColor(TurntableTokens.cream.opacity(0.4)))
+                .font(DeckType.body)
+                .foregroundColor(TurntableTokens.cream)
+                .tint(DeckSignal.live)
+                .focused($searchFocused)
+                .submitLabel(.search)
+            if !viewModel.searchText.isEmpty {
+                Button {
+                    viewModel.searchText = ""
+                    searchFocused = false
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 17))
+                        .foregroundColor(TurntableTokens.aluminium.opacity(0.6))
+                        .frame(width: 34, height: 44)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Clear search")
+            }
+        }
+        .padding(.leading, 18)
+        .padding(.trailing, viewModel.searchText.isEmpty ? 18 : 6)
+        .frame(height: 48)
+        .deckWell(Capsule(), lit: searchFocused ? DeckSignal.live : nil)
+        .padding(.horizontal, 16)
+        .padding(.bottom, 12)
+        .animation(.easeInOut(duration: 0.2), value: searchFocused)
+    }
+
+    private var legacySearchBar: some View {
         HStack(spacing: 10) {
             if viewModel.isSearching {
                 ProgressView()
@@ -247,7 +366,7 @@ struct RadioView: View {
 
     var stationsSection: some View {
         LazyVStack(spacing: 20) {
-            genreChips(genres: RadioViewModel.radioGenres) { genre in
+            genreChips(genres: RadioViewModel.radioGenres, selected: viewModel.selectedGenre) { genre in
                 viewModel.loadStationsByGenre(genre)
             }
 
@@ -277,7 +396,7 @@ struct RadioView: View {
                     }
                     .overlay(alignment: .trailing) {
                         LinearGradient(
-                            colors: [Theme.cyberBackground.opacity(0), Theme.cyberBackground],
+                            colors: [wall.opacity(0), wall],
                             startPoint: .leading,
                             endPoint: .trailing
                         )
@@ -320,7 +439,7 @@ struct RadioView: View {
                     }
                     .overlay(alignment: .trailing) {
                         LinearGradient(
-                            colors: [Theme.cyberBackground.opacity(0), Theme.cyberBackground],
+                            colors: [wall.opacity(0), wall],
                             startPoint: .leading,
                             endPoint: .trailing
                         )
@@ -354,8 +473,7 @@ struct RadioView: View {
             }
 
             if viewModel.isSearching && viewModel.selectedSection == .songRadio {
-                ProgressView()
-                    .tint(Theme.cyberCyan)
+                busy
                     .padding(20)
             }
 
@@ -363,48 +481,66 @@ struct RadioView: View {
                 sectionHeader("RECENT_RADIOS", count: viewModel.recentSongRadios.count)
 
                 ForEach(viewModel.recentSongRadios) { track in
-                    Button(action: {
-                        viewModel.startSongRadio(from: track)
-                    }) {
-                        HStack(spacing: 12) {
-                            CachedAsyncImage(url: track.artworkURL) { image in
-                                image.resizable().aspectRatio(contentMode: .fill)
-                            } placeholder: {
-                                Theme.cyberSurface
+                    if deck {
+                        Button {
+                            viewModel.startSongRadio(from: track)
+                        } label: {
+                            DeckTrackRow(
+                                title: track.title,
+                                subtitle: "Radio based on \(track.displayArtist)",
+                                artworkURL: track.artworkURL
+                            ) {
+                                Image(systemName: "play.fill")
+                                    .font(.system(size: 11))
+                                    .foregroundColor(TurntableTokens.aluminium.opacity(0.7))
                             }
-                            .frame(width: 50, height: 50)
-                            .cornerRadius(CornerRadius.sm)
-
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("Radio based on")
-                                    .font(.system(size: 10, weight: .medium, design: .monospaced))
-                                    .foregroundColor(Theme.cyberDim)
-                                Text(track.title)
-                                    .font(.system(size: 14, weight: .semibold))
-                                    .foregroundColor(.white)
-                                    .lineLimit(1)
-                                Text(track.displayArtist)
-                                    .font(.system(size: 12))
-                                    .foregroundColor(Theme.tertiaryText)
-                                    .lineLimit(1)
-                            }
-                            Spacer()
-                            Image(systemName: "play.fill")
-                                .foregroundColor(Theme.cyberCyan)
                         }
-                        .padding(12)
-                        .background(
-                            RoundedRectangle(cornerRadius: CornerRadius.md)
-                                .fill(Theme.cyberSurface)
-                        )
+                        .buttonStyle(.plain)
+                        .deckRowRule()
+                        .padding(.horizontal, 16)
+                    } else {
+                        Button(action: {
+                            viewModel.startSongRadio(from: track)
+                        }) {
+                            HStack(spacing: 12) {
+                                CachedAsyncImage(url: track.artworkURL) { image in
+                                    image.resizable().aspectRatio(contentMode: .fill)
+                                } placeholder: {
+                                    Theme.cyberSurface
+                                }
+                                .frame(width: 50, height: 50)
+                                .cornerRadius(CornerRadius.sm)
+
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Radio based on")
+                                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                                        .foregroundColor(Theme.cyberDim)
+                                    Text(track.title)
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .foregroundColor(.white)
+                                        .lineLimit(1)
+                                    Text(track.displayArtist)
+                                        .font(.system(size: 12))
+                                        .foregroundColor(Theme.tertiaryText)
+                                        .lineLimit(1)
+                                }
+                                Spacer()
+                                Image(systemName: "play.fill")
+                                    .foregroundColor(Theme.cyberCyan)
+                            }
+                            .padding(12)
+                            .background(
+                                RoundedRectangle(cornerRadius: CornerRadius.md)
+                                    .fill(Theme.cyberSurface)
+                            )
+                        }
+                        .padding(.horizontal, 20)
                     }
-                    .padding(.horizontal, 20)
                 }
             }
 
             if viewModel.isLoadingSongRadio {
-                ProgressView()
-                    .tint(Theme.cyberCyan)
+                busy
                     .padding(40)
             } else if let seed = viewModel.songRadioSeed, !viewModel.songRadioTracks.isEmpty {
                 sectionHeader("RADIO: \(seed.title.uppercased())", count: viewModel.songRadioTracks.count)
@@ -416,6 +552,18 @@ struct RadioView: View {
                     }
                     .padding(.horizontal, 20)
                 }
+            } else if deck {
+                VStack(spacing: 8) {
+                    Text("Start song radio")
+                        .font(DeckType.title)
+                        .foregroundColor(TurntableTokens.cream)
+                    Text("Choose Start Radio from any song's menu and the deck will build a station from it.")
+                        .font(DeckType.subtitle)
+                        .foregroundColor(TurntableTokens.cream.opacity(0.55))
+                        .multilineTextAlignment(.center)
+                }
+                .padding(.horizontal, 40)
+                .padding(.top, 60)
             } else {
                 VStack(spacing: 16) {
                     Image(systemName: "radio")
@@ -437,7 +585,31 @@ struct RadioView: View {
 
     // MARK: - Helper Views
 
-    func genreChips(genres: [String], onSelect: @escaping (String) -> Void) -> some View {
+    @ViewBuilder
+    func genreChips(genres: [String], selected: String = "", onSelect: @escaping (String) -> Void) -> some View {
+        if deck {
+            // Deck: a second selector under the first. (A tuner dial
+            // for genres is still to come; see the design doc.)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 2) {
+                    ForEach(genres, id: \.self) { genre in
+                        DeckChip(title: genre, isSelected: genre == selected) {
+                            onSelect(genre)
+                            HapticManager.selectionChanged()
+                        }
+                        .accessibilityLabel("Genre: \(genre)")
+                    }
+                }
+                .padding(5)
+            }
+            .deckPanel()
+            .padding(.horizontal, 16)
+        } else {
+            legacyGenreChips(genres: genres, onSelect: onSelect)
+        }
+    }
+
+    func legacyGenreChips(genres: [String], onSelect: @escaping (String) -> Void) -> some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
                 ForEach(genres, id: \.self) { genre in
@@ -461,7 +633,19 @@ struct RadioView: View {
         }
     }
 
+    @ViewBuilder
     func sectionHeader(_ title: String, count: Int) -> some View {
+        if deck {
+            // Deck: a ledge. "TOP_STATIONS" becomes "Top stations".
+            let words = title.replacingOccurrences(of: "_", with: " ").lowercased()
+            DeckLedge(title: words.prefix(1).uppercased() + words.dropFirst(), count: count > 0 ? count : nil)
+                .padding(.horizontal, 16)
+        } else {
+            legacySectionHeader(title, count: count)
+        }
+    }
+
+    func legacySectionHeader(_ title: String, count: Int) -> some View {
         HStack {
             Text(title)
                 .font(.system(size: 12, weight: .bold, design: .monospaced))
@@ -482,10 +666,17 @@ struct RadioView: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 14) {
                 ForEach(0..<count, id: \.self) { _ in
-                    RoundedRectangle(cornerRadius: CornerRadius.md)
-                        .fill(Theme.cyberDim.opacity(0.15))
-                        .frame(width: 120, height: 120)
-                        .shimmer()
+                    if deck {
+                        TurntableTokens.walnut.opacity(0.5)
+                            .frame(width: 120, height: 120)
+                            .deckCover(cornerRadius: 3)
+                            .shimmer()
+                    } else {
+                        RoundedRectangle(cornerRadius: CornerRadius.md)
+                            .fill(Theme.cyberDim.opacity(0.15))
+                            .frame(width: 120, height: 120)
+                            .shimmer()
+                    }
                 }
             }
             .padding(.horizontal, 20)
@@ -524,17 +715,59 @@ struct RadioView: View {
         }
     }
 
+    @ViewBuilder
     private func emptySearchState(icon: String, text: String) -> some View {
-        VStack(spacing: 12) {
-            Image(systemName: icon)
-                .font(.system(size: 36))
-                .foregroundColor(Theme.cyberDim)
+        if deck {
+            // Deck: one quiet line, no icon in a box.
             Text(text)
-                .font(.system(size: 14, weight: .medium, design: .monospaced))
-                .foregroundColor(Theme.tertiaryText)
+                .font(DeckType.title)
+                .foregroundColor(TurntableTokens.cream.opacity(0.7))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 40)
+        } else {
+            VStack(spacing: 12) {
+                Image(systemName: icon)
+                    .font(.system(size: 36))
+                    .foregroundColor(Theme.cyberDim)
+                Text(text)
+                    .font(.system(size: 14, weight: .medium, design: .monospaced))
+                    .foregroundColor(Theme.tertiaryText)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 40)
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 40)
+    }
+
+    private func errorBanner(_ message: String) -> some View {
+        Group {
+            if deck {
+                HStack(spacing: 10) {
+                    DeckLamp(color: DeckSignal.attention, state: .lit, size: 6)
+                    Text(message)
+                        .font(DeckType.subtitle)
+                        .foregroundColor(TurntableTokens.cream)
+                        .lineLimit(2)
+                }
+                .padding(.horizontal, 18)
+                .padding(.vertical, 10)
+                .deckPanel(cornerRadius: CornerRadius.md)
+                .accessibilityElement(children: .combine)
+            } else {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundColor(.white)
+                    Text(message)
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .foregroundColor(.white)
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 10)
+                .background(
+                    Capsule()
+                        .fill(Theme.cyberMagenta.opacity(0.9))
+                )
+            }
+        }
     }
 
     // MARK: - Audiobooks Section
@@ -543,11 +776,22 @@ struct RadioView: View {
         LazyVStack(spacing: 20) {
             if !viewModel.searchText.isEmpty {
                 if viewModel.isSearching {
-                    ProgressView()
-                        .tint(Theme.cyberCyan)
+                    busy
                         .padding(20)
                 } else if viewModel.audiobookSearchResults.isEmpty {
-                    if viewModel.errorMessage != nil {
+                    if viewModel.errorMessage != nil && deck {
+                        VStack(spacing: 14) {
+                            Text("Search failed")
+                                .font(DeckType.title)
+                                .foregroundColor(TurntableTokens.cream)
+                            DeckButton(title: "Retry", symbol: "arrow.clockwise", kind: .card) {
+                                HapticManager.light()
+                                viewModel.searchAudiobooks(query: viewModel.searchText)
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 40)
+                    } else if viewModel.errorMessage != nil {
                         VStack(spacing: 12) {
                             Image(systemName: "wifi.slash")
                                 .font(.system(size: 36))
@@ -609,7 +853,7 @@ struct RadioView: View {
                         }
                         .overlay(alignment: .trailing) {
                             LinearGradient(
-                                colors: [Theme.cyberBackground.opacity(0), Theme.cyberBackground],
+                                colors: [wall.opacity(0), wall],
                                 startPoint: .leading,
                                 endPoint: .trailing
                             )
@@ -627,6 +871,10 @@ struct RadioView: View {
 
     private var myLibrarySection: some View {
         VStack(alignment: .leading, spacing: 12) {
+            if deck {
+                DeckLedge(title: "My library", count: library.books.count)
+                    .padding(.horizontal, 16)
+            } else {
             HStack {
                 Image(systemName: "books.vertical.fill")
                     .font(.system(size: 12))
@@ -640,6 +888,7 @@ struct RadioView: View {
                 Spacer()
             }
             .padding(.horizontal, 20)
+            }
 
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: 14) {
@@ -654,7 +903,7 @@ struct RadioView: View {
             }
             .overlay(alignment: .trailing) {
                 LinearGradient(
-                    colors: [Theme.cyberBackground.opacity(0), Theme.cyberBackground],
+                    colors: [wall.opacity(0), wall],
                     startPoint: .leading,
                     endPoint: .trailing
                 )
@@ -664,7 +913,35 @@ struct RadioView: View {
         }
     }
 
+    @ViewBuilder
     private var audiobookGenreChips: some View {
+        if deck {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 2) {
+                    ForEach(RadioViewModel.audiobookGenres, id: \.self) { genre in
+                        DeckChip(title: genre, isSelected: viewModel.selectedAudiobookGenre == genre) {
+                            if viewModel.selectedAudiobookGenre == genre {
+                                viewModel.selectedAudiobookGenre = ""
+                                viewModel.audiobookGenreResults = []
+                            } else {
+                                viewModel.loadAudiobooksByGenre(genre)
+                            }
+                            HapticManager.selectionChanged()
+                        }
+                        .disabled(viewModel.isLoadingAudiobooks)
+                        .accessibilityLabel("\(genre) audiobooks")
+                    }
+                }
+                .padding(5)
+            }
+            .deckPanel()
+            .padding(.horizontal, 16)
+        } else {
+            legacyAudiobookGenreChips
+        }
+    }
+
+    private var legacyAudiobookGenreChips: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
                 ForEach(RadioViewModel.audiobookGenres, id: \.self) { genre in
@@ -709,10 +986,12 @@ struct RadioView: View {
             if viewModel.isLoadingAudiobooks {
                 HStack {
                     Spacer()
-                    ProgressView().tint(Theme.cyberCyan)
+                    busy
                     Spacer()
                 }
                 .padding(.top, 40)
+            } else if books.isEmpty && deck {
+                emptySearchState(icon: "book.closed", text: "No audiobooks found")
             } else if books.isEmpty {
                 VStack(spacing: 12) {
                     Image(systemName: "book.closed")
@@ -741,13 +1020,84 @@ struct RadioView: View {
     }
 }
 
+// MARK: - Deck helpers
+
+private extension View {
+    /// The hairline under a Deck row.
+    func deckRowRule() -> some View {
+        overlay(alignment: .bottom) {
+            Rectangle().fill(TurntableTokens.cream.opacity(0.08)).frame(height: 1)
+        }
+    }
+}
+
+/// A shelf item in the Deck: a sleeve, then its name in print and a
+/// line of small print under it.
+private struct DeckShelfCard: View {
+    let artworkURL: URL?
+    let symbol: String
+    let title: String
+    let detail: String
+    var width: CGFloat = 120
+    var height: CGFloat = 120
+    let onTap: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            VStack(alignment: .leading, spacing: 8) {
+                CachedAsyncImage(url: artworkURL) { image in
+                    image.resizable().aspectRatio(contentMode: .fill)
+                } placeholder: {
+                    ZStack {
+                        TurntableTokens.walnut
+                        Image(systemName: symbol)
+                            .font(.system(size: 26, weight: .light))
+                            .foregroundColor(TurntableTokens.aluminium.opacity(0.6))
+                    }
+                }
+                .frame(width: width, height: height)
+                .deckCover(cornerRadius: 3)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(TurntableTokens.cream)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                    if !detail.isEmpty {
+                        Text(detail)
+                            .font(.system(size: 11))
+                            .foregroundColor(TurntableTokens.cream.opacity(0.55))
+                            .lineLimit(1)
+                    }
+                }
+                .frame(width: width, alignment: .leading)
+            }
+        }
+        .buttonStyle(DeckPressStyle())
+        .accessibilityElement(children: .combine)
+    }
+}
+
 // MARK: - RadioStationCard
 
 struct RadioStationCard: View {
     let station: RadioStation
     let onTap: () -> Void
 
+    @Environment(\.deckStyle) private var deck
+
     var body: some View {
+        if deck {
+            DeckShelfCard(artworkURL: station.faviconURL, symbol: "radio", title: station.name,
+                          detail: station.displayCountry, onTap: onTap)
+                .accessibilityLabel("\(station.name), \(station.country)")
+        } else {
+            legacyBody
+        }
+    }
+
+    private var legacyBody: some View {
         Button(action: onTap) {
             VStack(spacing: 8) {
                 CachedAsyncImage(url: station.faviconURL) { image in
@@ -790,7 +1140,19 @@ struct PodcastCard: View {
     let show: PodcastShow
     let onTap: () -> Void
 
+    @Environment(\.deckStyle) private var deck
+
     var body: some View {
+        if deck {
+            DeckShelfCard(artworkURL: show.artworkURL, symbol: "mic.fill", title: show.collectionName,
+                          detail: show.artistName, onTap: onTap)
+                .accessibilityLabel("\(show.collectionName) by \(show.artistName)")
+        } else {
+            legacyBody
+        }
+    }
+
+    private var legacyBody: some View {
         Button(action: onTap) {
             VStack(spacing: 8) {
                 CachedAsyncImage(url: show.artworkURL) { image in
@@ -831,7 +1193,26 @@ struct SongRadioRow: View {
     let track: Track
     let onTap: () -> Void
 
+    @Environment(\.deckStyle) private var deck
+
     var body: some View {
+        if deck {
+            Button(action: onTap) {
+                DeckTrackRow(
+                    title: track.title,
+                    subtitle: track.displayArtist,
+                    artworkURL: track.artworkURL,
+                    smallPrint: DeckFormat.runtime(track.durationSeconds)
+                )
+            }
+            .buttonStyle(.plain)
+            .deckRowRule()
+        } else {
+            legacyBody
+        }
+    }
+
+    private var legacyBody: some View {
         TrackRow(
             title: track.title,
             subtitle: track.displayArtist,
@@ -861,7 +1242,21 @@ struct RadioStationRow: View {
         return parts.joined(separator: " · ")
     }
 
+    @Environment(\.deckStyle) private var deck
+
     var body: some View {
+        if deck {
+            Button(action: onTap) {
+                DeckTrackRow(title: station.name, subtitle: subtitleText, artworkURL: station.faviconURL)
+            }
+            .buttonStyle(.plain)
+            .deckRowRule()
+        } else {
+            legacyBody
+        }
+    }
+
+    private var legacyBody: some View {
         TrackRow(
             title: station.name,
             subtitle: subtitleText,
@@ -880,7 +1275,26 @@ struct PodcastRow: View {
     let show: PodcastShow
     let onTap: () -> Void
 
+    @Environment(\.deckStyle) private var deck
+
     var body: some View {
+        if deck {
+            Button(action: onTap) {
+                DeckTrackRow(title: show.collectionName, subtitle: show.artistName, artworkURL: show.artworkURL) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(TurntableTokens.aluminium.opacity(0.7))
+                }
+            }
+            .buttonStyle(.plain)
+            .deckRowRule()
+            .accessibilityLabel("\(show.collectionName) by \(show.artistName), \(show.trackCount) episodes")
+        } else {
+            legacyBody
+        }
+    }
+
+    private var legacyBody: some View {
         Button(action: onTap) {
             HStack(spacing: 12) {
                 CachedAsyncImage(url: show.artworkURL) { image in
@@ -929,7 +1343,19 @@ struct AudiobookCard: View {
     let book: Audiobook
     let onTap: () -> Void
 
+    @Environment(\.deckStyle) private var deck
+
     var body: some View {
+        if deck {
+            DeckShelfCard(artworkURL: book.coverURL, symbol: "book.closed.fill", title: book.title,
+                          detail: book.displayAuthors, width: 140, height: 180, onTap: onTap)
+                .accessibilityLabel("\(book.title) by \(book.displayAuthors)")
+        } else {
+            legacyBody
+        }
+    }
+
+    private var legacyBody: some View {
         Button(action: onTap) {
             VStack(alignment: .leading, spacing: 8) {
                 CachedAsyncImage(url: book.coverURL) { image in
@@ -971,7 +1397,64 @@ struct LibraryBookCard: View {
     let libraryBook: LibraryBook
     let onTap: () -> Void
 
+    @Environment(\.deckStyle) private var deck
+
     var body: some View {
+        if deck { deckBody } else { legacyBody }
+    }
+
+    /// Deck: the cover with a progress channel along its foot. Brass
+    /// while reading; a lit lamp and "DONE" when finished.
+    private var deckBody: some View {
+        Button(action: onTap) {
+            VStack(alignment: .leading, spacing: 8) {
+                CachedAsyncImage(url: libraryBook.audiobook.coverURL) { image in
+                    image.resizable().aspectRatio(contentMode: .fill)
+                } placeholder: {
+                    ZStack {
+                        TurntableTokens.walnut
+                        Image(systemName: "book.closed.fill")
+                            .font(.system(size: 22, weight: .light))
+                            .foregroundColor(TurntableTokens.aluminium.opacity(0.6))
+                    }
+                }
+                .frame(width: 120, height: 160)
+                .deckCover(cornerRadius: 3)
+                .overlay(alignment: .bottom) {
+                    GeometryReader { geo in
+                        Capsule()
+                            .fill(TurntableTokens.brass)
+                            .frame(width: max(3, geo.size.width * libraryBook.progress), height: 3)
+                            .frame(maxHeight: .infinity, alignment: .bottom)
+                    }
+                    .allowsHitTesting(false)
+                }
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(libraryBook.audiobook.title)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(TurntableTokens.cream)
+                        .lineLimit(2)
+                    HStack(spacing: 5) {
+                        if libraryBook.isComplete {
+                            DeckLamp(color: DeckSignal.power, state: .lit, size: 4.5)
+                        }
+                        Text(libraryBook.isComplete ? "DONE" : libraryBook.progressText.uppercased())
+                            .font(DeckType.engraved)
+                            .foregroundColor(TurntableTokens.brass)
+                            .lineLimit(1)
+                    }
+                }
+                .frame(width: 120, alignment: .leading)
+            }
+        }
+        .buttonStyle(DeckPressStyle())
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(libraryBook.audiobook.title), \(libraryBook.progressText)")
+        .accessibilityHint(libraryBook.isComplete ? "Completed" : "Tap to continue reading")
+    }
+
+    private var legacyBody: some View {
         Button(action: onTap) {
             VStack(alignment: .leading, spacing: 8) {
                 // Cover art with progress overlay
@@ -1048,7 +1531,31 @@ struct AudiobookRow: View {
     let book: Audiobook
     let onTap: () -> Void
 
+    @Environment(\.deckStyle) private var deck
+
     var body: some View {
+        if deck {
+            Button(action: onTap) {
+                DeckTrackRow(
+                    title: book.title,
+                    subtitle: book.numSections > 0 ? "\(book.displayAuthors) · \(book.chapterCountText)" : book.displayAuthors,
+                    artworkURL: book.coverURL,
+                    smallPrint: book.durationText.isEmpty ? nil : book.durationText.uppercased()
+                ) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(TurntableTokens.aluminium.opacity(0.7))
+                }
+            }
+            .buttonStyle(.plain)
+            .deckRowRule()
+            .accessibilityLabel("\(book.title) by \(book.displayAuthors), \(book.chapterCountText)")
+        } else {
+            legacyBody
+        }
+    }
+
+    private var legacyBody: some View {
         Button(action: onTap) {
             HStack(spacing: 12) {
                 CachedAsyncImage(url: book.coverURL) { image in

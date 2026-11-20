@@ -19,8 +19,84 @@ struct PlaylistPreviewView: View {
     @State private var error: String?
     @State private var showCloneConfirmation = false
     @State private var clonedPlaylistId: UUID?
-    
+
+    // Deck design system (docs/design/deck-design-system.md §8). Drawn
+    // on the Deck when the turntable flag is on; the old drawing stays
+    // as `legacyContent` until the flag retires.
+    @ObservedObject private var featureFlags = FeatureFlags.shared
+    private var deck: Bool { featureFlags.turntableHome }
+
+    private var state: some View {
+        Group {
+            if isLoading {
+                PlaylistLoadingView()
+                    .transition(.opacity)
+            } else if let error = error {
+                PlaylistErrorView(message: error, onRetry: loadDetails)
+                    .transition(.opacity)
+            } else if let details = details {
+                PlaylistContentView(
+                    details: details,
+                    onPlayAll: { playAll(shuffle: false) },
+                    onShuffle: { playAll(shuffle: true) },
+                    onClone: { showCloneConfirmation = true }
+                )
+            } else {
+                PlaylistLoadingView()
+            }
+        }
+    }
+
+    /// Deck: a walnut board with the playlist's name and Done over
+    /// the same room as everywhere else.
+    private var deckContent: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                Text(playlist.title)
+                    .font(DeckType.title)
+                    .foregroundColor(TurntableTokens.cream)
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                DeckButton(title: "Done", kind: .card) { dismiss() }
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 18)
+            .padding(.bottom, 14)
+            .deckPlinth(cornerRadius: 0)
+
+            state
+        }
+        .background(DeckRoom())
+        .environment(\.deckStyle, true)
+    }
+
     var body: some View {
+        Group {
+            if deck { deckContent } else { legacyContent }
+        }
+        .preferredColorScheme(deck ? .dark : nil)
+        .onAppear {
+            loadDetails()
+        }
+        .alert("Clone Playlist?", isPresented: $showCloneConfirmation) {
+            Button("Cancel", role: .cancel) {}
+            Button("Clone") {
+                clonePlaylist()
+            }
+        } message: {
+            Text("This will create a copy of '\(playlist.title)' with \(playlist.videoCount) tracks in your playlists.")
+        }
+        .sheet(item: Binding<IdentifiablePlaylist?>(
+            get: { clonedPlaylistId.map { IdentifiablePlaylist(id: $0) } },
+            set: { _ in clonedPlaylistId = nil }
+        )) { identifiable in
+            if let playlist = playlistManager.playlist(withId: identifiable.id) {
+                PlaylistDetailView(playlist: playlist)
+            }
+        }
+    }
+
+    private var legacyContent: some View {
         NavigationStack {
             Group {
                 if isLoading {
@@ -50,27 +126,8 @@ struct PlaylistPreviewView: View {
                 }
             }
         }
-        .onAppear {
-            loadDetails()
-        }
-        .alert("Clone Playlist?", isPresented: $showCloneConfirmation) {
-            Button("Cancel", role: .cancel) {}
-            Button("Clone") {
-                clonePlaylist()
-            }
-        } message: {
-            Text("This will create a copy of '\(playlist.title)' with \(playlist.videoCount) tracks in your playlists.")
-        }
-        .sheet(item: Binding<IdentifiablePlaylist?>(
-            get: { clonedPlaylistId.map { IdentifiablePlaylist(id: $0) } },
-            set: { _ in clonedPlaylistId = nil }
-        )) { identifiable in
-            if let playlist = playlistManager.playlist(withId: identifiable.id) {
-                PlaylistDetailView(playlist: playlist)
-            }
-        }
     }
-    
+
     private struct IdentifiablePlaylist: Identifiable {
         let id: UUID
     }
@@ -195,8 +252,73 @@ struct PlaylistContentView: View {
     @State private var selectedTrack: Track?
     @State private var showAddToPlaylist = false
     @State private var cancellables = Set<AnyCancellable>()
-    
+
+    @Environment(\.deckStyle) private var deck
+
     var body: some View {
+        if deck { deckBody } else { legacyBody }
+    }
+
+    /// Deck: the header, Play (the one card) and Shuffle, Clone as a
+    /// key, then a "Tracks" ledge with the rows hanging under it.
+    private var deckBody: some View {
+        List {
+            VStack(spacing: 18) {
+                PlaylistHeaderView(details: details)
+
+                HStack(spacing: 12) {
+                    DeckButton(title: "Play all", symbol: "play.fill", kind: .card, fillsWidth: true, action: onPlayAll)
+                    DeckButton(title: "Shuffle", symbol: "shuffle", fillsWidth: true, action: onShuffle)
+                }
+                DeckButton(title: "Clone to my playlists", symbol: "plus", fillsWidth: true, action: onClone)
+
+                DeckLedge(title: "Tracks", count: details.tracks.count)
+                    .padding(.top, 10)
+                    .padding(.bottom, 4)
+            }
+            .padding(.horizontal, 16)
+            .listRowInsets(EdgeInsets())
+            .listRowSeparator(.hidden)
+            .listRowBackground(Color.clear)
+
+            ForEach(Array(details.tracks.enumerated()), id: \.element.id) { index, track in
+                TrackListRow(
+                    index: index + 1,
+                    track: track,
+                    onPlay: { playTrack(track) },
+                    onAddToQueue: { addToQueue(track) },
+                    onPlayNext: { playNext(track) },
+                    onAddToPlaylist: {
+                        selectedTrack = track
+                        showAddToPlaylist = true
+                    },
+                    onDownload: { downloadTrack(track) }
+                )
+                .padding(.horizontal, 16)
+                .listRowInsets(EdgeInsets())
+                .listRowSeparator(.hidden)
+                .listRowBackground(Color.clear)
+            }
+
+            Color.clear
+                .frame(height: 40)
+                .listRowInsets(EdgeInsets())
+                .listRowSeparator(.hidden)
+                .listRowBackground(Color.clear)
+        }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .task(id: details.tracks.map(\.videoId)) {
+            StreamURLCache.shared.prefetchBatch(videoIds: details.tracks.prefix(5).map(\.videoId))
+        }
+        .sheet(isPresented: $showAddToPlaylist) {
+            if let track = selectedTrack {
+                AddToPlaylistSheet(track: track)
+            }
+        }
+    }
+
+    private var legacyBody: some View {
         List {
             // Header
             Section {
@@ -319,8 +441,47 @@ struct PlaylistContentView: View {
 
 struct PlaylistHeaderView: View {
     let details: YouTubePlaylistDetails
-    
+
+    @Environment(\.deckStyle) private var deck
+
     var body: some View {
+        if deck { deckBody } else { legacyBody }
+    }
+
+    /// Deck: the sleeve, the name in print, the author and count in
+    /// small print.
+    private var deckBody: some View {
+        VStack(spacing: 14) {
+            CachedAsyncImage(url: details.thumbnails.last?.url) { image in
+                image.resizable().aspectRatio(contentMode: .fill)
+            } placeholder: {
+                TurntableTokens.walnut
+            }
+            .frame(width: 180, height: 180)
+            .deckCover(cornerRadius: 3)
+
+            VStack(spacing: 6) {
+                Text(details.title)
+                    .font(DeckType.screenTitle)
+                    .foregroundColor(TurntableTokens.cream)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                Text("by \(details.author)")
+                    .font(DeckType.subtitle)
+                    .foregroundColor(TurntableTokens.cream.opacity(0.55))
+                Text(DeckFormat.tracks(details.videoCount).uppercased())
+                    .font(DeckType.smallPrint)
+                    .foregroundColor(TurntableTokens.brass)
+                    .padding(.top, 2)
+            }
+        }
+        .padding(.top, 20)
+        .padding(.bottom, 6)
+        .frame(maxWidth: .infinity)
+        .accessibilityElement(children: .combine)
+    }
+
+    private var legacyBody: some View {
         VStack(spacing: 16) {
             // Artwork
             ArtworkImage(url: details.thumbnails.last?.url, size: 180)
@@ -397,8 +558,89 @@ struct TrackListRow: View {
     private var isDownloaded: Bool {
         downloadTask?.status == .completed
     }
-    
+
+    @Environment(\.deckStyle) private var deck
+
     var body: some View {
+        face
+            .contentShape(Rectangle())
+            .onTapGesture {
+                onPlay()
+            }
+            .contextMenu {
+                Button(action: onPlay) {
+                    Label(isPlaying ? "Now Playing" : "Play", systemImage: "play.fill")
+                }
+
+                Button(action: onPlayNext) {
+                    Label("Play Next", systemImage: "text.badge.plus")
+                }
+
+                Button(action: onAddToQueue) {
+                    Label("Add to Queue", systemImage: "plus")
+                }
+
+                Button(action: onAddToPlaylist) {
+                    Label("Add to Playlist", systemImage: "music.note.list")
+                }
+
+                Divider()
+
+                Button(action: onDownload) {
+                    if let task = downloadTask, task.status.isActive {
+                        Label("Cancel Download", systemImage: "xmark")
+                    } else {
+                        Label(isDownloaded ? "Downloaded" : "Download",
+                              systemImage: isDownloaded ? "checkmark" : "arrow.down")
+                    }
+                }
+                .disabled(isDownloaded)
+            }
+            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                Button(action: onDownload) {
+                    Label("Download", systemImage: "arrow.down")
+                }
+                .tint(deck ? TurntableTokens.aluminium : .cyberCyan)
+
+                Button(action: onAddToQueue) {
+                    Label("Queue", systemImage: "plus")
+                }
+                .tint(deck ? TurntableTokens.brass : .cyberMagenta)
+            }
+    }
+
+    @ViewBuilder
+    private var face: some View {
+        if deck { deckFace } else { legacyFace }
+    }
+
+    /// Deck: the shared track row. Amber pulsing while it downloads,
+    /// a small arrow once it is on the device.
+    private var deckFace: some View {
+        DeckTrackRow(
+            title: track.title,
+            subtitle: track.displayArtist,
+            artworkURL: track.artworkURL,
+            smallPrint: DeckFormat.runtime(track.durationSeconds),
+            isPlaying: isPlaying
+        ) {
+            if downloadTask?.status.isActive ?? false {
+                DeckLamp(color: DeckSignal.power, state: .working)
+                    .accessibilityLabel("Downloading")
+            } else if isDownloaded {
+                Image(systemName: "arrow.down")
+                    .font(.system(size: 9, weight: .heavy))
+                    .foregroundColor(TurntableTokens.aluminium.opacity(0.7))
+                    .accessibilityLabel("Downloaded")
+            }
+        }
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(TurntableTokens.cream.opacity(0.08)).frame(height: 1)
+        }
+        .accessibilityAddTraits(.isButton)
+    }
+
+    private var legacyFace: some View {
         HStack(spacing: 12) {
             // Index or Artwork
             ZStack(alignment: .center) {
@@ -470,57 +712,32 @@ struct TrackListRow: View {
         }
         .padding(.vertical, 6)
         .background(isPlaying ? Color.accentColor.opacity(0.05) : Color.clear)
-        .contentShape(Rectangle())
-        .onTapGesture {
-            onPlay()
-        }
-        .contextMenu {
-            Button(action: onPlay) {
-                Label(isPlaying ? "Now Playing" : "Play", systemImage: "play.fill")
-            }
-            
-            Button(action: onPlayNext) {
-                Label("Play Next", systemImage: "text.badge.plus")
-            }
-            
-            Button(action: onAddToQueue) {
-                Label("Add to Queue", systemImage: "plus")
-            }
-            
-            Button(action: onAddToPlaylist) {
-                Label("Add to Playlist", systemImage: "music.note.list")
-            }
-            
-            Divider()
-            
-            Button(action: onDownload) {
-                if let task = downloadTask, task.status.isActive {
-                    Label("Cancel Download", systemImage: "xmark")
-                } else {
-                    Label(isDownloaded ? "Downloaded" : "Download",
-                          systemImage: isDownloaded ? "checkmark" : "arrow.down")
-                }
-            }
-            .disabled(isDownloaded)
-        }
-        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-            Button(action: onDownload) {
-                Label("Download", systemImage: "arrow.down")
-            }
-            .tint(.cyberCyan)
-
-            Button(action: onAddToQueue) {
-                Label("Queue", systemImage: "plus")
-            }
-            .tint(.cyberMagenta)
-        }
     }
 }
 
 // MARK: - Loading View
 
 struct PlaylistLoadingView: View {
+    @Environment(\.deckStyle) private var deck
+
     var body: some View {
+        if deck {
+            VStack(spacing: 14) {
+                DeckLamp(color: DeckSignal.power, state: .working, size: 8)
+                Text("Loading playlist")
+                    .font(DeckType.engraved)
+                    .tracking(DeckType.engravedTracking)
+                    .foregroundColor(TurntableTokens.cream.opacity(0.55))
+                    .textCase(.uppercase)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .accessibilityElement(children: .combine)
+        } else {
+            legacyBody
+        }
+    }
+
+    private var legacyBody: some View {
         VStack(spacing: 16) {
             ProgressView()
                 .scaleEffect(1.5)
@@ -535,8 +752,27 @@ struct PlaylistLoadingView: View {
 struct PlaylistErrorView: View {
     let message: String
     let onRetry: () -> Void
-    
+
+    @Environment(\.deckStyle) private var deck
+
     var body: some View {
+        if deck {
+            VStack(spacing: 18) {
+                DeckLamp(color: DeckSignal.attention, state: .lit, size: 8)
+                Text(message)
+                    .font(DeckType.subtitle)
+                    .foregroundColor(TurntableTokens.cream.opacity(0.7))
+                    .multilineTextAlignment(.center)
+                DeckButton(title: "Try again", symbol: "arrow.clockwise", kind: .card, action: onRetry)
+            }
+            .padding(40)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            legacyBody
+        }
+    }
+
+    private var legacyBody: some View {
         VStack(spacing: 16) {
             Image(systemName: "exclamationmark.triangle")
                 .font(.system(size: 50))

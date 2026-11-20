@@ -4,8 +4,124 @@ struct PodcastDetailView: View {
     let show: PodcastShow
     @ObservedObject var viewModel: RadioViewModel
     @Environment(\.dismiss) private var dismiss
-    
+
+    // Deck design system (docs/design/deck-design-system.md §8 step 6).
+    @ObservedObject private var featureFlags = FeatureFlags.shared
+    private var deck: Bool { featureFlags.turntableHome }
+
     var body: some View {
+        Group {
+            if deck { deckBody } else { legacyBody }
+        }
+        .environment(\.deckStyle, deck)
+        .task {
+            viewModel.loadEpisodes(for: show)
+        }
+    }
+
+    /// Deck: a walnut head over the room, the sleeve and name, then an
+    /// "Episodes" ledge with the rows under it.
+    private var deckBody: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                Text("Podcast")
+                    .font(DeckType.screenTitle)
+                    .foregroundColor(TurntableTokens.cream)
+                Spacer(minLength: 8)
+                DeckButton(title: "Done", kind: .card) { dismiss() }
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 18)
+            .padding(.bottom, 14)
+            .deckPlinth(cornerRadius: 0)
+
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 0) {
+                    deckHeader
+                        .padding(.vertical, 22)
+                    deckEpisodes
+                }
+                .padding(.bottom, 90)
+            }
+        }
+        .background(DeckRoom())
+        .preferredColorScheme(.dark)
+    }
+
+    private var deckHeader: some View {
+        VStack(spacing: 14) {
+            CachedAsyncImage(url: show.artworkURL) { image in
+                image.resizable().aspectRatio(contentMode: .fill)
+            } placeholder: {
+                ZStack {
+                    TurntableTokens.walnut
+                    Image(systemName: "mic.fill")
+                        .font(.system(size: 40, weight: .light))
+                        .foregroundColor(TurntableTokens.aluminium.opacity(0.6))
+                }
+            }
+            .frame(width: 180, height: 180)
+            .deckCover(cornerRadius: 3)
+
+            VStack(spacing: 6) {
+                Text(show.collectionName)
+                    .font(DeckType.screenTitle)
+                    .foregroundColor(TurntableTokens.cream)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                Text(show.artistName)
+                    .font(DeckType.subtitle)
+                    .foregroundColor(TurntableTokens.cream.opacity(0.55))
+                    .lineLimit(1)
+                Text(([show.displayGenres, "\(show.trackCount) episodes"].filter { !$0.isEmpty }).joined(separator: " · ").uppercased())
+                    .font(DeckType.smallPrint)
+                    .foregroundColor(TurntableTokens.brass)
+                    .multilineTextAlignment(.center)
+                    .padding(.top, 2)
+            }
+        }
+        .padding(.horizontal, 20)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(show.collectionName) by \(show.artistName), \(show.trackCount) episodes")
+    }
+
+    @ViewBuilder
+    private var deckEpisodes: some View {
+        if viewModel.isLoadingEpisodes {
+            DeckLamp(color: DeckSignal.power, state: .working, size: 8)
+                .padding(.vertical, 40)
+                .accessibilityLabel("Loading episodes")
+        } else if viewModel.currentEpisodes.isEmpty && viewModel.errorMessage != nil {
+            VStack(spacing: 14) {
+                Text("Failed to load episodes")
+                    .font(DeckType.title)
+                    .foregroundColor(TurntableTokens.cream)
+                DeckButton(title: "Retry", symbol: "arrow.clockwise", kind: .card) {
+                    viewModel.loadEpisodes(for: show)
+                }
+            }
+            .padding(.vertical, 40)
+        } else if viewModel.currentEpisodes.isEmpty {
+            Text("No episodes available")
+                .font(DeckType.title)
+                .foregroundColor(TurntableTokens.cream.opacity(0.7))
+                .padding(.vertical, 40)
+        } else {
+            LazyVStack(spacing: 0) {
+                DeckLedge(title: "Episodes", count: viewModel.currentEpisodes.count)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 6)
+                ForEach(viewModel.currentEpisodes) { episode in
+                    PodcastEpisodeRow(episode: episode) {
+                        viewModel.playEpisode(episode)
+                    }
+                    .padding(.horizontal, 16)
+                }
+            }
+        }
+    }
+
+    private var legacyBody: some View {
         ZStack {
             Theme.cyberBackground.ignoresSafeArea()
             
@@ -43,9 +159,6 @@ struct PodcastDetailView: View {
                 }
                 .padding(.bottom, 90)
             }
-        }
-        .task {
-            viewModel.loadEpisodes(for: show)
         }
     }
     
@@ -190,7 +303,8 @@ struct PodcastEpisodeRow: View {
     let episode: PodcastEpisode
     let onPlay: () -> Void
     @State private var isExpanded = false
-    
+    @Environment(\.deckStyle) private var deck
+
     private var savedPosition: Double {
         UserDefaults.standard.double(forKey: "podcast_position_\(episode.guid)")
     }
@@ -205,6 +319,54 @@ struct PodcastEpisodeRow: View {
     }
     
     var body: some View {
+        if deck { deckBody } else { legacyBody }
+    }
+
+    /// Deck: the shared row, a metal play button, and a brass channel
+    /// under it showing how far through the episode was left.
+    private var deckBody: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            DeckTrackRow(
+                title: episode.title,
+                subtitle: [episode.formattedDate, episode.durationText].filter { !$0.isEmpty }.joined(separator: " · "),
+                artworkURL: episode.artworkURL
+            ) {
+                DeckMetalButton(symbol: "play.fill", size: 28) {
+                    onPlay()
+                }
+                .accessibilityLabel("Play \(episode.title)")
+            }
+
+            if hasProgress {
+                GeometryReader { geo in
+                    Capsule()
+                        .fill(TurntableTokens.brass)
+                        .frame(width: max(4, geo.size.width * progressFraction))
+                }
+                .frame(height: 4)
+                .deckWell(Capsule())
+                .accessibilityHidden(true)
+            }
+
+            if !episode.description.isEmpty {
+                Button(action: { withAnimation(DeckMotion.move) { isExpanded.toggle() } }) {
+                    Text(episode.description)
+                        .font(DeckType.subtitle)
+                        .foregroundColor(TurntableTokens.cream.opacity(0.55))
+                        .lineLimit(isExpanded ? nil : 2)
+                        .multilineTextAlignment(.leading)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.bottom, 10)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(TurntableTokens.cream.opacity(0.08)).frame(height: 1)
+        }
+        .accessibilityElement(children: .contain)
+    }
+
+    private var legacyBody: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .top, spacing: 12) {
                 CachedAsyncImage(url: episode.artworkURL) { image in

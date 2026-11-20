@@ -187,14 +187,34 @@ each one proves a part the next ones reuse:
    a ledge per queue state, a progress well that fills amber. The
    Share item in the playlist menu did nothing and was left out.
    `RecentlyPlayedView` is unreferenced dead code; delete it at step
-   10. Not yet moved: the rename sheet is a flat board, not a walnut
-   plinth, and History's per-row options still use a system
+   10. Not yet moved: the rename sheet is a flat board (the sheets in
+   step 8 have a walnut head), and History's per-row options still use a system
    confirmation dialog.
-6. **Radio** (stations, podcasts, audiobooks). Adds a tuner dial for
-   genres.
-7. **Settings.** Rows with levers for toggles; needs the lever
-   generalised out of `CueLeverView`.
-8. **Sheets and one-offs:** create playlist, Smart Library review,
+6. **Radio** (stations, podcasts, audiobooks). **Done 2026-11-21,
+   without the tuner dial.** `RadioView` and its podcast and audiobook
+   detail sheets: the four sections and the genres are selectors
+   (chips in a panel, lamp on the chosen one), search is a well, shelves
+   are sleeves under ledges, rows are `DeckTrackRow`, progress is a
+   brass channel (brass because it is a position, not a state). The
+   dial is not built: genres are a second chip selector for now.
+7. **Settings.** **Done 2026-11-21.** Toggles are levers:
+   `DeckLever` (a generic version of the cue lever, on its side, with a
+   lamp) and `DeckLeverToggleStyle`, which `SettingsView` sets on its
+   List so every toggle under it, including the Labs ones, becomes a
+   lever. Section headers are ledges; row text is cream, icons are
+   aluminium or brass, destructive rows have no colour of their own.
+   The colours go through `SettingsInk`, so the old Settings is
+   unchanged with the flag off. Not yet moved: `BackupStatusSection`,
+   the backend sheet, the audio and equaliser sheets it opens, the
+   profile sheet, and the Smart Library "Candidates per cycle" and
+   other pickers, which are still system menus. Not seen running:
+   Settings sits behind sign-in, so it was checked only as parts.
+8. **Sheets and one-offs.** *Playlist sheets done 2026-11-21:* add to
+   playlist (a lamp lit on each playlist the song is already in),
+   create playlist (two wells with engraved legends and the one card),
+   and the YouTube playlist preview (sleeve header, Play card, rows).
+   Each is a walnut board for a head over the room, `deckPlinth(0)`
+   as in the queue sheet. Still to do: Smart Library review,
    cleanup, sleep timer, equaliser, Time Vault, Anti-Algorithm stats.
 9. **Outside the app:** widgets, Live Activity, share cards. These
    compile `SharedCyberColors` and cannot use textures; they get the

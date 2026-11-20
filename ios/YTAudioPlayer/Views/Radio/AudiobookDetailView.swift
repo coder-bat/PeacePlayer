@@ -7,7 +7,171 @@ struct AudiobookDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var isDescriptionExpanded = false
 
+    // Deck design system (docs/design/deck-design-system.md §8 step 6).
+    @ObservedObject private var featureFlags = FeatureFlags.shared
+    private var deck: Bool { featureFlags.turntableHome }
+
     var body: some View {
+        Group {
+            if deck { deckBody } else { legacyBody }
+        }
+        .environment(\.deckStyle, deck)
+        .preferredColorScheme(.dark)
+        .task {
+            viewModel.loadChapters(for: book)
+        }
+    }
+
+    /// Deck: a walnut head, the cover and name, the library key and
+    /// (once started) the one cream card to continue, then a
+    /// "Chapters" ledge with the rows under it.
+    private var deckBody: some View {
+        let inLibrary = library.isInLibrary(book)
+        return VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                Text("Audiobook")
+                    .font(DeckType.screenTitle)
+                    .foregroundColor(TurntableTokens.cream)
+                Spacer(minLength: 8)
+                DeckButton(title: "Done", kind: .card) { dismiss() }
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 18)
+            .padding(.bottom, 14)
+            .deckPlinth(cornerRadius: 0)
+
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 0) {
+                    VStack(spacing: 14) {
+                        deckCover
+                        VStack(spacing: 6) {
+                            Text(book.title)
+                                .font(DeckType.screenTitle)
+                                .foregroundColor(TurntableTokens.cream)
+                                .multilineTextAlignment(.center)
+                                .lineLimit(2)
+                            Text(book.displayAuthors)
+                                .font(DeckType.subtitle)
+                                .foregroundColor(TurntableTokens.cream.opacity(0.55))
+                                .lineLimit(1)
+                            Text("\(book.durationText) · \(book.chapterCountText)".uppercased())
+                                .font(DeckType.smallPrint)
+                                .foregroundColor(TurntableTokens.brass)
+                                .padding(.top, 2)
+                            if !book.description.isEmpty {
+                                Button(action: { withAnimation(DeckMotion.move) { isDescriptionExpanded.toggle() } }) {
+                                    Text(book.description)
+                                        .font(DeckType.subtitle)
+                                        .foregroundColor(TurntableTokens.cream.opacity(0.55))
+                                        .lineLimit(isDescriptionExpanded ? nil : 3)
+                                        .multilineTextAlignment(.leading)
+                                }
+                                .buttonStyle(.plain)
+                                .padding(.top, 6)
+                                .accessibilityLabel("Description")
+                                .accessibilityHint(isDescriptionExpanded ? "Tap to collapse" : "Tap to expand")
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 22)
+
+                    VStack(spacing: 12) {
+                        deckContinue
+                        DeckButton(
+                            title: inLibrary ? "Remove from library" : "Add to library",
+                            symbol: inLibrary ? "minus" : "plus",
+                            fillsWidth: true
+                        ) {
+                            HapticManager.medium()
+                            if inLibrary { library.removeBook(book) } else { library.addBook(book) }
+                        }
+                        .accessibilityHint(inLibrary ? "Removes this audiobook from your library" : "Adds this audiobook to your library")
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 22)
+
+                    deckChapters
+                }
+                .padding(.bottom, 90)
+            }
+        }
+        .background(DeckRoom())
+    }
+
+    private var deckCover: some View {
+        let url: URL? = book.coverURL
+            ?? (viewModel.currentChaptersCoverUrl.isEmpty ? nil : URL(string: viewModel.currentChaptersCoverUrl))
+        return CachedAsyncImage(url: url) { image in
+            image.resizable().aspectRatio(contentMode: .fill)
+        } placeholder: {
+            ZStack {
+                TurntableTokens.walnut
+                Image(systemName: "book.closed")
+                    .font(.system(size: 40, weight: .light))
+                    .foregroundColor(TurntableTokens.aluminium.opacity(0.6))
+            }
+        }
+        .frame(width: 180, height: 180)
+        .deckCover(cornerRadius: 3)
+    }
+
+    @ViewBuilder
+    private var deckContinue: some View {
+        if let libraryBook = library.getLibraryBook(for: book),
+           libraryBook.currentChapterIndex > 0 || libraryBook.chaptersCompleted > 0 {
+            let chapterIndex = libraryBook.currentChapterIndex
+            DeckButton(title: "Continue · Chapter \(chapterIndex + 1)", symbol: "book.fill", kind: .card, fillsWidth: true) {
+                HapticManager.medium()
+                if chapterIndex < viewModel.currentChapters.count {
+                    viewModel.playChapter(viewModel.currentChapters[chapterIndex], from: book)
+                }
+            }
+            .disabled(viewModel.isLoadingChapters)
+            .opacity(viewModel.isLoadingChapters ? 0.6 : 1)
+            .accessibilityLabel("Continue reading at chapter \(chapterIndex + 1)")
+            .accessibilityHint("Resumes playback from your saved position")
+        }
+    }
+
+    @ViewBuilder
+    private var deckChapters: some View {
+        if viewModel.isLoadingChapters {
+            DeckLamp(color: DeckSignal.power, state: .working, size: 8)
+                .padding(.vertical, 40)
+                .accessibilityLabel("Loading chapters")
+        } else if viewModel.currentChapters.isEmpty && viewModel.errorMessage != nil {
+            VStack(spacing: 14) {
+                Text("Failed to load chapters")
+                    .font(DeckType.title)
+                    .foregroundColor(TurntableTokens.cream)
+                DeckButton(title: "Retry", symbol: "arrow.clockwise", kind: .card) {
+                    viewModel.loadChapters(for: book)
+                }
+                .accessibilityLabel("Retry loading chapters")
+            }
+            .padding(.vertical, 40)
+        } else if viewModel.currentChapters.isEmpty {
+            Text("No chapters available")
+                .font(DeckType.title)
+                .foregroundColor(TurntableTokens.cream.opacity(0.7))
+                .padding(.vertical, 40)
+        } else {
+            LazyVStack(spacing: 0) {
+                DeckLedge(title: "Chapters", count: viewModel.currentChapters.count)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 6)
+                ForEach(viewModel.currentChapters) { chapter in
+                    AudiobookChapterRow(chapter: chapter, bookId: book.id) {
+                        viewModel.playChapter(chapter, from: book)
+                    }
+                    .padding(.horizontal, 16)
+                }
+            }
+        }
+    }
+
+    private var legacyBody: some View {
         ZStack {
             Theme.cyberBackground.ignoresSafeArea()
 
@@ -51,10 +215,6 @@ struct AudiobookDetailView: View {
                 }
                 .padding(.bottom, 90)
             }
-        }
-        .preferredColorScheme(.dark)
-        .task {
-            viewModel.loadChapters(for: book)
         }
     }
 
@@ -307,6 +467,8 @@ struct AudiobookChapterRow: View {
     let bookId: String
     let onPlay: () -> Void
 
+    @Environment(\.deckStyle) private var deck
+
     private var savedPosition: Double {
         UserDefaults.standard.double(forKey: "audiobook_position_\(chapter.guid)")
     }
@@ -321,6 +483,57 @@ struct AudiobookChapterRow: View {
     }
 
     var body: some View {
+        if deck { deckBody } else { legacyBody }
+    }
+
+    /// Deck: the chapter number engraved in brass, its name in print,
+    /// a metal play button, and a brass channel for progress.
+    private var deckBody: some View {
+        HStack(alignment: .center, spacing: 12) {
+            Text(String(format: "%02d", chapter.chapterNumber))
+                .font(DeckType.smallPrint)
+                .foregroundColor(TurntableTokens.brass)
+                .frame(width: 30)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(chapter.displayTitle)
+                    .font(DeckType.title)
+                    .foregroundColor(TurntableTokens.cream)
+                    .lineLimit(2)
+                Text(chapter.durationText)
+                    .font(DeckType.smallPrint)
+                    .foregroundColor(TurntableTokens.cream.opacity(0.55))
+                if hasProgress {
+                    GeometryReader { geo in
+                        Capsule()
+                            .fill(TurntableTokens.brass)
+                            .frame(width: max(4, geo.size.width * progressFraction))
+                    }
+                    .frame(height: 4)
+                    .deckWell(Capsule())
+                    .padding(.top, 2)
+                    .accessibilityHidden(true)
+                }
+            }
+
+            Spacer(minLength: 8)
+
+            DeckMetalButton(symbol: "play.fill", size: 28) {
+                HapticManager.light()
+                onPlay()
+            }
+            .accessibilityLabel("Play chapter \(chapter.chapterNumber)")
+            .accessibilityHint("Plays \(chapter.displayTitle)")
+        }
+        .padding(.vertical, 8)
+        .frame(minHeight: 58)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(TurntableTokens.cream.opacity(0.08)).frame(height: 1)
+        }
+        .accessibilityElement(children: .contain)
+    }
+
+    private var legacyBody: some View {
         HStack(alignment: .center, spacing: 12) {
             Text("\(chapter.chapterNumber)")
                 .font(.system(size: 13, weight: .bold, design: .monospaced))

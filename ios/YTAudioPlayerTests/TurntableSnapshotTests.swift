@@ -451,6 +451,132 @@ final class TurntableSnapshotTests: XCTestCase {
         XCTAssertGreaterThan(data.count, 10_000)
     }
 
+    /// The playlist sheets' parts: picker rows, preview rows, states.
+    @MainActor
+    func testRenderPlaylistSheetsDeckStyle() throws {
+        let flag = FeatureFlags.shared.turntableHome
+        FeatureFlags.shared.turntableHome = true
+        defer { FeatureFlags.shared.turntableHome = flag }
+
+        let track = Self.makeTrack(id: "sh-1", title: "Feeling Good", artist: "Nina Simone", artIndex: 2)
+        let drives = Playlist(name: "Late night drives", trackIds: ["a", "b", "c"])
+        let focus = Playlist(name: "Focus", trackIds: ["a"])
+
+        let sheet = VStack(alignment: .leading, spacing: 0) {
+            DeckLedge(title: "All playlists", count: 2).padding(.bottom, 6)
+            PlaylistRow(playlist: drives, track: track, isAdded: true, onTap: {})
+            PlaylistRow(playlist: focus, track: track, isAdded: false, onTap: {})
+            DeckLedge(title: "Tracks", count: 2).padding(.top, 24).padding(.bottom, 6)
+            TrackListRow(index: 1, track: track, onPlay: {}, onAddToQueue: {}, onPlayNext: {}, onAddToPlaylist: {}, onDownload: {})
+            TrackListRow(index: 2, track: Self.makeTrack(id: "sh-2", title: "Maria También", artist: "Khruangbin", artIndex: 5),
+                         onPlay: {}, onAddToQueue: {}, onPlayNext: {}, onAddToPlaylist: {}, onDownload: {})
+            HStack(spacing: 30) {
+                PlaylistLoadingView().frame(height: 90)
+                PlaylistErrorView(message: "Failed to load playlist", onRetry: {}).frame(height: 160)
+            }
+            .padding(.top, 20)
+        }
+        .environment(\.deckStyle, true)
+        .padding(16)
+        .frame(width: 402, alignment: .leading)
+        .background(DeckRoom())
+        let data = try render(sheet, width: 402, height: 640, scale: 2)
+        try write(data, named: "playlist-sheets-deck.png")
+        XCTAssertGreaterThan(data.count, 10_000)
+    }
+
+    /// Radio's selectors, shelf cards, rows, and the detail rows.
+    @MainActor
+    func testRenderRadioDeckStyle() throws {
+        let flag = FeatureFlags.shared.turntableHome
+        FeatureFlags.shared.turntableHome = true
+        defer { FeatureFlags.shared.turntableHome = flag }
+
+        func art(_ index: Int) -> String { Self.makeArtworkFile(index: index)?.absoluteString ?? "" }
+        let station = RadioStation(stationuuid: "s1", name: "FIP Radio", urlResolved: "", favicon: art(2),
+                                   country: "France", tags: "eclectic", codec: "AAC", bitrate: 128, clickcount: 1, votes: 1)
+        let show = PodcastShow(collectionId: 1, collectionName: "Song Exploder", artistName: "Hrishikesh Hirway",
+                               artworkUrl600: art(5), feedUrl: "", genres: ["Music"], trackCount: 300, releaseDate: "")
+        let book = Audiobook(id: "b1", title: "Pride and Prejudice", description: "", authors: ["Jane Austen"],
+                             language: "English", totalTime: "11:52:00", totalTimeSecs: 42_720, numSections: 61,
+                             rssUrl: "", coverUrl: art(7), urlLibrivox: "")
+        let episode = PodcastEpisode(guid: "e1", title: "Khruangbin — Maria También",
+                                     description: "How a Thai-funk trio built a slow groove.",
+                                     audioUrl: "", durationSeconds: 1_860, pubDate: "", artworkUrl: art(9))
+        let chapter = AudiobookChapter(guid: "c1", title: "Chapter 1", chapterNumber: 1, audioUrl: "", durationSeconds: 640)
+
+        let sheet = VStack(alignment: .leading, spacing: 14) {
+            ScrollView(.horizontal) {
+                HStack(spacing: 2) {
+                    DeckChip(title: "Stations", isSelected: true) {}
+                    DeckChip(title: "Podcasts", isSelected: false) {}
+                    DeckChip(title: "Audiobooks", isSelected: false) {}
+                }.padding(5)
+            }
+            .deckPanel()
+            DeckLedge(title: "Top stations", count: 3)
+            HStack(alignment: .top, spacing: 14) {
+                RadioStationCard(station: station) {}
+                PodcastCard(show: show) {}
+                AudiobookCard(book: book) {}
+            }
+            RadioStationRow(station: station) {}
+            PodcastRow(show: show) {}
+            AudiobookRow(book: book) {}
+            DeckLedge(title: "Episodes", count: 1)
+            PodcastEpisodeRow(episode: episode) {}
+            AudiobookChapterRow(chapter: chapter, bookId: "b1") {}
+        }
+        .environment(\.deckStyle, true)
+        .padding(16)
+        .frame(width: 402, alignment: .leading)
+        .background(DeckRoom())
+        let data = try render(sheet, width: 402, height: 900, scale: 2)
+        try write(data, named: "radio-deck.png")
+        XCTAssertGreaterThan(data.count, 10_000)
+    }
+
+    /// Settings' lever, off and on, in the rows it lives in, with a
+    /// section ledge and the favourite-artist chips.
+    @MainActor
+    func testRenderSettingsLeversDeckStyle() throws {
+        func row(_ title: String, _ detail: String, _ icon: String, on: Bool) -> some View {
+            HStack(spacing: 12) {
+                Image(systemName: icon)
+                    .foregroundColor(TurntableTokens.aluminium.opacity(0.85))
+                    .frame(width: 28)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).foregroundColor(TurntableTokens.cream)
+                    Text(detail).font(.caption).foregroundColor(TurntableTokens.cream.opacity(0.55))
+                }
+                Spacer(minLength: 8)
+                DeckLever(isOn: on)
+            }
+            .frame(minHeight: 44)
+            .overlay(alignment: .bottom) {
+                Rectangle().fill(TurntableTokens.cream.opacity(0.08)).frame(height: 1)
+            }
+        }
+        let sheet = VStack(alignment: .leading, spacing: 10) {
+            DeckLedge(title: "Labs").padding(.bottom, 6)
+            row("On This Day", "Show tracks you played on this day", "calendar", on: false)
+            row("Daily Recap", "Remind you of your last track", "clock.arrow.circlepath", on: true)
+            row("Turntable Home", "Replace the home screen with a record deck", "record.circle", on: true)
+            DeckLedge(title: "Favorite artists", count: 3).padding(.top, 18).padding(.bottom, 6)
+            HStack(spacing: 8) {
+                FavoriteArtistChip(artist: "Khruangbin", onRemove: {})
+                FavoriteArtistChip(artist: "Nina Simone", onRemove: {})
+            }
+        }
+        .environment(\.deckStyle, true)
+        .padding(16)
+        .frame(width: 402, alignment: .leading)
+        .background(DeckRoom())
+        let data = try render(sheet, width: 402, height: 420, scale: 2)
+        try write(data, named: "settings-levers-deck.png")
+        XCTAssertGreaterThan(data.count, 10_000)
+    }
+
     /// The mini player's record at three points in a side, and loading.
     @MainActor
     func testRenderMiniRecord() throws {

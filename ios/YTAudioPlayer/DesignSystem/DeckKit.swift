@@ -826,3 +826,90 @@ extension DeckTrackRow where Accessory == EmptyView {
         )
     }
 }
+
+// MARK: - Lever
+
+/// A two-position lever in a slot: the Deck's switch. The knurled
+/// aluminium head sits at the left end for off and the right end for
+/// on, and the pilot lamp beside it is lit while it is on.
+///
+/// This is `CueLeverView`'s idea (a thing with two positions is a
+/// lever) turned on its side and made generic. It draws only; the
+/// toggle that owns it (`DeckLeverToggleStyle`) supplies the touch.
+struct DeckLever: View {
+    let isOn: Bool
+    var lamp: Color = DeckSignal.power
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// How far the head travels either side of the slot's centre.
+    private static let travel: CGFloat = 11
+
+    var body: some View {
+        HStack(spacing: 9) {
+            DeckLamp(color: lamp, state: isOn ? .lit : .idle, size: 5)
+
+            ZStack {
+                Capsule()
+                    .fill(.black.opacity(0.85))
+                    .frame(width: 44, height: 17)
+                    .overlay(Capsule().strokeBorder(.white.opacity(0.10), lineWidth: 0.6))
+
+                head
+                    .offset(x: isOn ? Self.travel : -Self.travel)
+            }
+            .frame(width: 48, height: 26)
+        }
+        .animation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.62), value: isOn)
+    }
+
+    /// The lever's head: a knurled aluminium barrel, ridges across it.
+    private var head: some View {
+        RoundedRectangle(cornerRadius: 3.5)
+            .fill(
+                LinearGradient(
+                    stops: [
+                        .init(color: Color(white: 0.42), location: 0),
+                        .init(color: Color(white: 0.98), location: 0.3),
+                        .init(color: Color(white: 0.72), location: 0.55),
+                        .init(color: Color(white: 0.30), location: 1)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            )
+            .colorMultiply(TurntableTokens.aluminium)
+            .frame(width: 17, height: 21)
+            .overlay(
+                VStack(spacing: 2) {
+                    ForEach(0..<4, id: \.self) { _ in
+                        Rectangle().fill(.black.opacity(0.22)).frame(width: 11, height: 0.8)
+                    }
+                }
+            )
+            .overlay(RoundedRectangle(cornerRadius: 3.5).strokeBorder(.black.opacity(0.5), lineWidth: 0.8))
+            .shadow(color: .black.opacity(0.65), radius: 3, x: 1.5, y: isOn ? 2 : 3)
+    }
+}
+
+/// A `Toggle` drawn as a lever: its label on the left, the lever at
+/// the far end. Use it with `.toggleStyle(DeckLeverToggleStyle())`;
+/// set on a `List` it reaches every toggle in it.
+struct DeckLeverToggleStyle: ToggleStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: 12) {
+            configuration.label
+            Spacer(minLength: 8)
+            DeckLever(isOn: configuration.isOn)
+        }
+        .frame(minHeight: 44)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            HapticManager.selectionChanged()
+            configuration.isOn.toggle()
+        }
+        .accessibilityRepresentation {
+            Toggle(isOn: configuration.$isOn) { configuration.label }
+        }
+    }
+}

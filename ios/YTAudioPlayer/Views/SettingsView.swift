@@ -28,6 +28,51 @@ struct SettingsView: View {
     @State private var isSigningOut = false
     @State private var cacheSize: String = "Calculating..."
 
+    // Deck design system (docs/design/deck-design-system.md §8 step 7).
+    // The colours of every row go through `k`: the old values with the
+    // flag off, cream / aluminium / brass with it on. Toggles become
+    // levers (`DeckLeverToggleStyle`); the section headers become
+    // ledges.
+    @ObservedObject private var featureFlags = FeatureFlags.shared
+    @Environment(\.dismiss) private var dismiss
+    private var deck: Bool { featureFlags.turntableHome }
+    private var k: SettingsInk { SettingsInk(deck: deck) }
+
+    /// A section's header: a ledge on the Deck, the old coloured
+    /// capitals otherwise.
+    @ViewBuilder
+    private func sectionHeader(_ title: String, _ color: Color) -> some View {
+        if deck {
+            DeckLedge(title: title)
+                .textCase(nil)
+                .padding(.vertical, 6)
+        } else {
+            Text(title)
+                .font(Typography.sectionHeader)
+                .foregroundColor(color)
+                .textCase(.uppercase)
+        }
+    }
+
+    /// Deck: a metal back button and the name in print. No bar.
+    private var deckHeader: some View {
+        HStack(spacing: 4) {
+            DeckMetalButton(symbol: "chevron.left", size: 30) {
+                HapticManager.light()
+                dismiss()
+            }
+            .accessibilityLabel("Back")
+            Text("Settings")
+                .font(DeckType.screenTitle)
+                .foregroundColor(TurntableTokens.cream)
+                .accessibilityAddTraits(.isHeader)
+            Spacer()
+        }
+        .padding(.horizontal, 12)
+        .padding(.top, 8)
+        .padding(.bottom, 4)
+    }
+
     // S18 / v1.6.1: dynamic version string read from the bundle.
     // Returns "1.6.0 (12)" — the marketing version plus the build
     // number in parens, which is the conventional App Store format
@@ -307,10 +352,18 @@ struct SettingsView: View {
         // reduced to 8pt because the nav bar already provides top
         // padding; the extra 24pt only made sense under a bare sheet.
         ZStack {
-            Theme.cyberBackground.ignoresSafeArea()
+            if deck {
+                DeckRoom()
+            } else {
+                Theme.cyberBackground.ignoresSafeArea()
+            }
 
             VStack(spacing: 0) {
-                Color.clear.frame(height: 8)
+                if deck {
+                    deckHeader
+                } else {
+                    Color.clear.frame(height: 8)
+                }
             List {
                 // MARK: - Account Section (S13)
                 // S13: Account actions belong at the top of Settings, not
@@ -328,36 +381,36 @@ struct SettingsView: View {
                         HStack(spacing: 16) {
                             ZStack {
                                 Circle()
-                                    .fill(Theme.cyberCyan.opacity(0.2))
+                                    .fill(k.accent.opacity(0.2))
                                     .frame(width: 44, height: 44)
 
                                 Image(systemName: "person.crop.circle.fill")
                                     .font(.system(size: 22))
-                                    .foregroundColor(Theme.cyberCyan)
+                                    .foregroundColor(k.accent)
                             }
 
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(auth.email ?? auth.userId ?? "Signed In")
                                     .font(.system(size: 17, weight: .semibold))
-                                    .foregroundColor(.white)
+                                    .foregroundColor(k.ink)
                                     .lineLimit(1)
                                     .truncationMode(.middle)
 
                                 Text("Apple ID")
                                     .font(.caption)
-                                    .foregroundColor(.green)
+                                    .foregroundColor(k.ok)
                             }
 
                             Spacer()
 
                             Image(systemName: "chevron.right")
                                 .font(.system(size: 13, weight: .semibold))
-                                .foregroundColor(Theme.cyberDim)
+                                .foregroundColor(k.dim)
                         }
                     }
                     .buttonStyle(.plain)
                     .padding(.vertical, 4)
-                    .listRowBackground(Theme.cyberSurface)
+                    .listRowBackground(k.rowBG)
                     .accessibilityLabel("Profile and sign out")
 
                     Button {
@@ -367,22 +420,19 @@ struct SettingsView: View {
                             if isSigningOut {
                                 ProgressView()
                                     .progressViewStyle(.circular)
-                                    .tint(.red)
+                                    .tint(k.destructive)
                             } else {
                                 Image(systemName: "rectangle.portrait.and.arrow.right")
-                                    .foregroundColor(Theme.error)
+                                    .foregroundColor(k.destructive)
                             }
                             Text(isSigningOut ? "Signing Out…" : "Sign Out")
-                                .foregroundColor(Theme.error)
+                                .foregroundColor(k.destructive)
                         }
                     }
                     .disabled(isSigningOut)
-                    .listRowBackground(Theme.cyberSurface)
+                    .listRowBackground(k.rowBG)
                 } header: {
-                    Text("Account")
-                        .font(Typography.sectionHeader)
-                        .foregroundColor(Theme.cyberCyan)
-                        .textCase(.uppercase)
+                    sectionHeader("Account", k.accent)
                 }
 
                 BackupStatusSection()
@@ -401,22 +451,22 @@ struct SettingsView: View {
                     } label: {
                         HStack(spacing: 12) {
                             Image(systemName: "slider.horizontal.3")
-                                .foregroundColor(Theme.cyberCyan)
+                                .foregroundColor(k.accent)
                                 .frame(width: 28)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("Audio")
-                                    .foregroundColor(.white)
+                                    .foregroundColor(k.ink)
                                 Text("Crossfade, gapless, loudness")
                                     .font(.caption)
-                                    .foregroundColor(Theme.cyberDim)
+                                    .foregroundColor(k.dim)
                             }
                             Spacer()
                             Image(systemName: "chevron.right")
                                 .font(.caption)
-                                .foregroundColor(Theme.cyberDim)
+                                .foregroundColor(k.dim)
                         }
                     }
-                    .listRowBackground(Theme.cyberSurface)
+                    .listRowBackground(k.rowBG)
                     // S15: real EQ panel — 10-band parametric EQ with
                     // 8 presets (Flat / Bass Boost / Treble Boost /
                     // Vocal / Electronic / Hip-Hop / Rock / Acoustic)
@@ -428,38 +478,35 @@ struct SettingsView: View {
                     } label: {
                         HStack(spacing: 12) {
                             Image(systemName: "slider.vertical.3")
-                                .foregroundColor(Theme.cyberMagenta)
+                                .foregroundColor(k.warm)
                                 .frame(width: 28)
                             VStack(alignment: .leading, spacing: 2) {
                                 HStack(spacing: 6) {
                                     Text("Equalizer")
-                                        .foregroundColor(.white)
+                                        .foregroundColor(k.ink)
                                     if AudioEqualizer.shared.isEnabled {
                                         Text("ON")
                                             .font(.system(size: 9, weight: .bold, design: .monospaced))
                                             .foregroundColor(.black)
                                             .padding(.horizontal, 5)
                                             .padding(.vertical, 2)
-                                            .background(Theme.cyberCyan)
+                                            .background(k.accent)
                                             .clipShape(Capsule())
                                     }
                                 }
                                 Text(eqStatusLine)
                                     .font(.caption)
-                                    .foregroundColor(Theme.cyberDim)
+                                    .foregroundColor(k.dim)
                             }
                             Spacer()
                             Image(systemName: "chevron.right")
                                 .font(.caption)
-                                .foregroundColor(Theme.cyberDim)
+                                .foregroundColor(k.dim)
                         }
                     }
-                    .listRowBackground(Theme.cyberSurface)
+                    .listRowBackground(k.rowBG)
                 } header: {
-                    Text("Audio")
-                        .font(Typography.sectionHeader)
-                        .foregroundColor(Theme.cyberCyan)
-                        .textCase(.uppercase)
+                    sectionHeader("Audio", k.accent)
                 }
 
                 // MARK: - Accessibility Section (S18 / P0-2)
@@ -495,23 +542,20 @@ struct SettingsView: View {
                     )) {
                         HStack(spacing: 12) {
                             Image(systemName: "hand.raised.slash.fill")
-                                .foregroundColor(Theme.cyberYellow)
+                                .foregroundColor(k.warm)
                                 .frame(width: 28)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("Reduce Haptics")
-                                    .foregroundColor(.white)
+                                    .foregroundColor(k.ink)
                                 Text("Suppress Haptic Symphony in the player")
                                     .font(.caption)
-                                    .foregroundColor(Theme.cyberDim)
+                                    .foregroundColor(k.dim)
                             }
                         }
                     }
-                    .listRowBackground(Theme.cyberSurface)
+                    .listRowBackground(k.rowBG)
                 } header: {
-                    Text("Accessibility")
-                        .font(Typography.sectionHeader)
-                        .foregroundColor(Theme.cyberCyan)
-                        .textCase(.uppercase)
+                    sectionHeader("Accessibility", k.accent)
                 }
 
                 // MARK: - Labs Section (S18 / v1.6)
@@ -524,7 +568,7 @@ struct SettingsView: View {
                         key: "ff_on_this_day",
                         defaultValue: false,
                         icon: "calendar",
-                        iconColor: Theme.cyberMagenta,
+                        iconColor: k.warm,
                         title: "On This Day",
                         subtitle: "Show tracks you played on this day in prior years"
                     )
@@ -532,7 +576,7 @@ struct SettingsView: View {
                         key: "ff_capsule_prewarn",
                         defaultValue: false,
                         icon: "bell.badge",
-                        iconColor: Theme.cyberYellow,
+                        iconColor: k.warm,
                         title: "Capsule Pre-Warning",
                         subtitle: "Notify 7 days before a Time Capsule unlocks"
                     )
@@ -540,7 +584,7 @@ struct SettingsView: View {
                         key: "ff_daily_recap",
                         defaultValue: false,
                         icon: "clock.arrow.circlepath",
-                        iconColor: Theme.cyberCyan,
+                        iconColor: k.accent,
                         title: "Daily Recap",
                         subtitle: "If you haven't played in 24h, remind you of your last track",
                         // When the user flips the toggle, the notifier
@@ -555,7 +599,7 @@ struct SettingsView: View {
                         key: "ff_cross_feature_wiring",
                         defaultValue: true,
                         icon: "antenna.radiowaves.left.and.right",
-                        iconColor: Theme.cyberMagenta,
+                        iconColor: k.warm,
                         title: "Memory-Boosted Anti-Algorithm",
                         subtitle: "Songs you've written memories for are seeded more often"
                     )
@@ -573,7 +617,7 @@ struct SettingsView: View {
                         key: FeatureFlags.turntableHomeKey,
                         defaultValue: false,
                         icon: "record.circle",
-                        iconColor: Theme.cyberCyan,
+                        iconColor: k.accent,
                         title: "Turntable Home",
                         subtitle: "Replace the home screen with a record deck",
                         onChange: { enabled in
@@ -581,14 +625,11 @@ struct SettingsView: View {
                         }
                     )
                 } header: {
-                    Text("Labs")
-                        .font(Typography.sectionHeader)
-                        .foregroundColor(Theme.cyberMagenta)
-                        .textCase(.uppercase)
+                    sectionHeader("Labs", k.warm)
                 } footer: {
                     Text("Experimental features. Each toggle is independent.")
                         .font(.caption)
-                        .foregroundColor(Theme.cyberTextSecondary)
+                        .foregroundColor(k.secondary)
                 }
 
                 // MARK: - Music Sources Section
@@ -597,36 +638,33 @@ struct SettingsView: View {
                     HStack(spacing: 16) {
                         ZStack {
                             Circle()
-                                .fill(Color.red.opacity(0.2))
+                                .fill(k.youtube.opacity(0.2))
                                 .frame(width: 44, height: 44)
 
                             Image(systemName: "play.rectangle.fill")
                                 .font(.system(size: 22))
-                                .foregroundColor(.red)
+                                .foregroundColor(k.youtube)
                         }
 
                         VStack(alignment: .leading, spacing: 2) {
                             Text("YouTube")
                                 .font(.system(size: 17, weight: .semibold))
-                                .foregroundColor(.white)
+                                .foregroundColor(k.ink)
 
                             Text("Active")
                                 .font(.caption)
-                                .foregroundColor(.green)
+                                .foregroundColor(k.ok)
                         }
 
                         Spacer()
 
                         Image(systemName: "checkmark.circle.fill")
-                            .foregroundColor(.green)
+                            .foregroundColor(k.ok)
                     }
                     .padding(.vertical, 4)
-                    .listRowBackground(Theme.cyberSurface)
+                    .listRowBackground(k.rowBG)
                 } header: {
-                    Text("Music Sources")
-                        .font(Typography.sectionHeader)
-                        .foregroundColor(Theme.cyberCyan)
-                        .textCase(.uppercase)
+                    sectionHeader("Music Sources", k.accent)
                 }
 
                 // MARK: - Favorite Artists Section
@@ -645,21 +683,21 @@ struct SettingsView: View {
                             VStack(spacing: 12) {
                                 Image(systemName: "music.mic")
                                     .font(.system(size: 32))
-                                    .foregroundColor(Theme.cyberCyan)
-                                    .glow(color: Theme.cyberCyan, radius: 10)
+                                    .foregroundColor(k.accent)
+                                    .glow(color: k.accent, radius: deck ? 0 : 10)
                                 Text("No favorites yet")
                                     .font(.system(size: 14, weight: .medium))
-                                    .foregroundColor(.white)
+                                    .foregroundColor(k.ink)
                                 Text("Add artists you love to personalize Home")
                                     .font(.system(size: 12))
-                                    .foregroundColor(Theme.cyberDim)
+                                    .foregroundColor(k.dim)
                                     .multilineTextAlignment(.center)
                             }
                             .padding(.vertical, 24)
                             .padding(.horizontal, 16)
                             Spacer()
                         }
-                        .listRowBackground(Theme.cyberSurface)
+                        .listRowBackground(k.rowBG)
                     } else {
                         // Wrap chips into a flow layout (iOS doesn't
                         // ship one, so we use a simple width-tracking
@@ -671,15 +709,38 @@ struct SettingsView: View {
                             )
                         }
                         .padding(.vertical, 8)
-                        .listRowBackground(Theme.cyberSurface)
+                        .listRowBackground(k.rowBG)
                     }
 
                     // Add row — neon-bordered field + cyan add button
+                    if deck {
+                        // Deck: the name lies in a well; Add is a key.
+                        HStack(spacing: 10) {
+                            TextField("", text: $newArtistText,
+                                      prompt: Text("Add artist or genre").foregroundColor(TurntableTokens.cream.opacity(0.4)))
+                                .font(DeckType.body)
+                                .foregroundColor(TurntableTokens.cream)
+                                .tint(DeckSignal.live)
+                                .autocorrectionDisabled()
+                                .textInputAutocapitalization(.words)
+                                .submitLabel(.done)
+                                .onSubmit { addArtist() }
+                                .padding(.horizontal, 18)
+                                .frame(height: 48)
+                                .deckWell(Capsule())
+
+                            DeckButton(title: "Add") { addArtist() }
+                                .disabled(newArtistText.isEmpty)
+                                .opacity(newArtistText.isEmpty ? 0.45 : 1)
+                        }
+                        .listRowBackground(k.rowBG)
+                        .listRowSeparator(.hidden)
+                    } else {
                     HStack(spacing: 10) {
                         HStack(spacing: 8) {
                             Image(systemName: "plus")
                                 .font(.system(size: 13, weight: .bold))
-                                .foregroundColor(Theme.cyberCyan)
+                                .foregroundColor(k.accent)
                             TextField("Add artist or genre...", text: $newArtistText)
                                 .textFieldStyle(.neon)
                                 .autocorrectionDisabled()
@@ -692,30 +753,34 @@ struct SettingsView: View {
                         } label: {
                             Text("ADD")
                                 .font(.system(size: 12, weight: .bold, design: .monospaced))
-                                .foregroundColor(newArtistText.isEmpty ? Theme.cyberDim : Theme.cyberBackground)
+                                .foregroundColor(newArtistText.isEmpty ? k.dim : Theme.cyberBackground)
                                 .padding(.horizontal, 16)
                                 .padding(.vertical, 10)
                                 .background(
                                     RoundedRectangle(cornerRadius: 10)
-                                        .fill(newArtistText.isEmpty ? Theme.cyberSurface : Theme.cyberCyan)
+                                        .fill(newArtistText.isEmpty ? k.rowBG : k.accent)
                                 )
                         }
                         .disabled(newArtistText.isEmpty)
                     }
-                    .listRowBackground(Theme.cyberSurface)
+                    .listRowBackground(k.rowBG)
+                    }
                 } header: {
+                    if deck {
+                        DeckLedge(title: "Favorite artists", count: favoriteArtists.artists.count)
+                            .textCase(nil)
+                            .padding(.vertical, 6)
+                    } else {
                     HStack {
                         Image(systemName: "music.mic")
-                            .foregroundColor(Theme.cyberMagenta)
-                        Text("Favorite Artists")
-                            .font(Typography.sectionHeader)
-                            .foregroundColor(Theme.cyberCyan)
-                            .textCase(.uppercase)
+                            .foregroundColor(k.warm)
+                        sectionHeader("Favorite Artists", k.accent)
+                    }
                     }
                 } footer: {
                     Text("Get personalized track suggestions on the Home screen based on your favorite artists and genres.")
                         .font(.system(size: 11))
-                        .foregroundColor(Theme.cyberDim)
+                        .foregroundColor(k.dim)
                 }
 
                 // MARK: - Storage Section
@@ -725,9 +790,9 @@ struct SettingsView: View {
                             Text("Cache Size")
                         } icon: {
                             Image(systemName: "externaldrive.fill")
-                                .foregroundColor(Theme.cyberCyan)
+                                .foregroundColor(k.accent)
                         }
-                        .foregroundColor(.white)
+                        .foregroundColor(k.ink)
 
                         Spacer()
 
@@ -735,25 +800,22 @@ struct SettingsView: View {
                             .font(.system(size: 15, weight: .medium, design: .monospaced))
                             .foregroundColor(.secondary)
                     }
-                    .listRowBackground(Theme.cyberSurface)
+                    .listRowBackground(k.rowBG)
 
                     Button {
                         showClearCacheConfirmation = true
                     } label: {
                         Label {
                             Text("Clear Cache")
-                                .foregroundColor(Theme.error)
+                                .foregroundColor(k.destructive)
                         } icon: {
                             Image(systemName: "trash")
-                                .foregroundColor(Theme.error)
+                                .foregroundColor(k.destructive)
                         }
                     }
-                    .listRowBackground(Theme.cyberSurface)
+                    .listRowBackground(k.rowBG)
                 } header: {
-                    Text("Storage")
-                        .font(Typography.sectionHeader)
-                        .foregroundColor(Theme.cyberCyan)
-                        .textCase(.uppercase)
+                    sectionHeader("Storage", k.accent)
                 }
 
                 // MARK: - Smart Library Section
@@ -776,34 +838,34 @@ struct SettingsView: View {
                         VStack(alignment: .leading, spacing: 2) {
                             HStack(spacing: 6) {
                                 Image(systemName: "sparkles")
-                                    .foregroundColor(Theme.cyberCyan)
+                                    .foregroundColor(k.accent)
                                 Text("Auto-cleanup library")
-                                    .foregroundColor(.white)
+                                    .foregroundColor(k.ink)
                             }
                             Text(cleanupStatusLine)
                                 .font(.system(size: 12, design: .monospaced))
-                                .foregroundColor(Theme.cyberTextSecondary)
+                                .foregroundColor(k.secondary)
                         }
                     }
-                    .tint(Theme.cyberCyan)
-                    .listRowBackground(Theme.cyberSurface)
+                    .tint(k.accent)
+                    .listRowBackground(k.rowBG)
 
                     if smartLibrary.cleanupEnabled {
                         Toggle(isOn: $smartLibrary.emergencyCleanupEnabled) {
                             VStack(alignment: .leading, spacing: 2) {
                                 HStack(spacing: 6) {
                                     Image(systemName: "exclamationmark.triangle")
-                                        .foregroundColor(.orange)
+                                        .foregroundColor(k.caution)
                                     Text("Delete immediately when storage is low")
-                                        .foregroundColor(.white)
+                                        .foregroundColor(k.ink)
                                 }
                                 Text(emergencyCleanupExplainer)
                                     .font(.system(size: 11, design: .monospaced))
-                                    .foregroundColor(Theme.cyberTextSecondary)
+                                    .foregroundColor(k.secondary)
                             }
                         }
                         .tint(.orange)
-                        .listRowBackground(Theme.cyberSurface)
+                        .listRowBackground(k.rowBG)
                     }
 
                     // Auto-download on WiFi
@@ -811,16 +873,16 @@ struct SettingsView: View {
                         VStack(alignment: .leading, spacing: 2) {
                             HStack(spacing: 6) {
                                 Image(systemName: "wifi")
-                                    .foregroundColor(Theme.cyberCyan)
+                                    .foregroundColor(k.accent)
                                 Text("Auto-download on WiFi")
-                                    .foregroundColor(.white)
+                                    .foregroundColor(k.ink)
                             }
                             Text(autoDownloadStatusLine)
                                 .font(.system(size: 12, design: .monospaced))
-                                .foregroundColor(Theme.cyberTextSecondary)
+                                .foregroundColor(k.secondary)
                         }
                     }
-                    .listRowBackground(Theme.cyberSurface)
+                    .listRowBackground(k.rowBG)
 
                     // v1.8.2: Library limit picker. Pinned
                     // options (25/50/100/200/500) instead of a
@@ -829,14 +891,14 @@ struct SettingsView: View {
                     // v1.8.2 ship default.
                     HStack {
                         Image(systemName: "gauge.with.dots.needle.bottom.50percent")
-                            .foregroundColor(Theme.cyberCyan)
+                            .foregroundColor(k.accent)
                             .frame(width: 24)
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Library limit")
-                                .foregroundColor(.white)
+                                .foregroundColor(k.ink)
                             Text("\(smartLibrary.maxLibraryTracks) tracks")
                                 .font(.system(size: 12, design: .monospaced))
-                                .foregroundColor(Theme.cyberTextSecondary)
+                                .foregroundColor(k.secondary)
                         }
                         Spacer()
                         Picker("", selection: $smartLibrary.maxLibraryTracks) {
@@ -846,9 +908,9 @@ struct SettingsView: View {
                         }
                         .labelsHidden()
                         .pickerStyle(.menu)
-                        .tint(Theme.cyberCyan)
+                        .tint(k.accent)
                     }
-                    .listRowBackground(Theme.cyberSurface)
+                    .listRowBackground(k.rowBG)
 
                     // v1.9.0 (r4 + r5): Per-cycle candidate
                     // count. Distinct from "Library limit"
@@ -868,18 +930,18 @@ struct SettingsView: View {
                     // option.
                     HStack {
                         Image(systemName: "tray.full")
-                            .foregroundColor(Theme.cyberCyan)
+                            .foregroundColor(k.accent)
                             .frame(width: 24)
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Candidates per cycle")
-                                .foregroundColor(.white)
+                                .foregroundColor(k.ink)
                             // Sublabel explains the constraint
                             // so the user understands why the
                             // Picker doesn't show 50/100 when
                             // the library limit is 25.
                             Text("Up to \(smartLibrary.autoDownloadMaxPerCycle) · must be < library limit (\(smartLibrary.maxLibraryTracks))")
                                 .font(.system(size: 12, design: .monospaced))
-                                .foregroundColor(Theme.cyberTextSecondary)
+                                .foregroundColor(k.secondary)
                                 .lineLimit(2)
                         }
                         Spacer()
@@ -896,9 +958,9 @@ struct SettingsView: View {
                         }
                         .labelsHidden()
                         .pickerStyle(.menu)
-                        .tint(Theme.cyberCyan)
+                        .tint(k.accent)
                     }
-                    .listRowBackground(Theme.cyberSurface)
+                    .listRowBackground(k.rowBG)
                     // v1.9.0 (r5): when the Library limit
                     // changes, clamp the candidate cap so it
                     // stays strictly less. Without this, a
@@ -920,14 +982,14 @@ struct SettingsView: View {
                     // every cycle (power-user mode).
                     HStack {
                         Image(systemName: "clock.arrow.circlepath")
-                            .foregroundColor(Theme.cyberCyan)
+                            .foregroundColor(k.accent)
                             .frame(width: 24)
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Auto-confirm after")
-                                .foregroundColor(.white)
+                                .foregroundColor(k.ink)
                             Text(autoConfirmLabel)
                                 .font(.system(size: 12, design: .monospaced))
-                                .foregroundColor(Theme.cyberTextSecondary)
+                                .foregroundColor(k.secondary)
                         }
                         Spacer()
                         Picker("", selection: $smartLibrary.autoConfirmSeconds) {
@@ -943,9 +1005,9 @@ struct SettingsView: View {
                         }
                         .labelsHidden()
                         .pickerStyle(.menu)
-                        .tint(Theme.cyberCyan)
+                        .tint(k.accent)
                     }
-                    .listRowBackground(Theme.cyberSurface)
+                    .listRowBackground(k.rowBG)
 
                     // Manual cleanup trigger
                     Button {
@@ -953,19 +1015,19 @@ struct SettingsView: View {
                     } label: {
                         HStack {
                             Image(systemName: "sparkles")
-                                .foregroundColor(Theme.cyberCyan)
+                                .foregroundColor(k.accent)
                             Text("Clean up now")
-                                .foregroundColor(.white)
+                                .foregroundColor(k.ink)
                             Spacer()
                             if smartLibrary.isCleaningUp {
                                 ProgressView()
-                                    .tint(Theme.cyberCyan)
+                                    .tint(k.accent)
                                     .scaleEffect(0.8)
                             }
                         }
                     }
                     .disabled(smartLibrary.isCleaningUp)
-                    .listRowBackground(Theme.cyberSurface)
+                    .listRowBackground(k.rowBG)
 
                     // 2026-09-08: v1.9.3 Trash. The ask-
                     // before-cleanup flow moves files here
@@ -979,22 +1041,22 @@ struct SettingsView: View {
                     } label: {
                         HStack {
                             Image(systemName: "trash")
-                                .foregroundColor(Theme.cyberMagenta)
+                                .foregroundColor(k.warm)
                             Text("Trash")
-                                .foregroundColor(.white)
+                                .foregroundColor(k.ink)
                             Spacer()
                             if smartLibrary.trashBytes > 0 {
                                 Text(byteString(smartLibrary.trashBytes))
                                     .font(.system(size: 12, weight: .bold, design: .monospaced))
-                                    .foregroundColor(Theme.cyberMagenta)
+                                    .foregroundColor(k.warm)
                             } else {
                                 Text("Empty")
                                     .font(.system(size: 12, design: .monospaced))
-                                    .foregroundColor(Theme.cyberTextSecondary)
+                                    .foregroundColor(k.secondary)
                             }
                         }
                     }
-                    .listRowBackground(Theme.cyberSurface)
+                    .listRowBackground(k.rowBG)
 
                     // v1.8.2: Refresh downloads. Destructive
                     // action (deletes ALL current downloads,
@@ -1006,25 +1068,27 @@ struct SettingsView: View {
                     } label: {
                         HStack {
                             Image(systemName: "arrow.triangle.2.circlepath")
-                                .foregroundColor(Theme.cyberMagenta)
+                                .foregroundColor(k.warm)
                             Text("Refresh downloads")
-                                .foregroundColor(.white)
+                                .foregroundColor(k.ink)
                             Spacer()
                             if smartLibrary.isRefreshing {
                                 ProgressView()
-                                    .tint(Theme.cyberMagenta)
+                                    .tint(k.warm)
                                     .scaleEffect(0.8)
                             }
                         }
                     }
                     .disabled(smartLibrary.isRefreshing)
-                    .listRowBackground(Theme.cyberSurface)
+                    .listRowBackground(k.rowBG)
                 } header: {
+                    if deck {
+                        DeckLedge(title: "Smart library", count: libraryCount)
+                            .textCase(nil)
+                            .padding(.vertical, 6)
+                    } else {
                     HStack {
-                        Text("Smart Library")
-                            .font(Typography.sectionHeader)
-                            .foregroundColor(Theme.cyberCyan)
-                            .textCase(.uppercase)
+                        sectionHeader("Smart Library", k.accent)
                         Spacer()
                         // v1.8.2: live library count in the
                         // section header. Shows "X / N" so the
@@ -1037,14 +1101,15 @@ struct SettingsView: View {
                             .font(.system(size: 11, weight: .bold, design: .monospaced))
                             .foregroundColor(
                                 libraryCount >= smartLibrary.maxLibraryTracks
-                                    ? Theme.cyberMagenta
-                                    : Theme.cyberTextSecondary
+                                    ? k.warm
+                                    : k.secondary
                             )
+                    }
                     }
                 } footer: {
                     Text("Auto-downloads: new releases from your favorite artists + recently-played tracks. The library is capped at the chosen limit — auto-downloads skip when full, and the Refresh button clears and re-derives from your current history. Auto-cleanup: removes liked-never, auto-downloads after \(smartLibrary.cleanupDaysAuto)d unplayed, manual downloads after \(smartLibrary.cleanupDaysManual)d.")
                         .font(.system(size: 11))
-                        .foregroundColor(Theme.cyberTextSecondary)
+                        .foregroundColor(k.secondary)
                 }
                 // v1.8.2: confirmation alert for Refresh.
                 // Destructive button role above + the alert
@@ -1071,10 +1136,12 @@ struct SettingsView: View {
                     }
                 }
 
-                Section("Backend") {
+                Section {
                     Button("Configure backend server") { showBackendSettings = true }
                     Text(BackendConfiguration.shared.identity.origin.absoluteString)
                         .font(.caption).foregroundStyle(.secondary)
+                } header: {
+                    sectionHeader("Backend", k.accent)
                 }
 
                 // MARK: - About Section
@@ -1084,9 +1151,9 @@ struct SettingsView: View {
                             Text("Version")
                         } icon: {
                             Image(systemName: "info.circle.fill")
-                                .foregroundColor(Theme.cyberCyan)
+                                .foregroundColor(k.accent)
                         }
-                        .foregroundColor(.white)
+                        .foregroundColor(k.ink)
 
                         Spacer()
 
@@ -1102,16 +1169,15 @@ struct SettingsView: View {
                             .font(.system(size: 15, weight: .medium, design: .monospaced))
                             .foregroundColor(.secondary)
                     }
-                    .listRowBackground(Theme.cyberSurface)
+                    .listRowBackground(k.rowBG)
                 } header: {
-                    Text("About")
-                        .font(Typography.sectionHeader)
-                        .foregroundColor(Theme.cyberCyan)
-                        .textCase(.uppercase)
+                    sectionHeader("About", k.accent)
                 }
             }
-            .listStyle(.insetGrouped)
-            .background(Theme.cyberBackground)
+            .scrollContentBackground(deck ? .hidden : .automatic)
+            .listRowSeparatorTint(deck ? TurntableTokens.cream.opacity(0.08) : nil)
+            .modifier(DeckSettingsStyle(deck: deck))
+            .background(k.wall)
             }
         }
         .confirmationDialog(
@@ -1160,6 +1226,8 @@ struct SettingsView: View {
         // nav bar; the back button is auto-provided.
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar(deck ? .hidden : .visible, for: .navigationBar)
+        .environment(\.deckStyle, deck)
         // S13: Audio settings sheet (reuses AudioSettingsView defined in
         // FullPlayer.swift — default-internal struct, no extraction
         // needed).
@@ -1258,7 +1326,36 @@ struct FavoriteArtistChip: View {
     let artist: String
     let onRemove: () -> Void
 
+    @Environment(\.deckStyle) private var deck
+
     var body: some View {
+        if deck { deckBody } else { legacyBody }
+    }
+
+    /// Deck: the name in print in a well, with a small metal-grey ×.
+    private var deckBody: some View {
+        HStack(spacing: 4) {
+            Text(artist)
+                .font(DeckType.subtitle)
+                .foregroundColor(TurntableTokens.cream)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .padding(.leading, 14)
+            Button(action: onRemove) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 10, weight: .heavy))
+                    .foregroundColor(TurntableTokens.aluminium.opacity(0.8))
+                    .frame(width: 34, height: 34)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Remove \(artist)")
+        }
+        .frame(height: 34)
+        .deckWell(Capsule())
+    }
+
+    private var legacyBody: some View {
         HStack(spacing: 8) {
             Text(artist)
                 .font(.system(size: 13, weight: .semibold))
@@ -1363,6 +1460,7 @@ private struct LabsToggle: View {
     let onChange: ((Bool) -> Void)?
 
     @State private var isOn: Bool
+    private var k: SettingsInk { SettingsInk(deck: FeatureFlags.shared.turntableHome) }
 
     init(
         key: String,
@@ -1402,13 +1500,54 @@ private struct LabsToggle: View {
                     .frame(width: 28)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)
-                        .foregroundColor(.white)
+                        .foregroundColor(k.ink)
                     Text(subtitle)
                         .font(.caption)
-                        .foregroundColor(Theme.cyberTextSecondary)
+                        .foregroundColor(k.secondary)
                 }
             }
         }
-        .listRowBackground(Theme.cyberSurface)
+        .listRowBackground(k.rowBG)
+    }
+}
+
+// MARK: - Deck tokens
+
+/// The colours of a Settings row. With the turntable flag off these
+/// are the old values; on, a row's text is cream, its icons are
+/// aluminium or brass (a colour is a lamp, and a row is not on), and
+/// destructive rows get no colour of their own.
+struct SettingsInk {
+    let deck: Bool
+
+    var ink: Color { deck ? TurntableTokens.cream : .white }
+    var dim: Color { deck ? TurntableTokens.cream.opacity(0.55) : Theme.cyberDim }
+    var secondary: Color { deck ? TurntableTokens.cream.opacity(0.55) : Theme.cyberTextSecondary }
+    var accent: Color { deck ? TurntableTokens.aluminium.opacity(0.85) : Theme.cyberCyan }
+    var warm: Color { deck ? TurntableTokens.brass : Theme.cyberMagenta }
+    var rowBG: Color { deck ? .clear : Theme.cyberSurface }
+    var wall: Color { deck ? TurntableTokens.room : Theme.cyberBackground }
+    var destructive: Color { deck ? TurntableTokens.cream.opacity(0.9) : Theme.error }
+    var ok: Color { deck ? TurntableTokens.brass : .green }
+    var caution: Color { deck ? DeckSignal.attention : .orange }
+    var youtube: Color { deck ? TurntableTokens.aluminium.opacity(0.85) : .red }
+    var headerFont: Font { deck ? DeckType.engraved : Typography.sectionHeader }
+}
+
+/// On the Deck every toggle under it is a lever.
+private struct DeckSettingsStyle: ViewModifier {
+    let deck: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if deck {
+            // Plain, not inset-grouped: the grouped style adds ~20pt
+            // a side on top of the Deck's own 16pt gutter.
+            content
+                .listStyle(.plain)
+                .toggleStyle(DeckLeverToggleStyle())
+        } else {
+            content.listStyle(.insetGrouped)
+        }
     }
 }

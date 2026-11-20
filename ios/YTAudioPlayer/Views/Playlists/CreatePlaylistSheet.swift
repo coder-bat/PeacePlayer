@@ -18,7 +18,80 @@ struct CreatePlaylistSheet: View {
     @Environment(\.dismiss) private var dismiss
     @FocusState private var focusedField: Field?
 
+    @ObservedObject private var featureFlags = FeatureFlags.shared
+
     var body: some View {
+        if featureFlags.turntableHome { deckBody } else { legacyBody }
+    }
+
+    /// Deck: a walnut board with the title and Cancel, two wells with
+    /// their legends engraved above, and the one cream card.
+    private var deckBody: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                Text("New playlist")
+                    .font(DeckType.screenTitle)
+                    .foregroundColor(TurntableTokens.cream)
+                Spacer(minLength: 8)
+                DeckButton(title: "Cancel") { dismiss() }
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 18)
+            .padding(.bottom, 14)
+            .deckPlinth(cornerRadius: 0)
+
+            VStack(alignment: .leading, spacing: 18) {
+                deckField("Name", prompt: "Playlist name", text: $name, field: .name, submit: .next) {
+                    focusedField = .description
+                }
+                deckField("Description (optional)", prompt: "Add a description", text: $description, field: .description, submit: .done) {
+                    createPlaylist()
+                }
+
+                DeckButton(title: "Create playlist", symbol: "plus", kind: .card, fillsWidth: true) {
+                    createPlaylist()
+                }
+                .opacity(name.isEmpty ? 0.45 : 1)
+                .disabled(name.isEmpty)
+                .padding(.top, 6)
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 24)
+
+            Spacer()
+        }
+        .background(DeckRoom())
+        .preferredColorScheme(.dark)
+        .onAppear { focusedField = .name }
+    }
+
+    private func deckField(
+        _ legend: String, prompt: String, text: Binding<String>,
+        field: Field, submit: SubmitLabel, onSubmit: @escaping () -> Void
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(legend.uppercased())
+                .font(DeckType.engraved)
+                .tracking(DeckType.engravedTracking)
+                .foregroundColor(TurntableTokens.aluminium.opacity(0.7))
+                .padding(.leading, 6)
+
+            TextField("", text: text, prompt: Text(prompt).foregroundColor(TurntableTokens.cream.opacity(0.4)))
+                .font(DeckType.body)
+                .foregroundColor(TurntableTokens.cream)
+                .tint(DeckSignal.live)
+                .focused($focusedField, equals: field)
+                .submitLabel(submit)
+                .autocorrectionDisabled()
+                .onSubmit(onSubmit)
+                .padding(.horizontal, 18)
+                .frame(height: 48)
+                .deckWell(Capsule(), lit: focusedField == field ? DeckSignal.live : nil)
+                .accessibilityLabel(legend)
+        }
+    }
+
+    private var legacyBody: some View {
         ZStack {
             // Cyberpunk background — same as the rest of the app
             Theme.cyberBackground.ignoresSafeArea()
