@@ -189,6 +189,37 @@ that already exists in `PlayerState`.
 - `MiniPlayer` is still hidden on Home (§7.1) — the deck replaced the strip's
   role, so the global `BottomBar` must not also show it there.
 
+### 4.8 Revision 2026-11-19 — the deck as an object
+
+This revision supersedes the layout details in §4.2–§4.6 where they differ.
+
+- **Plinth.** The deck is one walnut plinth (`TurntableDeckView`, 366×336 design
+  size, scaled to fit). The platter sits left of centre; the corners hold the 45
+  adapter (back-left), the arm pivot (back-right) and the cue lever (front-left).
+- **Tonearm geometry is a real deck's.** Pivot off the platter at the back-right,
+  arm 13pt longer than pivot-to-spindle (overhang), so the arm runs down the
+  right-hand side and the stylus plays the front-right quadrant: 103.7° at the
+  lead-in → 129.1° at the label. The headshell is cranked 24° so the cartridge lies
+  along the groove. The arm no longer crosses the artwork.
+- **Three arm positions:** parked in its rest (nothing loaded), lifted (loaded, not
+  playing), needle down (playing). The cue lever lifts and drops the arm.
+- **Only the headshell takes a drag.** The arm's touch area used to cover the whole
+  platter, so a tap on the record seeked instead of opening the player. The drag is
+  relative (the arm never jumps to the finger) and shows the time under the needle.
+- **The record turns once every 8 seconds of audio**, not once per track. Still a
+  function of playback position (`PlatterGeometry.rotation(forProgress:duration:)`);
+  the drawn angle eases toward it (`PlatterGeometry.follow`) so clock ticks, seeks
+  and pauses never show as a jump. The strobe band turns with the platter; grooves
+  and light stay still.
+- **Loading is visible:** an amber lamp runs round the platter edge and the pilot
+  lamp pulses while a track is fetched or buffering.
+- **Queue tray.** A window of the queue that follows the current record
+  (`QueueShelf.window`), auto-scrolled, with a `+N` slot that opens the full queue.
+- **Shelves.** One ledge per favourite artist (the user's order) plus "Recently
+  played", each with a card naming it (`TurntableHomeModel.shelves`). The queue no
+  longer tops up the shelves. Sleeves shrink on narrow phones so five always fit.
+- **The room** picks up the playing record's colours behind the deck.
+
 ## 5. Visual language
 
 New tokens live in a dedicated file so the existing cyberpunk palette is not
@@ -230,6 +261,124 @@ TRACK CHANGE:       → 3D FACE FLIP (new artwork rotates in)
 Rotation is a pure function of `PlayerState.progress`; there is no independent
 animation clock, so pausing or seeking is always visually consistent with audio.
 This is the single most important correctness property of the design.
+
+### 4.9 Revision 2026-11-19 (b) — after the first run on the phone
+
+Asked for after trying the deck with real music:
+
+- **Tray.** The records are clipped to the channel's own shape, so
+  nothing shows outside the pill. The tray follows the song: the
+  current record is brought back to the leading third whenever the
+  track changes, including after the tray has been scrolled by hand.
+- **Now-playing line.** One line between the deck and the tray —
+  title, then artist. This reverses the earlier "no now-playing strip"
+  decision, at the user's request; it is a caption, not a control.
+- **Spacing.** More air between the tray and the first shelf, and
+  between one shelf and the next (`CrateGrid.rowSpacing` 16 → 30).
+- **Liked songs.** A last shelf of the user's liked songs (up to ten).
+  It is exempt from the one-shelf-per-track rule: liked songs are the
+  ones played most, and thinning the shelf by "recently played" would
+  leave it bare. Not put up when nothing is liked.
+- **Hold to look.** Holding a sleeve raises a card above it — cover,
+  title, artist, album, running time — and letting go puts it back. A
+  tap still plays. This replaces the system context menu. "Add to
+  queue" is reached by keeping the hold: after a second a ring on the
+  card closes over a further 1.1s, and when it does the record is
+  queued (also a VoiceOver action). The hold is read off the button's pressed state:
+  a long-press gesture on the sleeve stopped the shelves scrolling.
+
+### 4.10 Revision 2026-11-20 — the icons become keys
+
+The row of icons over the deck is gone. Asked for by the user.
+
+- **Front panel.** The plinth is 56pt taller (366×392) and carries a
+  black anodised panel along its front edge with three keys: DIG,
+  RADIO, SETUP (`DeckKeysView`). Each has a pilot lamp and a legend
+  that lights: dark at rest, lit while what it starts is running,
+  pulsing while the deck is working. The removed icon row gives the
+  height back, so the tray and shelves sit where they did.
+- **DIG** replaces the Anti-Algorithm icon and its screen's "Start
+  Exploring" step. One press re-deals the queue: the records in the
+  tray spin on a wave and a light runs along the channel while the
+  engine looks; the queue is then REPLACED (it used to be appended
+  to) and the new records are flicked into the tray as their streams
+  resolve. The playing record is kept as the queue's first item until
+  the first new one starts. Pressing again deals again. With no
+  listening history, or when nothing comes back, the caption line says
+  so. The lamp stays lit only while a dealt record is playing. The
+  old Anti-Algorithm screen (stats, End) is still reachable from the
+  full player.
+- **RADIO** and **SETUP** push the existing Radio and Settings screens
+  onto Home's NavigationStack. RADIO is lit while a live station plays.
+- **Time Vault** has no entry point on the turntable Home any more.
+- **Playlists** moved to the Library tab as a third section beside
+  Liked and Downloaded (`PlaylistsContent`, shared with the old
+  screen). The section picker now sits above Library's empty state, so
+  an empty Downloaded list no longer hides the other sections.
+- The Smart Library and cleanup indicators are the only things left
+  above the deck, and the row is drawn only when one is pending.
+
+### 4.11 Revision 2026-11-21 — metal buttons, review, design system
+
+- The three captioned keys and their black panel are replaced by four
+  round machined-aluminium push buttons set straight into the walnut
+  (`DeckMetalButton`), with no captions: dig (magenta ring), radio
+  (cyan), review (yellow), setup (amber). The ring is the lamp.
+- **Review** takes over the last icon above the deck. It opens the
+  Smart Library auto-download review, or the scheduled cleanup if that
+  is all that is waiting; its ring is lit while either is pending.
+  With nothing pending the caption line says so. `DeckFasciaView` is
+  deleted; nothing floats over the deck any more.
+- The deck's look is written up as a design system for the rest of
+  the app: `docs/design/deck-design-system.md`, with its components in
+  `DesignSystem/DeckKit.swift`. The tray's channel and the shelf cards
+  now use those components.
+
+### 4.12 Revision 2026-11-22 — one thing in each corner
+
+Asked for by the user. The plinth's four corners each hold one thing:
+
+- **Back-left:** the setup (Settings) button, replacing the 45
+  adapter, which did nothing.
+- **Back-right:** the arm's pivot, as before.
+- **Front-left:** the cue lever, moved down into the corner.
+- **Front-right:** dig, radio and review as a triangle sitting into
+  the corner (dig above review, radio to their left).
+
+The row of four buttons along the front is gone and the plinth is 8pt
+shorter (366×384).
+
+### 4.13 Revision 2026-11-22 (b) — rest, record change, browsing
+
+- **Arm rest.** The rest post stood on the pivot-to-stylus line, which
+  the S-shaped tube does not follow, so a parked arm hung beside it.
+  The post is now placed from the tube's own curve
+  (`TonearmGeometry.restOffset`).
+- **Record change.** Changing song is choreographed over the second it
+  takes to buffer: the arm lifts and swings clear (0–0.3s), the old
+  record is lifted off and the new one set down (0.3–0.9s), the arm
+  comes back (from 0.92s). The in-place 3D flip is gone. Putting the
+  first record on, or taking the last off, skips it. Reduce Motion
+  swaps at once.
+- **Browsing the tray.** One record is in focus: in the middle of the
+  tray, 1.2× the size, named by the caption. At rest that is the one
+  playing. Swiping moves the focus (the tray snaps record by record)
+  without changing the music; the caption shows the focused record
+  with its place in the queue ("7/20") instead of the playing mark.
+  Tap plays. Five seconds after the last swipe, or when the song
+  changes, the tray swings back. The cyan ring always marks the record
+  that is playing.
+
+### 4.14 Revision 2026-11-22 (c) — glow follows focus; the case
+
+- The tray's lit cyan ring and glow are on the record in FOCUS, and
+  move with it while browsing. The record that is playing keeps a
+  thin unlit ring so it can still be found.
+- Tapping the record opens the full player as this deck with its case
+  open: the deck does not move, the case of controls swings down
+  under it. Tapping the record again, the latch, or a pull down shuts
+  it. Keys pressed on the deck there shut the case and are handed to
+  Home (`.deckKeyPressed`).
 
 ## 7. Resolved decisions (2026-11-17, Vergil)
 

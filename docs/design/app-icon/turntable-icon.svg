@@ -1,0 +1,106 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <!-- Walnut plinth, lit from the upper left -->
+    <linearGradient id="wood" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#6b4a30"/>
+      <stop offset="0.45" stop-color="#4a3221"/>
+      <stop offset="1" stop-color="#22170f"/>
+    </linearGradient>
+    <pattern id="grain" width="1024" height="60" patternUnits="userSpaceOnUse" patternTransform="rotate(-8)">
+      <path d="M0 14 C200 4 380 26 560 12 S900 4 1024 18" stroke="#1a110a" stroke-opacity="0.22" stroke-width="3" fill="none"/>
+      <path d="M0 40 C160 50 420 30 620 44 S880 52 1024 38" stroke="#8a6440" stroke-opacity="0.16" stroke-width="2" fill="none"/>
+    </pattern>
+    <radialGradient id="keylight" cx="0.2" cy="0.15" r="0.9">
+      <stop offset="0" stop-color="#fff4e0" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#fff4e0" stop-opacity="0"/>
+    </radialGradient>
+    <!-- Platter / vinyl -->
+    <radialGradient id="vinyl" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#15151a"/>
+      <stop offset="0.92" stop-color="#08080a"/>
+      <stop offset="1" stop-color="#1c1c22"/>
+    </radialGradient>
+    <linearGradient id="sheen" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0"/>
+      <stop offset="0.5" stop-color="#ffffff" stop-opacity="0.16"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="metal" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f2f0ea"/>
+      <stop offset="0.5" stop-color="#c9c6be"/>
+      <stop offset="1" stop-color="#7d7a73"/>
+    </linearGradient>
+    <radialGradient id="label" cx="0.38" cy="0.35" r="0.7">
+      <stop offset="0" stop-color="#fbf6ea"/>
+      <stop offset="1" stop-color="#e2d6bc"/>
+    </radialGradient>
+    <radialGradient id="lamp" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#ffe2a0"/>
+      <stop offset="0.45" stop-color="#f0a92b"/>
+      <stop offset="1" stop-color="#f0a92b" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="150%" height="150%">
+      <feDropShadow dx="14" dy="18" stdDeviation="16" flood-color="#000" flood-opacity="0.55"/>
+    </filter>
+    <filter id="armshadow" x="-20%" y="-20%" width="150%" height="150%">
+      <feDropShadow dx="10" dy="14" stdDeviation="8" flood-color="#000" flood-opacity="0.6"/>
+    </filter>
+    <clipPath id="disc"><circle cx="470" cy="540" r="360"/></clipPath>
+  </defs>
+
+  <!-- Plinth -->
+  <rect width="1024" height="1024" fill="url(#wood)"/>
+  <rect width="1024" height="1024" fill="url(#grain)"/>
+  <rect width="1024" height="1024" fill="url(#keylight)"/>
+
+  <!-- Platter rim (aluminium) -->
+  <circle cx="470" cy="540" r="378" fill="url(#metal)" filter="url(#shadow)"/>
+  <!-- Record -->
+  <circle cx="470" cy="540" r="360" fill="url(#vinyl)"/>
+  <g fill="none" stroke="#2a2a32" stroke-width="2.2" stroke-opacity="0.9">
+    <circle cx="470" cy="540" r="340"/><circle cx="470" cy="540" r="322"/>
+    <circle cx="470" cy="540" r="304"/><circle cx="470" cy="540" r="288"/>
+    <circle cx="470" cy="540" r="270"/><circle cx="470" cy="540" r="254"/>
+    <circle cx="470" cy="540" r="236"/><circle cx="470" cy="540" r="220"/>
+    <circle cx="470" cy="540" r="204"/><circle cx="470" cy="540" r="188"/>
+  </g>
+  <!-- track gap -->
+  <circle cx="470" cy="540" r="262" fill="none" stroke="#000" stroke-width="5"/>
+  <!-- light catching the grooves, upper-left to lower-right -->
+  <g clip-path="url(#disc)">
+    <path d="M470 540 L110 250 L210 160 Z" fill="#fff4e0" fill-opacity="0.13"/>
+    <path d="M470 540 L830 830 L730 920 Z" fill="#fff4e0" fill-opacity="0.07"/>
+  </g>
+
+  <!-- Label: cream card with brass ring -->
+  <circle cx="470" cy="540" r="130" fill="#bd9a5b"/>
+  <circle cx="470" cy="540" r="122" fill="url(#label)"/>
+  <circle cx="470" cy="540" r="96" fill="none" stroke="#bd9a5b" stroke-width="3"/>
+  <!-- little peace-sign mark on label -->
+  <g stroke="#3b2a1e" stroke-width="7" fill="none" stroke-linecap="round" opacity="0.85">
+    <path d="M470 482 V598"/>
+    <path d="M470 540 L428 580"/>
+    <path d="M470 540 L512 580"/>
+  </g>
+  <circle cx="470" cy="540" r="58" fill="none" stroke="#3b2a1e" stroke-width="7" opacity="0.85"/>
+  <!-- spindle -->
+  <circle cx="470" cy="540" r="13" fill="url(#metal)" stroke="#5b5850" stroke-width="2"/>
+
+  <!-- Tonearm -->
+  <g filter="url(#armshadow)">
+    <!-- pivot base -->
+    <circle cx="862" cy="200" r="74" fill="#141416"/>
+    <circle cx="862" cy="200" r="58" fill="url(#metal)"/>
+    <circle cx="862" cy="200" r="22" fill="#2a2a2e"/>
+    <!-- counterweight -->
+    <rect x="884" y="96" width="56" height="62" rx="12" fill="url(#metal)" transform="rotate(30 862 200)"/>
+    <!-- arm -->
+    <path d="M862 200 L880 560 L740 700" fill="none" stroke="url(#metal)" stroke-width="22" stroke-linecap="round" stroke-linejoin="round"/>
+    <!-- headshell -->
+    <rect x="690" y="672" width="92" height="54" rx="10" fill="#1d1d21" stroke="url(#metal)" stroke-width="6" transform="rotate(-45 736 699)"/>
+  </g>
+
+  <!-- Amber power lamp, bottom right (lit = playing) -->
+  <circle cx="900" cy="900" r="44" fill="url(#lamp)"/>
+  <circle cx="900" cy="900" r="15" fill="#ffd27a"/>
+</svg>
