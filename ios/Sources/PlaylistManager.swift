@@ -347,7 +347,7 @@ class PlaylistManager: ObservableObject {
                     }
                     group.leave()
                 }, receiveValue: { streamInfo in
-                    processingQueue.async(flags: .barrier) {
+                    processingQueue.sync(flags: .barrier) {
                         streamInfos.append((track, streamInfo.streamUrl))
                     }
                 })
@@ -358,7 +358,7 @@ class PlaylistManager: ObservableObject {
             guard !streamInfos.isEmpty else { return }
             
             // Sort by original order using Dictionary for O(1) lookup instead of O(n) first()
-            let streamInfoById = Dictionary(uniqueKeysWithValues: streamInfos.map { ($0.track.videoId, $0) })
+            let streamInfoById = Dictionary(streamInfos.map { ($0.track.videoId, $0) }, uniquingKeysWith: { first, _ in first })
             let ordered = tracks.prefix(20).compactMap { streamInfoById[$0.videoId] }
             
             // Clear queue and add tracks
@@ -479,7 +479,7 @@ class PlaylistManager: ObservableObject {
                     }
                     group.leave()
                 }, receiveValue: { streamInfo in
-                    processingQueue.async(flags: .barrier) {
+                    processingQueue.sync(flags: .barrier) {
                         streamInfos.append((track, streamInfo.streamUrl))
                     }
                 })
@@ -490,7 +490,7 @@ class PlaylistManager: ObservableObject {
             guard !streamInfos.isEmpty else { return }
             
             // Sort by original order using Dictionary for O(1) lookup instead of O(n) first()
-            let streamInfoById = Dictionary(uniqueKeysWithValues: streamInfos.map { ($0.track.videoId, $0) })
+            let streamInfoById = Dictionary(streamInfos.map { ($0.track.videoId, $0) }, uniquingKeysWith: { first, _ in first })
             let ordered = tracks.prefix(20).compactMap { streamInfoById[$0.videoId] }
             
             // Clear queue and add tracks

@@ -170,7 +170,10 @@ struct PlaylistPreviewView: View {
                 .sink(receiveCompletion: { _ in
                     group.leave()
                 }, receiveValue: { streamInfo in
-                    processingQueue.async(flags: .barrier) {
+                    // Append synchronously so the result is in before
+                    // receiveCompletion calls group.leave(); the old
+                    // async barrier could run after notify fired.
+                    processingQueue.sync(flags: .barrier) {
                         streamInfos.append((track, streamInfo.streamUrl))
                     }
                 })
@@ -190,11 +193,12 @@ struct PlaylistPreviewView: View {
                 streamInfos.first { $0.track.videoId == track.videoId }
             }
             
-            // Clear existing queue if needed and add new tracks
+            // Play All / Shuffle replaces the queue and starts playing.
+            // Previously this only cleared + played when nothing was
+            // loaded, so with a restored/paused track the playlist was
+            // silently appended to the end and nothing played.
             // S17-G: queue is a computed property. Use the store.
-            if playerState.currentItem == nil {
-                playerState.queueStore.clear()
-            }
+            playerState.queueStore.clear()
             
             // Add tracks in order
             for info in orderedInfos {
@@ -207,7 +211,7 @@ struct PlaylistPreviewView: View {
             }
             
             // Start playing first track
-            if playerState.currentItem == nil && !playerState.queue.isEmpty {
+            if !playerState.queue.isEmpty {
                 playerState.playQueue(at: 0)
                 playerState.showFullPlayer = true
             }
